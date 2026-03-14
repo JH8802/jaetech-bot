@@ -2,7 +2,7 @@ import asyncio
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from telethon import TelegramClient
 from telegram import Bot
-from summarizer import is_important, summarize
+from summarizer import is_important, deduplicate, summarize
 from config import CHANNELS
 from dotenv import load_dotenv
 import os
@@ -61,7 +61,7 @@ async def job():
         messages = []
         for channel in CHANNELS:
             try:
-                async for message in client.iter_messages(channel, limit=10):
+                async for message in client.iter_messages(channel, limit=30):
                     if not message.text:
                         continue
                     # 마지막 수집 이후 새 메시지만
@@ -79,15 +79,30 @@ async def job():
 
         print(f"📨 새 메시지 {len(messages)}개 수집됨")
 
-        published = 0
+        # 1단계: 중요도 판단
+        important_messages = []
         for msg in messages:
             if is_important(msg["channel"], msg["text"]):
-                summary = summarize(msg["channel"], msg["text"])
-                if summary:
-                    await bot.send_message(chat_id=CHANNEL_ID, text=summary)
-                    print(f"✅ 발행: {msg['channel']}")
-                    published += 1
-                    await asyncio.sleep(2)
+                important_messages.append(msg)
+
+        print(f"⭐ 중요 메시지 {len(important_messages)}개 선별됨")
+
+        # 2단계: 중복 제거 (같은 주제 중 최고 품질만 선별)
+        if len(important_messages) > 1:
+            unique_messages = deduplicate(important_messages)
+            print(f"✨ 중복 제거 후 {len(unique_messages)}개 최종 선별")
+        else:
+            unique_messages = important_messages
+
+        # 3단계: 요약 & 발행
+        published = 0
+        for msg in unique_messages:
+            summary = summarize(msg["channel"], msg["text"])
+            if summary:
+                await bot.send_message(chat_id=CHANNEL_ID, text=summary)
+                print(f"✅ 발행: {msg['channel']}")
+                published += 1
+                await asyncio.sleep(2)
 
         if published == 0:
             print("📭 발행할 중요 메시지 없음")

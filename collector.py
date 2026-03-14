@@ -17,7 +17,7 @@ async def collect():
     messages = []
     for channel in CHANNELS:
         try:
-            async for message in client.iter_messages(channel, limit=3):
+            async for message in client.iter_messages(channel, limit=30):
                 if message.text:
                     messages.append({
                         "channel": channel,
