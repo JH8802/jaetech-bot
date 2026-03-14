@@ -2,6 +2,7 @@ import anthropic
 from config import SECURITIES
 from dotenv import load_dotenv
 import os
+import json
 
 load_dotenv()
 
@@ -55,6 +56,85 @@ def is_important(channel, text):
     except Exception as e:
         print(f"❌ 중요도 판단 API 오류: {e}")
         return False
+
+
+def deduplicate(messages):
+    """
+    중복 주제 메시지를 제거하고, 각 주제별로 가장 품질 좋은 메시지 1개만 선별.
+    messages: [{"channel": "...", "text": "..."}, ...]
+    return: 선별된 메시지 리스트
+    """
+    if len(messages) <= 1:
+        return messages
+
+    # 20개씩 묶어서 처리 (API 토큰 한도 고려)
+    BATCH_SIZE = 20
+    selected = []
+
+    for i in range(0, len(messages), BATCH_SIZE):
+        batch = messages[i:i + BATCH_SIZE]
+
+        if len(batch) <= 1:
+            selected.extend(batch)
+            continue
+
+        # 각 메시지에 번호를 매겨서 AI에게 전달
+        numbered_list = ""
+        for idx, msg in enumerate(batch):
+            # 메시지가 너무 길면 앞부분만 전달 (토큰 절약)
+            text_preview = msg["text"][:500]
+            numbered_list += f"\n[{idx}] 채널: {msg['channel']}\n내용: {text_preview}\n"
+
+        prompt = f"""
+아래는 텔레그램 재테크 채널들에서 수집한 메시지 {len(batch)}개야.
+같은 주제를 다루는 메시지들이 있을 수 있어.
+
+너의 역할:
+1. 같은 주제(같은 기업 실적, 같은 정책, 같은 시장 이슈 등)를 다루는 메시지끼리 그룹으로 묶어.
+2. 각 그룹에서 가장 품질이 좋은 메시지 1개만 선택해. 품질 기준: 구체적 수치가 많은 것, 분석이 깊은 것, 신뢰도가 높은 것 (증권사 리서치 > 개인 채널).
+3. 중복이 아닌 독립적인 주제의 메시지는 그대로 선택해.
+
+반드시 아래 JSON 형식으로만 답해. 다른 설명 없이 JSON만 출력해.
+{{"selected": [0, 3, 7]}}
+
+선택된 메시지의 번호(인덱스)만 배열로 넣어줘.
+
+메시지 목록:
+{numbered_list}
+"""
+        try:
+            message = client.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=200,
+                messages=[{"role": "user", "content": prompt}]
+            )
+            result = message.content[0].text.strip()
+
+            # JSON 파싱 (```json 감싸기 제거)
+            result = result.replace("```json", "").replace("```", "").strip()
+            parsed = json.loads(result)
+            selected_indices = parsed.get("selected", [])
+
+            # 유효한 인덱스만 필터링
+            for idx in selected_indices:
+                if isinstance(idx, int) and 0 <= idx < len(batch):
+                    selected.append(batch[idx])
+
+            removed = len(batch) - len(selected_indices)
+            if removed > 0:
+                print(f"🔄 중복 제거: {len(batch)}개 중 {len(selected_indices)}개 선별 ({removed}개 중복 제거)")
+
+        except Exception as e:
+            print(f"❌ 중복 제거 API 오류: {e} → 이 배치는 전체 유지")
+            selected.extend(batch)
+
+    # 이전 배치에서 선별된 것들끼리도 중복이 있을 수 있으므로,
+    # 전체가 BATCH_SIZE 초과였다면 최종 중복 검사 1회 더 수행
+    if len(messages) > BATCH_SIZE and len(selected) > BATCH_SIZE:
+        print(f"🔄 최종 중복 검사 실행 ({len(selected)}개 대상)...")
+        return deduplicate(selected)
+
+    return selected
 
 
 def summarize(channel, text):
