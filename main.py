@@ -2,7 +2,7 @@ import asyncio
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from telethon import TelegramClient
 from telegram import Bot
-from summarizer import is_important, deduplicate, summarize
+from summarizer import is_important, deduplicate, summarize, reset_api_counter
 from config import CHANNELS
 from dotenv import load_dotenv
 import os
@@ -51,6 +51,10 @@ def save_last_check():
 
 async def job():
     print(f"🔄 콘텐츠 수집 & 발행 시작... ({datetime.now().strftime('%H:%M')})")
+
+    # 매 실행마다 API 호출 카운터 초기화
+    reset_api_counter()
+
     bot = Bot(token=BOT_TOKEN)
     last_check = get_last_check()
 
