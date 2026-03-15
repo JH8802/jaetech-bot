@@ -2,7 +2,7 @@ import asyncio
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from telethon import TelegramClient
 from telegram import Bot
-from summarizer import batch_filter_important, deduplicate, summarize, reset_api_counter
+from summarizer import select_important, summarize, reset_api_counter
 from config import CHANNELS
 from dotenv import load_dotenv
 import os
@@ -83,20 +83,13 @@ async def job():
 
         print(f"📨 새 메시지 {len(messages)}개 수집됨")
 
-        # 1단계: 중요도 판단 (10개씩 묶어서 처리)
-        important_messages = batch_filter_important(messages)
-        print(f"⭐ 중요 메시지 {len(important_messages)}개 선별됨")
+        # 1단계: 중요도 판단 + 중복 제거 (한번에 처리)
+        selected_messages = select_important(messages)
+        print(f"⭐ 최종 선별: {len(selected_messages)}개")
 
-        # 2단계: 중복 제거 (같은 주제 중 최고 품질만 선별)
-        if len(important_messages) > 1:
-            unique_messages = deduplicate(important_messages)
-            print(f"✨ 중복 제거 후 {len(unique_messages)}개 최종 선별")
-        else:
-            unique_messages = important_messages
-
-        # 3단계: 요약 & 발행
+        # 2단계: 요약 & 발행
         published = 0
-        for msg in unique_messages:
+        for msg in selected_messages:
             summary = summarize(msg["channel"], msg["text"])
             if summary:
                 await bot.send_message(chat_id=CHANNEL_ID, text=summary)
