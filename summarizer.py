@@ -18,6 +18,33 @@ INVALID_KEYWORDS = [
     "본문 텍스트를 직접", "내용을 공유해주시면", "기사 내용을 공유"
 ]
 
+# ========== 비용 안전장치 ==========
+# 1회 실행당 최대 API 호출 횟수 (이 숫자를 넘으면 더 이상 API 호출 안 함)
+MAX_API_CALLS_PER_RUN = 150
+api_call_count = 0
+
+
+def reset_api_counter():
+    """매 실행(job) 시작 시 카운터 초기화"""
+    global api_call_count
+    api_call_count = 0
+
+
+def check_api_limit():
+    """API 호출 한도 초과 여부 확인"""
+    global api_call_count
+    if api_call_count >= MAX_API_CALLS_PER_RUN:
+        print(f"⚠️ API 호출 한도 도달 ({MAX_API_CALLS_PER_RUN}회). 남은 메시지는 건너뜁니다.")
+        return False
+    return True
+
+
+def count_api_call():
+    """API 호출 1회 기록"""
+    global api_call_count
+    api_call_count += 1
+# ================================
+
 
 def is_valid_text(text):
     if not text or len(text.strip()) < 20:
@@ -33,6 +60,9 @@ def is_important(channel, text):
     if not is_valid_text(text):
         return False
 
+    if not check_api_limit():
+        return False
+
     prompt = f"""
 아래는 텔레그램 재테크 채널 '{channel}'의 메시지야.
 이 메시지가 주식/ETF/부동산/암호화폐 투자자에게 중요한 정보인지 판단해줘.
@@ -46,6 +76,7 @@ def is_important(channel, text):
 {text}
 """
     try:
+        count_api_call()
         message = client.messages.create(
             model="claude-haiku-4-5-20251001",
             max_tokens=10,
@@ -61,27 +92,45 @@ def is_important(channel, text):
 def deduplicate(messages):
     """
     중복 주제 메시지를 제거하고, 각 주제별로 가장 품질 좋은 메시지 1개만 선별.
-    messages: [{"channel": "...", "text": "..."}, ...]
-    return: 선별된 메시지 리스트
+    최대 2회까지만 수행하여 무한 반복 방지.
     """
     if len(messages) <= 1:
         return messages
 
-    # 20개씩 묶어서 처리 (API 토큰 한도 고려)
     BATCH_SIZE = 20
+
+    # --- 1차 중복 제거 ---
+    selected = _run_dedup_batch(messages, BATCH_SIZE)
+    print(f"✨ 1차 중복 제거 완료: {len(messages)}개 → {len(selected)}개")
+
+    # 배치가 여러 개였을 경우, 배치 간 중복 제거를 위해 1회만 더 수행
+    if len(messages) > BATCH_SIZE and len(selected) > BATCH_SIZE:
+        before = len(selected)
+        selected = _run_dedup_batch(selected, BATCH_SIZE)
+        print(f"✨ 2차 중복 제거 완료: {before}개 → {len(selected)}개")
+
+    # 여기서 끝. 더 이상 반복하지 않음.
+    return selected
+
+
+def _run_dedup_batch(messages, batch_size):
+    """20개씩 묶어서 중복 제거 1회 수행"""
     selected = []
 
-    for i in range(0, len(messages), BATCH_SIZE):
-        batch = messages[i:i + BATCH_SIZE]
+    for i in range(0, len(messages), batch_size):
+        batch = messages[i:i + batch_size]
 
         if len(batch) <= 1:
+            selected.extend(batch)
+            continue
+
+        if not check_api_limit():
             selected.extend(batch)
             continue
 
         # 각 메시지에 번호를 매겨서 AI에게 전달
         numbered_list = ""
         for idx, msg in enumerate(batch):
-            # 메시지가 너무 길면 앞부분만 전달 (토큰 절약)
             text_preview = msg["text"][:500]
             numbered_list += f"\n[{idx}] 채널: {msg['channel']}\n내용: {text_preview}\n"
 
@@ -103,6 +152,7 @@ def deduplicate(messages):
 {numbered_list}
 """
         try:
+            count_api_call()
             message = client.messages.create(
                 model="claude-haiku-4-5-20251001",
                 max_tokens=200,
@@ -116,29 +166,32 @@ def deduplicate(messages):
             selected_indices = parsed.get("selected", [])
 
             # 유효한 인덱스만 필터링
+            batch_selected = []
             for idx in selected_indices:
                 if isinstance(idx, int) and 0 <= idx < len(batch):
-                    selected.append(batch[idx])
+                    batch_selected.append(batch[idx])
 
-            removed = len(batch) - len(selected_indices)
-            if removed > 0:
-                print(f"🔄 중복 제거: {len(batch)}개 중 {len(selected_indices)}개 선별 ({removed}개 중복 제거)")
+            # 선별 결과가 비어있으면 원본 유지
+            if len(batch_selected) == 0:
+                selected.extend(batch)
+            else:
+                selected.extend(batch_selected)
+                removed = len(batch) - len(batch_selected)
+                if removed > 0:
+                    print(f"🔄 중복 제거: {len(batch)}개 중 {len(batch_selected)}개 선별 ({removed}개 중복 제거)")
 
         except Exception as e:
             print(f"❌ 중복 제거 API 오류: {e} → 이 배치는 전체 유지")
             selected.extend(batch)
-
-    # 이전 배치에서 선별된 것들끼리도 중복이 있을 수 있으므로,
-    # 전체가 BATCH_SIZE 초과였다면 최종 중복 검사 1회 더 수행
-    if len(messages) > BATCH_SIZE and len(selected) > BATCH_SIZE:
-        print(f"🔄 최종 중복 검사 실행 ({len(selected)}개 대상)...")
-        return deduplicate(selected)
 
     return selected
 
 
 def summarize(channel, text):
     if not is_valid_text(text):
+        return None
+
+    if not check_api_limit():
         return None
 
     prompt = f"""
@@ -164,6 +217,7 @@ def summarize(channel, text):
 {text}
 """
     try:
+        count_api_call()
         message = client.messages.create(
             model="claude-haiku-4-5-20251001",
             max_tokens=1000,
