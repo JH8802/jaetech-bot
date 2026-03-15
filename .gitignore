@@ -9,7 +9,8 @@ __pycache__/
 *.pyc
 
 # 텔레그램 세션 파일
-
+*.session
+session.session-journal
 
 # 마지막 수집 시간 기록
 last_check.json
