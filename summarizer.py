@@ -19,7 +19,7 @@ INVALID_KEYWORDS = [
 ]
 
 # ========== 비용 안전장치 ==========
-# 1회 실행당 최대 API 호출 횟수 (이 숫자를 넘으면 더 이상 API 호출 안 함)
+# 1회 실행당 최대 API 호출 횟수
 MAX_API_CALLS_PER_RUN = 150
 api_call_count = 0
 
@@ -56,37 +56,77 @@ def is_valid_text(text):
     return True
 
 
-def is_important(channel, text):
-    if not is_valid_text(text):
-        return False
+def batch_filter_important(messages):
+    """
+    메시지를 10개씩 묶어서 AI에게 한번에 중요도 판단을 요청.
+    1개씩 보내는 것보다 API 호출이 10분의 1로 줄어듦.
+    """
+    BATCH_SIZE = 10
+    important_messages = []
 
-    if not check_api_limit():
-        return False
+    for i in range(0, len(messages), BATCH_SIZE):
+        batch = messages[i:i + BATCH_SIZE]
 
-    prompt = f"""
-아래는 텔레그램 재테크 채널 '{channel}'의 메시지야.
-이 메시지가 주식/ETF/부동산/암호화폐 투자자에게 중요한 정보인지 판단해줘.
+        # 텍스트 유효성 먼저 필터링 (API 호출 불필요)
+        valid_batch = []
+        for msg in batch:
+            if is_valid_text(msg["text"]):
+                valid_batch.append(msg)
 
-중요한 경우: 시장 동향, 실적 발표, 정책 변화, 투자 기회 등
-중요하지 않은 경우: 단순 광고, 안부 인사, 의미없는 링크, 해시태그만 있는 경우
+        if len(valid_batch) == 0:
+            continue
 
-반드시 "YES" 또는 "NO" 중 하나만 대답해줘.
+        if not check_api_limit():
+            break
 
-메시지:
-{text}
+        # 각 메시지에 번호를 매겨서 AI에게 전달
+        numbered_list = ""
+        for idx, msg in enumerate(valid_batch):
+            text_preview = msg["text"][:300]
+            numbered_list += f"\n[{idx}] 채널: {msg['channel']}\n내용: {text_preview}\n"
+
+        prompt = f"""
+아래는 텔레그램 재테크 채널들에서 수집한 메시지 {len(valid_batch)}개야.
+각 메시지가 주식/ETF/부동산/암호화폐 투자자에게 중요한 정보인지 판단해줘.
+
+중요한 경우: 시장 동향, 실적 발표, 정책 변화, 투자 기회, 구체적 수치가 있는 분석 등
+중요하지 않은 경우: 단순 광고, 안부 인사, 의미없는 링크, 해시태그만 있는 경우, 짧은 코멘트
+
+중요하다고 판단되는 메시지의 번호만 골라줘.
+반드시 아래 JSON 형식으로만 답해. 다른 설명 없이 JSON만 출력해.
+중요한 메시지가 없으면 빈 배열을 반환해.
+{{"important": [0, 3, 7]}}
+
+메시지 목록:
+{numbered_list}
 """
-    try:
-        count_api_call()
-        message = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=10,
-            messages=[{"role": "user", "content": prompt}]
-        )
-        result = message.content[0].text.strip().upper()
-        return "YES" in result
-    except Exception as e:
-        print(f"❌ 중요도 판단 API 오류: {e}")
-        return False
+        try:
+            count_api_call()
+            message = client.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=100,
+                messages=[{"role": "user", "content": prompt}]
+            )
+            result = message.content[0].text.strip()
+
+            # JSON 파싱
+            result = result.replace("```json", "").replace("```", "").strip()
+            parsed = json.loads(result)
+            selected_indices = parsed.get("important", [])
+
+            # 유효한 인덱스만 필터링
+            for idx in selected_indices:
+                if isinstance(idx, int) and 0 <= idx < len(valid_batch):
+                    important_messages.append(valid_batch[idx])
+
+            batch_important = len([idx for idx in selected_indices if isinstance(idx, int) and 0 <= idx < len(valid_batch)])
+            print(f"🔍 중요도 판단: {len(valid_batch)}개 중 {batch_important}개 중요")
+
+        except Exception as e:
+            print(f"❌ 중요도 판단 API 오류: {e} → 이 배치는 전체 중요로 처리")
+            important_messages.extend(valid_batch)
+
+    return important_messages
 
 
 def deduplicate(messages):
@@ -160,7 +200,7 @@ def _run_dedup_batch(messages, batch_size):
             )
             result = message.content[0].text.strip()
 
-            # JSON 파싱 (```json 감싸기 제거)
+            # JSON 파싱
             result = result.replace("```json", "").replace("```", "").strip()
             parsed = json.loads(result)
             selected_indices = parsed.get("selected", [])
@@ -196,22 +236,16 @@ def summarize(channel, text):
 
     prompt = f"""
 아래는 텔레그램 재테크 채널 '{channel}'에서 가져온 글이야.
-아래 형식으로 요약해줘.
+아래 형식으로 간결하게 요약해줘.
 만약 링크만 있거나 요약할 내용이 없으면 반드시 "SKIP" 이라고만 답해줘.
 
 📌 [핵심 제목 한 줄]
 
 📝 내용:
-- 구체적인 숫자와 수치를 포함해서 2~3줄로 요약 (%, YoY, QoQ, 조원 등 구체적 수치 필수)
-- 시장 예상치 대비 상회/하회 여부가 있으면 반드시 포함
-- 숫자가 없으면 최대한 구체적인 표현으로 작성
+- 구체적인 숫자와 수치를 포함해서 2줄로 요약
 
 💡 투자 포인트:
-- 투자자 관점에서 중요한 점 1~2가지
-
-🔍 관련 종목 (참고용):
-- 뉴스와 관련된 국내 대표 종목 1~2개와 종목코드 포함 (예: 삼성전자 005930)
-- 관련 종목이 없으면 생략
+- 투자자 관점에서 핵심 1~2줄
 
 원문:
 {text}
@@ -220,7 +254,7 @@ def summarize(channel, text):
         count_api_call()
         message = client.messages.create(
             model="claude-haiku-4-5-20251001",
-            max_tokens=1000,
+            max_tokens=500,
             messages=[{"role": "user", "content": prompt}]
         )
         result = message.content[0].text
