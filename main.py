@@ -2,7 +2,7 @@ import asyncio
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from telethon import TelegramClient
 from telegram import Bot
-from summarizer import is_important, deduplicate, summarize, reset_api_counter
+from summarizer import batch_filter_important, deduplicate, summarize, reset_api_counter
 from config import CHANNELS
 from dotenv import load_dotenv
 import os
@@ -83,12 +83,8 @@ async def job():
 
         print(f"📨 새 메시지 {len(messages)}개 수집됨")
 
-        # 1단계: 중요도 판단
-        important_messages = []
-        for msg in messages:
-            if is_important(msg["channel"], msg["text"]):
-                important_messages.append(msg)
-
+        # 1단계: 중요도 판단 (10개씩 묶어서 처리)
+        important_messages = batch_filter_important(messages)
         print(f"⭐ 중요 메시지 {len(important_messages)}개 선별됨")
 
         # 2단계: 중복 제거 (같은 주제 중 최고 품질만 선별)
@@ -121,11 +117,9 @@ async def main():
     scheduler = AsyncIOScheduler(timezone="Asia/Seoul")
 
     times = [
-        (6, 30), (7, 30), (8, 0), (8, 30), (8, 45),
-        (9, 3), (9, 30), (10, 0), (11, 0), (11, 30),
-        (12, 0), (13, 0), (14, 0), (14, 30), (15, 0),
-        (15, 35), (16, 0), (17, 0), (18, 0), (19, 0), (20, 0),
-        (21, 0), (22, 0)
+        (6, 30), (8, 40),
+        (9, 3), (11, 30), (14, 30), (15, 40),
+        (18, 0), (21, 0)
     ]
 
     for hour, minute in times:
