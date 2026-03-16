@@ -1,7 +1,7 @@
 import asyncio
 from telethon import TelegramClient
 from telegram import Bot
-from summarizer import is_important, summarize
+from summarizer import select_important, summarize, reset_api_counter
 from config import CHANNELS
 from dotenv import load_dotenv
 import os
@@ -19,6 +19,8 @@ TEST_CHANNELS = CHANNELS[:10]
 
 async def test_send():
     print("🔄 테스트 발행 시작...")
+    reset_api_counter()
+
     bot = Bot(token=BOT_TOKEN)
     client = TelegramClient("session", API_ID, API_HASH)
     await client.start()
@@ -37,19 +39,21 @@ async def test_send():
             print(f"❌ {channel} 실패: {e}")
 
     await client.disconnect()
+    print(f"📨 수집 완료: {len(messages)}개")
 
+    # 1단계: 선별
+    selected = select_important(messages)
+    print(f"⭐ 선별: {len(selected)}개")
+
+    # 2단계: 요약 & 발행
     published = 0
-    for msg in messages:
-        print(f"🔍 중요도 판단 중: {msg['channel']}")
-        if is_important(msg["channel"], msg["text"]):
-            summary = summarize(msg["channel"], msg["text"])
-            if summary:
-                await bot.send_message(chat_id=CHANNEL_ID, text=summary)
-                print(f"✅ 발행 완료: {msg['channel']}")
-                published += 1
-                await asyncio.sleep(2)
-        else:
-            print(f"⏭ 스킵: {msg['channel']}")
+    for msg in selected:
+        summary = summarize(msg["channel"], msg["text"])
+        if summary:
+            await bot.send_message(chat_id=CHANNEL_ID, text=summary)
+            print(f"✅ 발행 완료: {msg['channel']}")
+            published += 1
+            await asyncio.sleep(2)
 
     print(f"\n🎉 총 {published}개 발행 완료!")
 
