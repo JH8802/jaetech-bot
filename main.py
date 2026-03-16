@@ -41,9 +41,9 @@ def get_last_check():
             data = json.load(f)
             return datetime.fromisoformat(data["last_check"])
     except (FileNotFoundError, json.JSONDecodeError, KeyError):
-        # 첫 실행이거나 파일이 없으면 최근 3시간 전부터만 수집
-        print("📌 last_check 없음 → 최근 3시간 메시지만 수집합니다.")
-        return datetime.now(timezone.utc) - timedelta(hours=3)
+        # 첫 실행이거나 파일이 없으면 최근 10시간 전부터만 수집
+        print("📌 last_check 없음 → 최근 10시간 메시지만 수집합니다.")
+        return datetime.now(timezone.utc) - timedelta(hours=10)
 
 
 def save_last_check():
