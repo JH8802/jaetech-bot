@@ -3,22 +3,22 @@
 
 CHANNELS = [
     # 개인 투자자/애널리스트
-    "small_stock", "gaoshoukorea", "globaletfi",
-    "Brain_And_Body_Research", "rafikiresearch",
-    "internetgameLJH", "ryu1moo2", "TNBfolio", "comvestment",
-    "vegastooza", "gnmkkhvvy7889", "gatubang",
+    "small_stock", "gaoshoukorea",
+    "Brain_And_Body_Research",
+    "internetgameLJH", "TNBfolio",
+    "vegastooza", "gatubang",
     "qooowooo", "econostudy", "sypark_strategy",
     "SmallCap", "jinhyeoblee", "hyungkeunryu",
     "Jstockclass", "technthecity", "tambangwang",
     "jw_tech", "anna7673", "GlobalTechMoon",
-    "yieldnspread", "ym_research", "auto_revolution",
+    "ym_research", "auto_revolution",
 
     # 증권사 리서치
     "shinhanresearch",
     "hanhwasmall",
     "kiwoom_semibat",
     "HanaResearch",
-    "ITforYouFromHana", "pharmbiohana", "hanabuild", "HANAchina",
+    "ITforYouFromHana", "pharmbiohana", "hanabuild",
     "merITz_tech", "meritz_fnb",
     "KyoboRSC",
     "nhis_bio",
@@ -31,6 +31,6 @@ CHANNELS = [
 SECURITIES = [
     "shinhanresearch", "hanhwasmall",
     "kiwoom_semibat", "HanaResearch",
-    "ITforYouFromHana", "pharmbiohana", "hanabuild", "HANAchina",
+    "ITforYouFromHana", "pharmbiohana", "hanabuild",
     "merITz_tech", "meritz_fnb", "KyoboRSC", "nhis_bio",
 ]
