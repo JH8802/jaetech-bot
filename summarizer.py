@@ -46,11 +46,12 @@ def count_api_call():
 
 
 def is_valid_text(text):
-    if not text or len(text.strip()) < 20:
+    if not text or len(text.strip()) < 15:
         return False
     lines = [line.strip() for line in text.strip().split('\n') if line.strip()]
-    non_link_lines = [l for l in lines if not l.startswith('http') and not l.startswith('#')]
-    if len(non_link_lines) == 0:
+    # 해시태그만 있는 메시지는 제외
+    non_tag_lines = [l for l in lines if not l.startswith('#')]
+    if len(non_tag_lines) == 0:
         return False
     return True
 
@@ -87,9 +88,9 @@ def select_important(messages):
         prompt = f"""
 아래는 텔레그램 재테크 채널들에서 수집한 메시지 {len(batch)}개야.
 
-너의 역할: {len(batch)}개 중 최대 2개 이하만 엄선해. 기준에 맞는 게 없으면 0개도 괜찮아.
+너의 역할: 아래 조건을 전부 충족하는 메시지만 골라줘. 개수 제한은 없지만, 기준에 맞는 게 없으면 0개도 괜찮아.
 
-아래 조건을 전부 충족해야만 선택:
+선택 조건 (전부 충족해야 함):
 ✅ 시장에 즉각적인 영향을 주는 뉴스 (실적 발표, 정책 변화, 금리 결정, 대형 M&A 등)
 ✅ 구체적인 수치(%, 조원, YoY, QoQ 등)가 반드시 포함된 분석
 ✅ 출처가 명확한 정보 (공시, 증권사 리포트, 정부 발표, 통계 데이터 등 근거가 있는 것)
@@ -98,7 +99,6 @@ def select_important(messages):
 
 제외 대상:
 ❌ 출처나 근거 없이 개인 의견/전망/추측만 있는 메시지
-❌ 단순 뉴스 링크 공유 (분석 없이 링크만 전달)
 ❌ 짧은 코멘트, 감상, 루머, 카더라 정보
 ❌ 광고, 홍보, 안부 인사, 일상 메시지
 ❌ 이미 다른 메시지에서 다룬 주제의 반복
@@ -115,7 +115,7 @@ def select_important(messages):
             count_api_call()
             message = client.messages.create(
                 model="claude-haiku-4-5-20251001",
-                max_tokens=100,
+                max_tokens=150,
                 messages=[{"role": "user", "content": prompt}]
             )
             result = message.content[0].text.strip()
