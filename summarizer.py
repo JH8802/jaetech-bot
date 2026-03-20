@@ -161,6 +161,8 @@ def summarize(channel, text):
 💡 투자 포인트:
 - 투자자 관점에서 핵심 1~2줄
 
+#해시태그 (관련 종목명, 산업, 키워드를 2~4개, 띄어쓰기 없이)
+
 원문:
 {text}
 """
@@ -168,7 +170,7 @@ def summarize(channel, text):
         count_api_call()
         message = client.messages.create(
             model="claude-haiku-4-5-20251001",
-            max_tokens=300,
+            max_tokens=350,
             messages=[{"role": "user", "content": prompt}]
         )
         result = message.content[0].text
