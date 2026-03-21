@@ -126,4 +126,4 @@ async def main():
 
     await asyncio.Event().wait()
 
-asyncio.run(job())
+asyncio.run(main())
