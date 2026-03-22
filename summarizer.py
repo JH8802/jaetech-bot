@@ -8,14 +8,14 @@ load_dotenv()
 
 ANTHROPIC_KEY = os.getenv("ANTHROPIC_API_KEY")
 if not ANTHROPIC_KEY:
-    raise ValueError("❌ .env 파일에 ANTHROPIC_API_KEY가 없습니다.")
+        raise ValueError("❌ .env 파일에 ANTHROPIC_API_KEY가 없습니다.")
 
 client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
 
 # 요약 불가 키워드
 INVALID_KEYWORDS = [
-    "죄송하지만", "링크를 클릭할 수 없", "확인할 수 없습니다",
-    "본문 텍스트를 직접", "내용을 공유해주시면", "기사 내용을 공유"
+        "죄송하지만", "링크를 클릭할 수 없", "확인할 수 없습니다",
+        "본문 텍스트를 직접", "내용을 공유해주시면", "기사 내용을 공유"
 ]
 
 # ========== 비용 안전장치 ==========
@@ -24,117 +24,166 @@ api_call_count = 0
 
 
 def reset_api_counter():
-    """매 실행(job) 시작 시 카운터 초기화"""
-    global api_call_count
-    api_call_count = 0
+        global api_call_count
+        api_call_count = 0
 
 
 def check_api_limit():
-    """API 호출 한도 초과 여부 확인"""
-    global api_call_count
-    if api_call_count >= MAX_API_CALLS_PER_RUN:
-        print(f"⚠️ API 호출 한도 도달 ({MAX_API_CALLS_PER_RUN}회). 남은 메시지는 건너뜁니다.")
-        return False
-    return True
+        global api_call_count
+        if api_call_count >= MAX_API_CALLS_PER_RUN:
+                    print(f"⚠️ API 호출 한도 도달 ({MAX_API_CALLS_PER_RUN}회). 남은 메시지는 건너뜁니다.")
+                    return False
+                return True
 
 
 def count_api_call():
-    """API 호출 1회 기록"""
-    global api_call_count
+        global api_call_count
     api_call_count += 1
 # ================================
 
 
 def is_valid_text(text):
-    if not text or len(text.strip()) < 15:
-        return False
-    lines = [line.strip() for line in text.strip().split('\n') if line.strip()]
-    # 해시태그만 있는 메시지는 제외
+        if not text or len(text.strip()) < 15:
+                    return False
+                lines = [line.strip() for line in text.strip().split('\n') if line.strip()]
     non_tag_lines = [l for l in lines if not l.startswith('#')]
     if len(non_tag_lines) == 0:
-        return False
-    return True
+                return False
+            return True
 
 
 def select_important(messages):
-    """
-    중요도 판단 + 중복 제거를 한번에 처리.
-    20개씩 묶어서 AI에게 "중요하면서 겹치지 않는 최고 3~5개만 골라줘" 요청.
-    API 호출 1회로 두 가지를 동시에 처리하여 비용 절감.
-    """
+        """
+            채널 성격별로 선별 기준을 다르게 적용.
+                - 증권사 채널: 수치/공시 기반 엄격한 기준
+                    - 개인 투자자 채널: 인사이트 중심 완화된 기준
+                        """
     BATCH_SIZE = 20
     selected = []
 
-    # 텍스트 유효성 먼저 필터링 (API 호출 불필요)
     valid_messages = [msg for msg in messages if is_valid_text(msg["text"])]
     print(f"📋 유효 메시지: {len(messages)}개 중 {len(valid_messages)}개")
 
-    for i in range(0, len(valid_messages), BATCH_SIZE):
-        batch = valid_messages[i:i + BATCH_SIZE]
+    # 증권사 채널과 개인 채널 분리
+    securities_messages = [msg for msg in valid_messages if msg["channel"] in SECURITIES]
+    personal_messages = [msg for msg in valid_messages if msg["channel"] not in SECURITIES]
 
-        if not check_api_limit():
-            break
+    # 증권사 채널 선별 (엄격한 기준)
+    for i in range(0, len(securities_messages), BATCH_SIZE):
+                batch = securities_messages[i:i + BATCH_SIZE]
+                if not check_api_limit():
+                                break
+                            if len(batch) <= 2:
+                                            selected.extend(batch)
+                                            continue
 
-        if len(batch) <= 2:
-            selected.extend(batch)
-            continue
-
-        # 각 메시지에 번호를 매겨서 AI에게 전달
         numbered_list = ""
         for idx, msg in enumerate(batch):
-            text_preview = msg["text"][:300]
-            numbered_list += f"\n[{idx}] 채널: {msg['channel']}\n내용: {text_preview}\n"
+                        text_preview = msg["text"][:300]
+                        numbered_list += f"\n[{idx}] 채널: {msg['channel']}\n내용: {text_preview}\n"
 
         prompt = f"""
-아래는 텔레그램 재테크 채널들에서 수집한 메시지 {len(batch)}개야.
+        아래는 증권사 리서치 채널에서 수집한 메시지 {len(batch)}개야.
 
-너의 역할: 아래 조건을 전부 충족하는 메시지만 골라줘. 개수 제한은 없지만, 기준에 맞는 게 없으면 0개도 괜찮아.
+        선택 조건 (전부 충족해야 함):
+        ✅ 실적 발표, 정책 변화, 금리 결정, 대형 M&A 등 시장에 즉각적인 영향을 주는 뉴스
+        ✅ 구체적인 수치(%, 조원, YoY, QoQ 등)가 반드시 포함된 분석
+        ✅ 공시, 증권사 리포트, 정부 발표 등 출처가 명확한 정보
+        ✅ 같은 주제가 여러 개 있으면 가장 구체적인 1개만 선택
 
-선택 조건 (전부 충족해야 함):
-✅ 시장에 즉각적인 영향을 주는 뉴스 (실적 발표, 정책 변화, 금리 결정, 대형 M&A 등)
-✅ 구체적인 수치(%, 조원, YoY, QoQ 등)가 반드시 포함된 분석
-✅ 출처가 명확한 정보 (공시, 증권사 리포트, 정부 발표, 통계 데이터 등 근거가 있는 것)
-✅ 새로운 정보 (이미 알려진 내용의 반복이 아닌 것)
-✅ 같은 주제가 여러 개 있으면 가장 구체적인 1개만 선택
+        제외 대상:
+        ❌ 수치 없이 의견/전망만 있는 메시지
+        ❌ 광고, 홍보, 인사, 일상 메시지
+        ❌ 중복 주제
 
-제외 대상:
-❌ 출처나 근거 없이 개인 의견/전망/추측만 있는 메시지
-❌ 짧은 코멘트, 감상, 루머, 카더라 정보
-❌ 광고, 홍보, 안부 인사, 일상 메시지
-❌ 이미 다른 메시지에서 다룬 주제의 반복
-❌ 수치 없이 "좋아 보인다", "관심" 같은 막연한 표현만 있는 것
+        조건을 충족하는 메시지가 없으면 빈 배열을 반환해.
+        반드시 아래 JSON 형식으로만 답해. 다른 설명 없이 JSON만 출력해.
+        {{"selected": [0, 3, 7]}}
 
-조건을 충족하는 메시지가 없으면 빈 배열을 반환해.
-반드시 아래 JSON 형식으로만 답해. 다른 설명 없이 JSON만 출력해.
-{{"selected": [0, 3, 7]}}
-
-메시지 목록:
-{numbered_list}
-"""
+        메시지 목록:
+        {numbered_list}
+        """
         try:
-            count_api_call()
-            message = client.messages.create(
-                model="claude-haiku-4-5-20251001",
-                max_tokens=150,
-                messages=[{"role": "user", "content": prompt}]
-            )
-            result = message.content[0].text.strip()
+                        count_api_call()
+                        message = client.messages.create(
+                            model="claude-haiku-4-5-20251001",
+                            max_tokens=150,
+                            messages=[{"role": "user", "content": prompt}]
+                        )
+                        result = message.content[0].text.strip()
+                        result = result.replace("```json", "").replace("```", "").strip()
+                        parsed = json.loads(result)
+                        selected_indices = parsed.get("selected", [])
 
-            # JSON 파싱
-            result = result.replace("```json", "").replace("```", "").strip()
-            parsed = json.loads(result)
-            selected_indices = parsed.get("selected", [])
-
-            # 유효한 인덱스만 필터링
             batch_selected = []
             for idx in selected_indices:
-                if isinstance(idx, int) and 0 <= idx < len(batch):
-                    batch_selected.append(batch[idx])
+                                if isinstance(idx, int) and 0 <= idx < len(batch):
+                                                        batch_selected.append(batch[idx])
 
-            selected.extend(batch_selected)
-            print(f"🔍 선별: {len(batch)}개 중 {len(batch_selected)}개 채택")
+                            selected.extend(batch_selected)
+            print(f"🔍 선별(증권사): {len(batch)}개 중 {len(batch_selected)}개 채택")
 
-        except Exception as e:
+except Exception as e:
+            print(f"❌ 선별 API 오류: {e} → 이 배치에서 앞 2개만 유지")
+            selected.extend(batch[:2])
+
+    # 개인 투자자 채널 선별 (완화된 기준)
+    for i in range(0, len(personal_messages), BATCH_SIZE):
+                batch = personal_messages[i:i + BATCH_SIZE]
+        if not check_api_limit():
+                        break
+                    if len(batch) <= 2:
+                                    selected.extend(batch)
+                                    continue
+
+        numbered_list = ""
+        for idx, msg in enumerate(batch):
+                        text_preview = msg["text"][:300]
+                        numbered_list += f"\n[{idx}] 채널: {msg['channel']}\n내용: {text_preview}\n"
+
+        prompt = f"""
+        아래는 개인 투자자/애널리스트 채널에서 수집한 메시지 {len(batch)}개야.
+
+        선택 조건 (하나 이상 충족하면 됨):
+        ✅ 시장 흐름, 종목, 섹터에 대한 명확한 인사이트나 분석이 있는 것
+        ✅ 구체적인 수치나 데이터가 포함된 것 (있으면 우선순위)
+        ✅ 투자자 관점에서 참고할 만한 새로운 시각이나 정보
+        ✅ 특정 종목/섹터의 이슈, 모멘텀, 리스크를 언급한 것
+
+        제외 대상:
+        ❌ 광고, 홍보, 안부 인사, 일상 메시지
+        ❌ 근거 없는 루머, 카더라 정보
+        ❌ "좋아 보인다", "관심 있다" 같은 내용 없는 단순 감상
+        ❌ 이미 다른 메시지에서 다룬 주제의 반복
+
+        조건을 충족하는 메시지가 없으면 빈 배열을 반환해.
+        반드시 아래 JSON 형식으로만 답해. 다른 설명 없이 JSON만 출력해.
+        {{"selected": [0, 3, 7]}}
+
+        메시지 목록:
+        {numbered_list}
+        """
+        try:
+                        count_api_call()
+                        message = client.messages.create(
+                            model="claude-haiku-4-5-20251001",
+                            max_tokens=150,
+                            messages=[{"role": "user", "content": prompt}]
+                        )
+                        result = message.content[0].text.strip()
+                        result = result.replace("```json", "").replace("```", "").strip()
+                        parsed = json.loads(result)
+                        selected_indices = parsed.get("selected", [])
+
+            batch_selected = []
+            for idx in selected_indices:
+                                if isinstance(idx, int) and 0 <= idx < len(batch):
+                                                        batch_selected.append(batch[idx])
+
+                            selected.extend(batch_selected)
+            print(f"🔍 선별(개인): {len(batch)}개 중 {len(batch_selected)}개 채택")
+
+except Exception as e:
             print(f"❌ 선별 API 오류: {e} → 이 배치에서 앞 3개만 유지")
             selected.extend(batch[:3])
 
@@ -142,52 +191,51 @@ def select_important(messages):
 
 
 def summarize(channel, text):
-    if not is_valid_text(text):
-        return None
+        if not is_valid_text(text):
+                    return None
 
     if not check_api_limit():
-        return None
+                return None
 
     prompt = f"""
-아래는 텔레그램 재테크 채널 '{channel}'에서 가져온 글이야.
-아래 형식으로 간결하게 요약해줘.
-만약 링크만 있거나 요약할 내용이 없으면 반드시 "SKIP" 이라고만 답해줘.
+    아래는 텔레그램 재테크 채널 '{channel}'에서 가져온 글이야.
+    아래 형식으로 간결하게 요약해줘.
+    만약 링크만 있거나 요약할 내용이 없으면 반드시 "SKIP" 이라고만 답해줘.
 
-📌 [핵심 제목 한 줄]
+    📌 [핵심 제목 한 줄]
 
-📝 내용:
-- 구체적인 숫자와 수치를 포함해서 2줄로 요약
+    📝 내용:
+    - 구체적인 숫자와 수치를 포함해서 2줄로 요약
 
-💡 투자 포인트:
-- 투자자 관점에서 핵심 1~2줄
+    💡 투자 포인트:
+    - 투자자 관점에서 핵심 1~2줄
 
-#해시태그 (관련 종목명, 산업, 키워드를 2~4개, 띄어쓰기 없이)
+    #해시태그 (관련 종목명, 산업, 키워드를 2~4개, 띄어쓰기 없이)
 
-원문:
-{text}
-"""
+    원문:
+    {text}
+    """
     try:
-        count_api_call()
+                count_api_call()
         message = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=350,
-            messages=[{"role": "user", "content": prompt}]
+                        model="claude-haiku-4-5-20251001",
+                        max_tokens=350,
+                        messages=[{"role": "user", "content": prompt}]
         )
         result = message.content[0].text
-    except Exception as e:
+except Exception as e:
         print(f"❌ 요약 API 오류: {e}")
         return None
 
-    # 요약 불가 응답 필터링
     if not result or len(result.strip()) < 10:
-        return None
+                return None
     if "SKIP" in result.strip().upper()[:10]:
-        return None
+                return None
     for keyword in INVALID_KEYWORDS:
-        if keyword in result:
-            return None
+                if keyword in result:
+                                return None
 
     if channel not in SECURITIES:
-        result += f"\n\n🔗 출처: https://t.me/{channel}"
+                result += f"\n\n🔗 출처: https://t.me/{channel}"
     result += "\n\n⚠️ 본 내용은 투자 참고용이며 투자 권유가 아닙니다."
     return result
