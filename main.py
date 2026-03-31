@@ -11,7 +11,6 @@ from datetime import datetime, timezone, timedelta
 
 load_dotenv()
 
-# 환경변수 로드 (누락 시 명확한 에러 메시지)
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CHANNEL_ID = os.getenv("TELEGRAM_CHANNEL_ID")
 API_ID_STR = os.getenv("TELEGRAM_API_ID")
@@ -31,7 +30,6 @@ try:
 except ValueError:
     raise ValueError(f"❌ TELEGRAM_API_ID는 숫자여야 합니다. 현재 값: {API_ID_STR}")
 
-# 마지막 수집 시간 저장 파일
 LAST_CHECK_FILE = "last_check.json"
 
 
@@ -41,7 +39,6 @@ def get_last_check():
             data = json.load(f)
             return datetime.fromisoformat(data["last_check"])
     except (FileNotFoundError, json.JSONDecodeError, KeyError):
-        # 첫 실행이거나 파일이 없으면 최근 10시간 전부터만 수집
         print("📌 last_check 없음 → 최근 10시간 메시지만 수집합니다.")
         return datetime.now(timezone.utc) - timedelta(hours=10)
 
@@ -54,42 +51,36 @@ def save_last_check():
 async def job():
     print(f"🔄 콘텐츠 수집 & 발행 시작... ({datetime.now().strftime('%H:%M')})")
 
-    # 매 실행마다 API 호출 카운터 초기화
     reset_api_counter()
 
     bot = Bot(token=BOT_TOKEN)
     last_check = get_last_check()
 
     try:
-        client = TelegramClient("session", API_ID, API_HASH)
-        await client.start()
+        # ✅ 수정 1: async with 사용 → 에러가 나도 자동으로 disconnect됨
+        async with TelegramClient("session", API_ID, API_HASH) as client:
+            messages = []
+            for channel in CHANNELS:
+                try:
+                    async for message in client.iter_messages(channel, limit=30):
+                        if not message.text:
+                            continue
+                        if last_check and message.date <= last_check:
+                            break
+                        messages.append({
+                            "channel": channel,
+                            "text": message.text
+                        })
+                except Exception as e:
+                    print(f"❌ {channel} 수집 실패: {e}")
 
-        messages = []
-        for channel in CHANNELS:
-            try:
-                async for message in client.iter_messages(channel, limit=30):
-                    if not message.text:
-                        continue
-                    # 마지막 수집 이후 새 메시지만
-                    if last_check and message.date <= last_check:
-                        break
-                    messages.append({
-                        "channel": channel,
-                        "text": message.text
-                    })
-            except Exception as e:
-                print(f"❌ {channel} 수집 실패: {e}")
-
-        await client.disconnect()
         save_last_check()
 
         print(f"📨 새 메시지 {len(messages)}개 수집됨")
 
-        # 1단계: 중요도 판단 + 중복 제거 (한번에 처리)
         selected_messages = select_important(messages)
         print(f"⭐ 최종 선별: {len(selected_messages)}개")
 
-        # 2단계: 요약 & 발행
         published = 0
         for msg in selected_messages:
             summary = summarize(msg["channel"], msg["text"])
@@ -118,7 +109,8 @@ async def main():
     ]
 
     for hour, minute in times:
-        scheduler.add_job(job, "cron", hour=hour, minute=minute)
+        # ✅ 수정 2: max_instances=1 → 실행이 겹치지 않음
+        scheduler.add_job(job, "cron", hour=hour, minute=minute, max_instances=1)
 
     scheduler.start()
     print("🚀 재테크 인사이트 봇 가동 시작!")
