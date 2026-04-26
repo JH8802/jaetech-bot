@@ -116,6 +116,7 @@ async def main():
     print("🚀 재테크 인사이트 봇 가동 시작!")
     print(f"📅 하루 {len(times)}회 자동 발행 예약 완료")
 
+    await job() 
     await asyncio.Event().wait()
 
 asyncio.run(main())
