@@ -15,6 +15,9 @@ session.session-journal
 # 마지막 수집 시간 기록
 last_check.json
 
+# 블로그 초안 저장 폴더 (개인 콘텐츠, 저장소에 올리지 않음)
+drafts/
+
 # OS 자동 생성 파일
 .DS_Store
 Thumbs.db
