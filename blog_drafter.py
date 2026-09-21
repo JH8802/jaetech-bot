@@ -36,7 +36,9 @@ def draft_post(topic, key_points, personal_take=""):
 저자의 의견/입장: {personal_take or "(별도 입력 없음 — 사실 전달 위주로 작성)"}
 
 분량: 1500~2000자 내외
-형식: 마크다운 기호(#, * 등) 없이 일반 텍스트로, 소제목은 최소화"""
+형식: 마크다운 기호(#, * 등)는 쓰지 마. 대신 소제목이 들어가는 줄은
+맨 앞에 [소제목]을 붙여줘 (예: [소제목] 균주명 없는 표시, 뭐가 문제인가).
+소제목은 2~4개, 자연스러운 자리에만."""
 
     message = client.messages.create(
         model="claude-sonnet-5",
