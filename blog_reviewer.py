@@ -35,6 +35,25 @@ def scan_cliches(draft):
     return issues
 
 
+def scan_structure(draft):
+    """규칙 기반 구조 점검 — 가독성 + 사진/그래프/지도 제안 존재 여부."""
+    issues = []
+
+    paragraphs = [p for p in draft.split("\n\n") if p.strip() and not p.strip().startswith("[")]
+    long_paragraphs = [p for p in paragraphs if len(p) > 400]
+    if long_paragraphs:
+        issues.append(f"긴 문단 {len(long_paragraphs)}개 (400자 초과 — 나누면 가독성 좋아짐)")
+
+    if len(draft) < 1000:
+        issues.append(f"본문이 짧음 ({len(draft)}자) — 짧은 글은 저품질 신호로 취급될 수 있음")
+
+    visual_markers = sum(draft.count(tag) for tag in ("[사진 제안]", "[그래프 제안]", "[지도 제안]"))
+    if visual_markers == 0:
+        issues.append("사진/그래프/지도 제안이 하나도 없음 — 이미지 없는 글은 불리하다고 알려져 있음")
+
+    return issues
+
+
 def review_draft(draft):
     """AI 기반 점검 (문장 리듬 / 저자 의견 / 사실 구체성) — Haiku로 저비용 호출."""
     prompt = f"""아래는 블로그 초안이야. 다음 3개 기준으로만 점검해줘.
