@@ -103,9 +103,9 @@ async def main():
     scheduler = AsyncIOScheduler(timezone="Asia/Seoul")
 
     times = [
-        (6, 30), (8, 40),
-        (9, 3), (11, 30), (14, 30), (15, 40),
-        (18, 0), (21, 0)
+        (7, 30), (8, 40),
+        (9, 30), (11, 30), (13, 30),
+        (15, 40), (18, 0), (21, 0)
     ]
 
     for hour, minute in times:
