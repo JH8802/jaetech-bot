@@ -72,8 +72,9 @@ def print_review(draft):
         "sentence_rhythm": "문장 길이 변주",
         "opinion": "저자 의견",
         "specificity": "사실 구체성",
+        "differentiation": "차별화(뻔한 내용 여부)",
     }
-    total = 2 + len(ai_labels)  # 클리셰 + 구조 + AI 3개
+    total = 2 + len(ai_labels)  # 클리셰 + 구조 + AI 4개
     passed = 0
 
     print("\n📋 점검 결과")
