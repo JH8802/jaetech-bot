@@ -50,7 +50,7 @@ def draft_post(topic, key_points, personal_take=""):
 
     message = client.messages.create(
         model="claude-sonnet-5",
-        max_tokens=2048,
+        max_tokens=8192,
         system=STYLE_GUIDE,
         messages=[{"role": "user", "content": prompt}]
     )
