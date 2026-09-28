@@ -1,4 +1,5 @@
 import anthropic
+from blog_utils import extract_text
 from dotenv import load_dotenv
 import os
 import json
@@ -80,7 +81,7 @@ def review_draft(draft):
             max_tokens=400,
             messages=[{"role": "user", "content": prompt}]
         )
-        result = message.content[0].text.strip()
+        result = extract_text(message).strip()
         result = result.replace("```json", "").replace("```", "").strip()
         return json.loads(result)
     except Exception as e:
