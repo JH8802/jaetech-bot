@@ -1,5 +1,6 @@
 import anthropic
 from blog_style_guide import STYLE_GUIDE
+from blog_utils import extract_text
 from dotenv import load_dotenv
 import os
 
@@ -53,7 +54,7 @@ def draft_post(topic, key_points, personal_take=""):
         system=STYLE_GUIDE,
         messages=[{"role": "user", "content": prompt}]
     )
-    return message.content[0].text.strip()
+    return extract_text(message).strip()
 
 
 def suggest_questions(topic):
@@ -75,7 +76,7 @@ def suggest_questions(topic):
             max_tokens=300,
             messages=[{"role": "user", "content": prompt}]
         )
-        lines = message.content[0].text.strip().split("\n")
+        lines = extract_text(message).strip().split("\n")
         return [line.strip("-• ").strip() for line in lines if line.strip()]
     except Exception as e:
         print(f"⚠️ 질문 생성 실패 (건너뜀): {e}")
