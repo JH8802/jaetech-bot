@@ -21,6 +21,8 @@ jaetech-bot/
 ├── config.py          # 채널 목록 설정
 ├── test_bot.py        # 봇 연결 테스트
 ├── test_send.py       # 수집→요약→발행 테스트
+├── test_threads.py    # 쓰레드 초안 생성 테스트
+├── get_chat_id.py     # 본인 텔레그램 chat_id 확인용 헬퍼
 ├── requirements.txt   # Python 패키지 목록
 ├── .env.example       # 환경변수 템플릿
 └── .gitignore
@@ -66,7 +68,7 @@ copy .env.example .env  # Windows
 | `TELEGRAM_API_ID` | 텔레그램 API ID | [my.telegram.org](https://my.telegram.org) |
 | `TELEGRAM_API_HASH` | 텔레그램 API Hash | [my.telegram.org](https://my.telegram.org) |
 | `ANTHROPIC_API_KEY` | Claude API 키 | [console.anthropic.com](https://console.anthropic.com) |
-| `TELEGRAM_ADMIN_CHAT_ID` | 쓰레드 초안을 받을 본인 chat_id (선택) | 텔레그램에서 `@userinfobot`과 대화 후 Id 확인, 본인 봇과도 대화 1회 시작 필요 |
+| `TELEGRAM_ADMIN_CHAT_ID` | 쓰레드 초안을 받을 본인 chat_id (선택) | 아래 5번 `get_chat_id.py` 실행해서 확인 |
 
 ### 5. 봇 실행
 ```bash
@@ -75,6 +77,13 @@ python test_bot.py
 
 # 수집→요약 테스트 (소량)
 python test_send.py
+
+# (선택) 쓰레드 초안 기능을 쓰려면, 본인 봇에게 메시지 1개 먼저 보낸 뒤:
+python get_chat_id.py
+# → 출력된 chat_id를 .env의 TELEGRAM_ADMIN_CHAT_ID에 입력
+
+# 쓰레드 초안 생성 테스트 (소량)
+python test_threads.py
 
 # 본 실행 (스케줄러 가동)
 python main.py
@@ -121,6 +130,7 @@ python main.py
 - `.env` 파일은 절대 GitHub에 올리지 마세요 (API 키 노출 위험)
 - `session.session` 파일은 텔레그램 로그인 세션이므로 공유하지 마세요
 - 본 봇의 발행 내용은 투자 참고용이며, 투자 판단은 본인 책임입니다
+- `python main.py`는 실행 중인 동안에만 스케줄이 동작합니다. 하루 종일(텔레그램 발행 + 쓰레드 초안 DM 포함) 계속 돌아가게 하려면 컴퓨터를 계속 켜두거나, 상시 구동 서버(PC 자체, 클라우드 VM 등)에서 실행해야 합니다
 
 ## 기술 스택
 
