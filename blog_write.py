@@ -33,13 +33,23 @@ def print_metadata(meta):
 
 def print_platform_guide(choice, meta):
     if choice in ("1", "3"):
-        print("\n[네이버 블로그 / 티스토리]")
+        print("\n[네이버 블로그]")
         print(f"  - 제목란에 위 제목 그대로")
         print(f"  - 카테고리: {meta['category']} 선택(또는 생성)")
         print(f"  - 에디터 하단 태그 입력란에: {meta['tags']}")
         print("  💡 본문 안 [소제목] 줄은 태그를 지우고 에디터에서 직접 굵게/크게 처리해.")
-        print("     [사진/그래프/지도 제안] 자리에는 실제 이미지를 삽입하고,")
-        print("     ALT로 안내된 문구를 에디터의 대체텍스트 입력창에 그대로 넣어.")
+        print("     사진 삽입+ALT: [사진/그래프/지도 제안] 자리에서 사진 삽입 버튼으로 이미지")
+        print("     넣기 → 삽입한 사진 클릭 → 뜨는 툴바에서 '대체 텍스트' 클릭 → 팝업에")
+        print("     ALT 문구 입력 → '업데이트'.")
+
+        print("\n[티스토리]")
+        print(f"  - 제목란에 위 제목 그대로")
+        print(f"  - 카테고리: {meta['category']} 선택(또는 생성)")
+        print(f"  - 에디터 하단 태그 입력란에: {meta['tags']}")
+        print("  💡 본문 안 [소제목] 줄은 태그를 지우고 에디터에서 직접 굵게/크게 처리해.")
+        print("     사진 삽입+ALT: [사진/그래프/지도 제안] 자리에서 사진 첨부 → 삽입한 사진")
+        print("     클릭 → 뜨는 도구모음에서 대체 텍스트 아이콘 클릭 → 팝업에 ALT 문구")
+        print("     입력 → 확인.")
     if choice in ("2", "3"):
         print("\n[워드프레스]")
         print(f"  - 제목란에 위 제목 그대로")
@@ -47,8 +57,9 @@ def print_platform_guide(choice, meta):
         print(f"  - 태그: {meta['tags']}")
         print(f"  - SEO 플러그인(Yoast 등)의 메타 설명 칸에: {meta['meta_description']}")
         print("  💡 본문 안 [소제목] 줄은 태그를 지우고 그 블록을 '제목(Heading, H2/H3)'으로 바꿔.")
-        print("     [사진/그래프/지도 제안] 자리에는 이미지 블록을 넣고,")
-        print("     블록 설정의 '대체 텍스트(Alt text)' 칸에 ALT 문구를 그대로 넣어.")
+        print("     사진 삽입+ALT: [사진/그래프/지도 제안] 자리에 이미지 블록 추가 → 사진")
+        print("     업로드 → 화면 오른쪽 블록 설정 패널의 'Alt text(대체 텍스트)' 칸에")
+        print("     ALT 문구 입력.")
 
 
 def get_key_points():
