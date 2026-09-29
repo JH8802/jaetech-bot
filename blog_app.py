@@ -4,7 +4,7 @@
 """
 import streamlit as st
 from blog_drafter import draft_post, suggest_questions
-from blog_reviewer import scan_cliches, scan_structure, review_draft
+from blog_reviewer import scan_cliches, scan_structure, review_draft, AI_REVIEW_LABELS
 from datetime import datetime
 import os
 
@@ -95,13 +95,7 @@ if st.session_state.draft:
     else:
         st.success("글 구조(가독성/이미지): 문제 없음")
 
-    ai_labels = {
-        "sentence_rhythm": "문장 길이 변주",
-        "opinion": "저자 의견",
-        "specificity": "사실 구체성",
-        "differentiation": "차별화(뻔한 내용 여부)",
-    }
-    for key, label in ai_labels.items():
+    for key, label in AI_REVIEW_LABELS.items():
         val = (ai_result.get(key) or "").strip()
         if val and val != "없음":
             st.error(f"**{label}**\n{val}")

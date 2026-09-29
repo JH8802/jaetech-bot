@@ -22,6 +22,15 @@ HARD_BAN = [
 REPEAT_WATCH = ["또한", "특히", "이처럼"]
 REPEAT_THRESHOLD = 2
 
+# review_draft()가 반환하는 키 -> 화면에 보여줄 라벨 (blog_write.py, blog_app.py 공용)
+AI_REVIEW_LABELS = {
+    "sentence_rhythm": "문장 길이 변주",
+    "opinion": "저자 의견",
+    "specificity": "사실 구체성",
+    "differentiation": "차별화(뻔한 내용 여부)",
+    "keyword_clarity": "SEO 키워드 명확성",
+}
+
 
 def scan_cliches(draft):
     """규칙 기반 점검 — API 호출 없이 즉시, 무료로 실행됨."""
@@ -52,12 +61,17 @@ def scan_structure(draft):
     if visual_markers == 0:
         issues.append("사진/그래프/지도 제안이 하나도 없음 — 이미지 없는 글은 불리하다고 알려져 있음")
 
+    if "[제목]" not in draft:
+        issues.append("[제목] 태그가 없음 — 제목 없이 본문만 생성된 것으로 보임")
+    if "[태그]" not in draft:
+        issues.append("[태그] 태그가 없음 — 발행 시 넣을 키워드 태그가 없음")
+
     return issues
 
 
 def review_draft(draft):
-    """AI 기반 점검 (문장 리듬 / 저자 의견 / 사실 구체성 / 차별화) — Haiku로 저비용 호출."""
-    prompt = f"""아래는 블로그 초안이야. 다음 4개 기준으로만 점검해줘.
+    """AI 기반 점검 (문장 리듬 / 저자 의견 / 사실 구체성 / 차별화 / SEO 키워드) — Haiku로 저비용 호출."""
+    prompt = f"""아래는 블로그 초안이야. 다음 5개 기준으로만 점검해줘.
 문제 되는 부분은 원문 문장을 그대로 짧게 인용해서 지적하고,
 문제 없으면 정확히 "없음"이라고만 답해.
 
@@ -68,9 +82,13 @@ def review_draft(draft):
    설명/사례에 그치는가 (직접 겪은 일이나 실무자만 아는 디테일이 아니라
    교과서적/통념적 설명 위주인가). 뻔한 부분이 있으면 그 문장을 인용해서
    지적하고, 이 글만의 구체적 시각·경험이 충분하면 "없음"
+5. keyword_clarity: [제목]과 본문 첫 문단만 보고 "이 글이 정확히 무엇에
+   대한 글인지" 검색하는 사람 입장에서 바로 알 수 있는가. 제목이나
+   도입부가 모호하거나 핵심 키워드 없이 겉돈다면 지적하고, 명확하면 "없음"
+   (키워드를 억지로 많이 넣으라는 뜻이 아니라, 명확성 문제만 봐줘)
 
 반드시 아래 JSON 형식으로만 답해. 다른 설명 없이 JSON만 출력해.
-{{"sentence_rhythm": "...", "opinion": "...", "specificity": "...", "differentiation": "..."}}
+{{"sentence_rhythm": "...", "opinion": "...", "specificity": "...", "differentiation": "...", "keyword_clarity": "..."}}
 
 초안:
 {draft}"""
@@ -78,7 +96,7 @@ def review_draft(draft):
     try:
         message = client.messages.create(
             model="claude-haiku-4-5-20251001",
-            max_tokens=400,
+            max_tokens=600,
             messages=[{"role": "user", "content": prompt}]
         )
         result = extract_text(message).strip()

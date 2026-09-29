@@ -8,7 +8,7 @@ drafts/ 폴더에 파일로 저장한다. 초안 자체는 네이버/티스토�
 하는지(제목 처리, ALT 입력 위치 등)만 그에 맞게 안내해준다.
 """
 from blog_drafter import draft_post, suggest_questions
-from blog_reviewer import scan_cliches, scan_structure, review_draft
+from blog_reviewer import scan_cliches, scan_structure, review_draft, AI_REVIEW_LABELS
 from datetime import datetime
 import os
 
@@ -68,13 +68,7 @@ def print_review(draft):
     structure_issues = scan_structure(draft)
     ai_result = review_draft(draft)
 
-    ai_labels = {
-        "sentence_rhythm": "문장 길이 변주",
-        "opinion": "저자 의견",
-        "specificity": "사실 구체성",
-        "differentiation": "차별화(뻔한 내용 여부)",
-    }
-    total = 2 + len(ai_labels)  # 클리셰 + 구조 + AI 4개
+    total = 2 + len(AI_REVIEW_LABELS)  # 클리셰 + 구조 + AI 5개
     passed = 0
 
     print("\n📋 점검 결과")
@@ -95,7 +89,7 @@ def print_review(draft):
         print("✅ 글 구조(가독성/이미지): 문제 없음")
         passed += 1
 
-    for key, label in ai_labels.items():
+    for key, label in AI_REVIEW_LABELS.items():
         val = (ai_result.get(key) or "").strip()
         if val and val != "없음":
             print(f"❌ {label}: {val}")
