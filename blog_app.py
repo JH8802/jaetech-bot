@@ -5,6 +5,7 @@
 import streamlit as st
 from blog_drafter import draft_post, suggest_questions
 from blog_reviewer import scan_cliches, scan_structure, review_draft, AI_REVIEW_LABELS
+from blog_utils import parse_draft_metadata
 from datetime import datetime
 import os
 
@@ -73,15 +74,31 @@ if st.button("✍️ 초안 생성", type="primary"):
         st.session_state.filename = filename
 
 if st.session_state.draft:
-    st.divider()
-    st.subheader("📄 초안")
-    st.text_area("결과 (클릭 후 Ctrl+A, Ctrl+C로 복사)", st.session_state.draft, height=400)
-    st.caption(f"글자 수: {len(st.session_state.draft)}자 · 저장됨: {st.session_state.filename}")
+    draft = st.session_state.draft
+    meta = parse_draft_metadata(draft)
 
     with st.spinner("🔍 자동 점검 중..."):
-        cliche_issues = scan_cliches(st.session_state.draft)
-        structure_issues = scan_structure(st.session_state.draft)
-        ai_result = review_draft(st.session_state.draft)
+        cliche_issues = scan_cliches(draft)
+        structure_issues = scan_structure(draft)
+        ai_result = review_draft(draft)
+
+    st.divider()
+    st.subheader("📝 발행 정보")
+    st.text_input("제목", meta["title"])
+    col1, col2 = st.columns(2)
+    with col1:
+        st.text_input("카테고리", meta["category"])
+    with col2:
+        st.text_input("태그 (쉼표로 구분)", meta["tags"])
+    if platform_choice in ("2", "3"):
+        st.text_area("메타 설명 (워드프레스 SEO 플러그인의 '메타 설명' 칸에)", meta["meta_description"], height=70)
+    else:
+        with st.expander("메타 설명 (참고용 — 네이버/티스토리는 보통 안 씀)"):
+            st.write(meta["meta_description"])
+
+    st.subheader("📄 본문")
+    st.text_area("본문 (클릭 후 Ctrl+A, Ctrl+C로 복사)", meta["body"], height=400)
+    st.caption(f"본문 글자 수: {len(meta['body'])}자 · 저장됨: {st.session_state.filename}")
 
     st.subheader("📋 점검 결과")
 
@@ -105,18 +122,25 @@ if st.session_state.draft:
     st.caption("참고: 이건 'AI 티/가독성' 체크일 뿐, 각 플랫폼 자체 검색 알고리즘 점수는 아니야.")
 
     st.divider()
-    st.subheader("📌 발행 전 체크")
+    st.subheader("📌 발행 체크리스트")
     if platform_choice in ("1", "3"):
         st.info(
             "**네이버 블로그 / 티스토리**\n\n"
-            "[소제목] 줄은 태그를 지우고 에디터에서 직접 굵게/크게 처리해.\n\n"
+            f"- 제목란에 위 제목 그대로 붙여넣기\n"
+            f"- 카테고리: **{meta['category']}** 선택(또는 생성)\n"
+            f"- 에디터 하단 태그 입력란에: **{meta['tags']}**\n\n"
+            "본문 안 [소제목] 줄은 태그를 지우고 에디터에서 직접 굵게/크게 처리해.\n\n"
             "[사진/그래프/지도 제안] 자리에는 실제 이미지를 삽입하고, "
             "ALT로 안내된 문구를 에디터의 대체텍스트 입력창에 그대로 넣어."
         )
     if platform_choice in ("2", "3"):
         st.info(
             "**워드프레스**\n\n"
-            "[소제목] 줄은 태그를 지우고 그 블록을 '제목(Heading, H2/H3)'으로 바꿔.\n\n"
+            f"- 제목란에 위 제목 그대로\n"
+            f"- 카테고리: **{meta['category']}**\n"
+            f"- 태그: **{meta['tags']}**\n"
+            f"- SEO 플러그인(Yoast 등)의 메타 설명 칸에 위 메타 설명 붙여넣기\n\n"
+            "본문 안 [소제목] 줄은 태그를 지우고 그 블록을 '제목(Heading, H2/H3)'으로 바꿔.\n\n"
             "[사진/그래프/지도 제안] 자리에는 이미지 블록을 넣고, "
             "블록 설정의 '대체 텍스트(Alt text)' 칸에 ALT 문구를 그대로 넣어."
         )

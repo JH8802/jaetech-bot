@@ -9,27 +9,9 @@ drafts/ 폴더에 파일로 저장한다. 초안 자체는 네이버/티스토�
 """
 from blog_drafter import draft_post, suggest_questions
 from blog_reviewer import scan_cliches, scan_structure, review_draft, AI_REVIEW_LABELS
+from blog_utils import parse_draft_metadata
 from datetime import datetime
 import os
-
-PLATFORM_GUIDES = {
-    "1": {
-        "label": "네이버 블로그 / 티스토리",
-        "guide": (
-            "💡 [소제목] 줄은 태그를 지우고 에디터에서 직접 굵게/크게 처리해.\n"
-            "   [사진/그래프/지도 제안] 자리에는 실제 이미지를 삽입하고,\n"
-            "   ALT로 안내된 문구를 에디터의 대체텍스트 입력창에 그대로 넣어."
-        ),
-    },
-    "2": {
-        "label": "워드프레스",
-        "guide": (
-            "💡 [소제목] 줄은 태그를 지우고 그 블록을 '제목(Heading, H2/H3)'으로 바꿔.\n"
-            "   [사진/그래프/지도 제안] 자리에는 이미지 블록을 넣고,\n"
-            "   블록 설정의 '대체 텍스트(Alt text)' 칸에 ALT 문구를 그대로 넣어."
-        ),
-    },
-}
 
 
 def choose_platform():
@@ -41,14 +23,32 @@ def choose_platform():
     return choice if choice in ("1", "2", "3") else "1"
 
 
-def print_platform_guide(choice):
-    if choice == "3":
-        for key in ("1", "2"):
-            print(f"\n[{PLATFORM_GUIDES[key]['label']}]")
-            print(PLATFORM_GUIDES[key]["guide"])
-    else:
-        guide = PLATFORM_GUIDES.get(choice, PLATFORM_GUIDES["1"])
-        print(guide["guide"])
+def print_metadata(meta):
+    print("\n📝 발행 정보")
+    print(f"  제목: {meta['title']}")
+    print(f"  카테고리: {meta['category']}")
+    print(f"  태그: {meta['tags']}")
+    print(f"  메타설명: {meta['meta_description']}")
+
+
+def print_platform_guide(choice, meta):
+    if choice in ("1", "3"):
+        print("\n[네이버 블로그 / 티스토리]")
+        print(f"  - 제목란에 위 제목 그대로")
+        print(f"  - 카테고리: {meta['category']} 선택(또는 생성)")
+        print(f"  - 에디터 하단 태그 입력란에: {meta['tags']}")
+        print("  💡 본문 안 [소제목] 줄은 태그를 지우고 에디터에서 직접 굵게/크게 처리해.")
+        print("     [사진/그래프/지도 제안] 자리에는 실제 이미지를 삽입하고,")
+        print("     ALT로 안내된 문구를 에디터의 대체텍스트 입력창에 그대로 넣어.")
+    if choice in ("2", "3"):
+        print("\n[워드프레스]")
+        print(f"  - 제목란에 위 제목 그대로")
+        print(f"  - 카테고리: {meta['category']}")
+        print(f"  - 태그: {meta['tags']}")
+        print(f"  - SEO 플러그인(Yoast 등)의 메타 설명 칸에: {meta['meta_description']}")
+        print("  💡 본문 안 [소제목] 줄은 태그를 지우고 그 블록을 '제목(Heading, H2/H3)'으로 바꿔.")
+        print("     [사진/그래프/지도 제안] 자리에는 이미지 블록을 넣고,")
+        print("     블록 설정의 '대체 텍스트(Alt text)' 칸에 ALT 문구를 그대로 넣어.")
 
 
 def get_key_points():
@@ -125,11 +125,14 @@ if __name__ == "__main__":
 
     print("\n⏳ 초안 생성 중...\n")
     draft = draft_post(topic, key_points, personal_take)
+    meta = parse_draft_metadata(draft)
 
+    print_metadata(meta)
+    print("\n📄 본문")
     print("=" * 50)
-    print(draft)
+    print(meta["body"])
     print("=" * 50)
-    print(f"\n[글자 수: {len(draft)}자]")
+    print(f"\n[본문 글자 수: {len(meta['body'])}자]")
 
     print_review(draft)
 
@@ -139,4 +142,4 @@ if __name__ == "__main__":
         f.write(f"주제: {topic}\n\n{draft}")
 
     print(f"\n💾 저장됨: {filename}")
-    print_platform_guide(platform_choice)
+    print_platform_guide(platform_choice, meta)
