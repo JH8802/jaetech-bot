@@ -236,3 +236,55 @@ def summarize(channel, text):
         result += f"\n\n🔗 출처: https://t.me/{channel}"
     result += "\n\n⚠️ 본 내용은 투자 참고용이며 투자 권유가 아닙니다."
     return result
+
+
+def summarize_for_threads(channel, text):
+    """텔레그램 발행용이 아니라 쓰레드(Threads) SNS 게시용 초안을 만든다."""
+    if not is_valid_text(text):
+        return None
+
+    if not check_api_limit():
+        return None
+
+    prompt = f"""아래는 텔레그램 재테크 채널 '{channel}'에서 가져온 글이야.
+이걸 개인 SNS(쓰레드) 게시글용으로 다시 써줘.
+
+규칙:
+- 반말 섞인 캐주얼한 톤 ("~임", "~함", "~인 듯" 같은 말투)
+- 첫 줄은 짧고 강하게, 스크롤 멈추는 훅으로 시작
+- 인과관계가 있으면 화살표(→)로 단계별로 풀어서 설명
+- 전체 6~8줄 이내로 짧게
+- 특정 종목을 "사라/팔아라" 식으로 추천하는 표현은 쓰지 말 것 (사실과 인과관계 설명에만 집중)
+- 마지막 문단은 답글을 유도하는 부드러운 질문으로 마무리
+  (논쟁이나 편 가르기를 유도하는 자극적 질문은 절대 금지, 가볍게 의견 묻는 정도로만)
+- 그다음 줄에 "⚠️ 투자 참고용이며 투자 권유가 아닙니다" 그대로 넣기
+- 마지막 줄에 해시태그 2~4개 (원문 내용 기반), 그리고 맨 마지막 해시태그 뒤에
+  한 칸 띄고 이 소식이 언급된 종목/섹터에 (호재) 또는 (악재) 또는 (중립) 중
+  하나를 붙이기 (예: #반도체 (호재))
+
+만약 링크만 있거나 요약할 내용이 없으면 반드시 "SKIP" 이라고만 답해줘.
+
+원문:
+{text}"""
+
+    try:
+        count_api_call()
+        message = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=400,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        result = message.content[0].text.strip()
+    except Exception as e:
+        print(f"❌ 쓰레드 초안 API 오류: {e}")
+        return None
+
+    if not result or len(result.strip()) < 10:
+        return None
+    if "SKIP" in result.strip().upper()[:10]:
+        return None
+    for keyword in INVALID_KEYWORDS:
+        if keyword in result:
+            return None
+
+    return result
