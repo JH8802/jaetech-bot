@@ -29,11 +29,6 @@ jobs:
       - name: 패키지 설치
         run: pip install -r requirements.txt
 
-      - name: 텔레그램 세션 파일 복원
-        env:
-          SESSION_B64: ${{ secrets.TELETHON_SESSION_B64 }}
-        run: echo "$SESSION_B64" | base64 -d > session.session
-
       - name: 쓰레드 초안 생성 및 DM 발송
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -41,6 +36,7 @@ jobs:
           TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
           TELEGRAM_ADMIN_CHAT_ID: ${{ secrets.TELEGRAM_ADMIN_CHAT_ID }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          TELETHON_STRING_SESSION: ${{ secrets.TELETHON_STRING_SESSION }}
         run: python threads_once.py
 
       - name: 상태 파일(threads_state.json) 커밋
