@@ -3,6 +3,7 @@ from blog_style_guide import STYLE_GUIDE
 from blog_utils import extract_text
 from dotenv import load_dotenv
 import os
+import random
 
 load_dotenv()
 
@@ -11,6 +12,16 @@ if not ANTHROPIC_KEY:
     raise ValueError("❌ .env 파일에 ANTHROPIC_API_KEY가 없습니다.")
 
 client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
+
+# 매번 이 중 하나를 무작위로 지정 — "요즘 ~보면 ~가 많이 보인다"류
+# 트렌드 관찰형 오프닝으로 매번 수렴하는 걸 막기 위함 (실사용 중 발견된 패턴)
+OPENING_STYLES = [
+    "구체적인 질문 하나를 툭 던지며 시작 (예: '~가 진짜 효과가 있을까?')",
+    "최근 겪은 구체적인 장면·상황 하나를 묘사하며 시작 (예: 특정 문의/사례 하나)",
+    "저자의 단정적인 주장이나 의견을 먼저 던지고 시작 (예: '나는 ~라고 본다')",
+    "숫자나 구체적 수치를 먼저 제시하며 시작",
+    "흔한 오해나 잘못된 통념을 하나 짚으며 시작 (예: '다들 ~라고 알고 있는데')",
+]
 
 
 def draft_post(topic, key_points, personal_take=""):
@@ -26,6 +37,7 @@ def draft_post(topic, key_points, personal_take=""):
         raise ValueError("key_points가 비어 있습니다. 구체적 사실/숫자/경험을 최소 1개 이상 넣어주세요.")
 
     points_text = "\n".join(f"- {p}" for p in key_points)
+    opening_style = random.choice(OPENING_STYLES)
 
     prompt = f"""아래 정보로 블로그 글 초안을 써줘.
 
@@ -49,6 +61,9 @@ def draft_post(topic, key_points, personal_take=""):
 4. 본문 — 첫 문단에 핵심 주제(키워드)가 자연스럽게 드러나야 해
    (검색엔진이 이 글이 뭘 다루는지 바로 알 수 있게. 단, 키워드를
    부자연스럽게 욱여넣지는 마).
+   도입부 스타일: {opening_style}
+   "요즘 홈쇼핑을 보면/둘러보면 ~가 많이 보인다" 식의 트렌드 관찰형
+   오프닝은 이미 여러 번 써서 패턴이 됐으니 이번엔 절대 쓰지 마.
    - 소제목이 들어가는 줄은 맨 앞에 [소제목]을 붙여줘
      (예: [소제목] 균주명 없는 표시, 뭐가 문제인가). 소제목은 2~4개,
      자연스러운 자리에만.
