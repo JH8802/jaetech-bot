@@ -24,6 +24,7 @@ jaetech-bot/
 ├── test_threads.py    # 쓰레드 초안 생성 테스트
 ├── get_chat_id.py     # 본인 텔레그램 chat_id 확인용 헬퍼
 ├── threads_once.py    # 쓰레드 초안 1회 생성+발송 (GitHub Actions용)
+├── generate_string_session.py  # 세션을 짧은 문자열로 변환 (GitHub Secret용, 1회성)
 ├── .github/
 │   └── workflows/
 │       └── threads_draft.yml  # PC 없이 하루 3번 자동 실행 설정
@@ -126,13 +127,15 @@ python main.py
 | `TELEGRAM_API_HASH` | `.env`에 있는 값과 동일 |
 | `TELEGRAM_ADMIN_CHAT_ID` | `.env`에 있는 값과 동일 |
 | `ANTHROPIC_API_KEY` | `.env`에 있는 값과 동일 |
-| `TELETHON_SESSION_B64` | 아래 명령으로 만든 값 |
+| `TELETHON_STRING_SESSION` | 아래 스크립트로 만든 값 |
 
-2. `TELETHON_SESSION_B64` 값 만들기 — 프로젝트 폴더에서 PowerShell에 아래 명령어 입력 (클립보드에 자동 복사됨):
-```powershell
-[Convert]::ToBase64String([IO.File]::ReadAllBytes("session.session")) | Set-Clipboard
+2. `TELETHON_STRING_SESSION` 값 만들기 — 프로젝트 폴더에서:
+```bash
+python generate_string_session.py
 ```
-복사된 값을 그대로 `TELETHON_SESSION_B64` 시크릿 값 칸에 붙여넣기.
+기존 `session.session`을 그대로 활용해서 재로그인 없이 짧은 문자열 하나로 변환해줍니다. 출력된 문자열을 그대로 `TELETHON_STRING_SESSION` 시크릿 값 칸에 붙여넣기.
+
+(참고: 처음엔 `session.session` 파일 자체를 base64로 인코딩해서 통째로 시크릿에 넣으려 했으나, 45KB 파일이 6만자 넘는 base64 문자열이 되면서 GitHub Secrets에서 계속 `base64: invalid input` 오류가 발생했습니다. Telethon의 `StringSession`으로 인증 정보만 압축해서 옮기는 방식으로 바꿔 해결했습니다.)
 
 3. 6개 다 등록했으면, GitHub 저장소의 **Actions 탭** → "쓰레드 초안 발송" 워크플로우 → **Run workflow** 버튼으로 지금 바로 테스트 가능 (PC 없이 폰 브라우저로도 가능).
 

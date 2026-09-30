@@ -10,6 +10,7 @@ from datetime import datetime, timezone, timedelta
 
 from dotenv import load_dotenv
 from telethon import TelegramClient
+from telethon.sessions import StringSession
 from telegram import Bot
 
 from summarizer import select_important, summarize_for_threads, reset_api_counter
@@ -21,6 +22,7 @@ BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 ADMIN_CHAT_ID = os.getenv("TELEGRAM_ADMIN_CHAT_ID")
 API_ID = int(os.getenv("TELEGRAM_API_ID"))
 API_HASH = os.getenv("TELEGRAM_API_HASH")
+STRING_SESSION = os.getenv("TELETHON_STRING_SESSION")
 
 # main.py의 last_threads_check.json과는 별개 (GitHub Actions에서는
 # 커밋으로 상태를 남겨야 다음 실행 때도 이어서 확인 가능하기 때문에
@@ -54,7 +56,7 @@ async def main():
     last_check = get_last_check()
 
     messages = []
-    async with TelegramClient("session", API_ID, API_HASH) as client:
+    async with TelegramClient(StringSession(STRING_SESSION), API_ID, API_HASH) as client:
         for channel in CHANNELS:
             try:
                 async for message in client.iter_messages(channel, limit=30):
