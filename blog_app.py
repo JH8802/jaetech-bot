@@ -73,7 +73,11 @@ if st.button("✍️ 초안 생성", type="primary"):
         drafts, filenames = {}, {}
         for platform in platforms:
             with st.spinner(f"⏳ {platform}용 초안 생성 중..."):
-                draft = draft_post(topic, key_points, personal_take, platform=platform)
+                try:
+                    draft = draft_post(topic, key_points, personal_take, platform=platform)
+                except Exception as e:
+                    st.error(f"❌ {platform} 초안 생성 실패: {e}\n(네트워크 문제일 수 있어 — 아래 '초안 생성'을 다시 눌러봐)")
+                    continue
             drafts[platform] = draft
 
             slug = platform.replace(" ", "")

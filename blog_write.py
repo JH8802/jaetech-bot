@@ -146,7 +146,12 @@ if __name__ == "__main__":
         print(f"{'#' * 50}")
 
         print(f"\n⏳ {platform}용 초안 생성 중...\n")
-        draft = draft_post(topic, key_points, personal_take, platform=platform)
+        try:
+            draft = draft_post(topic, key_points, personal_take, platform=platform)
+        except Exception as e:
+            print(f"❌ {platform} 초안 생성 실패: {e}")
+            print("   (네트워크 문제일 수 있어 — 다음 플랫폼으로 넘어감)")
+            continue
         meta = parse_draft_metadata(draft)
 
         print_metadata(meta)
