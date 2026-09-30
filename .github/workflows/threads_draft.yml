@@ -1,0 +1,48 @@
+name: 쓰레드 초안 발송
+
+# 개인 PC를 켜두지 않아도, GitHub 서버가 대신 하루 3번 실행해줌.
+# 시간은 UTC 기준이라 한국시간(KST, UTC+9)에서 9시간을 뺀 값으로 적음.
+on:
+  schedule:
+    - cron: '0 23 * * *'  # 매일 08:00 KST
+    - cron: '0 3 * * *'   # 매일 12:00 KST
+    - cron: '3 9 * * *'   # 매일 18:03 KST
+  workflow_dispatch: {}    # GitHub 웹사이트/앱에서 "Run workflow" 버튼으로 수동 실행도 가능
+
+permissions:
+  contents: write  # threads_state.json을 다시 커밋하기 위해 필요
+
+jobs:
+  send-threads-draft:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 저장소 체크아웃
+        uses: actions/checkout@v4
+
+      - name: Python 설치
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 패키지 설치
+        run: pip install -r requirements.txt
+
+      - name: 텔레그램 세션 파일 복원
+        run: echo "${{ secrets.TELETHON_SESSION_B64 }}" | base64 -d > session.session
+
+      - name: 쓰레드 초안 생성 및 DM 발송
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
+          TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+          TELEGRAM_ADMIN_CHAT_ID: ${{ secrets.TELEGRAM_ADMIN_CHAT_ID }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: python threads_once.py
+
+      - name: 상태 파일(threads_state.json) 커밋
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add threads_state.json
+          git diff --cached --quiet || git commit -m "쓰레드 상태 업데이트"
+          git push

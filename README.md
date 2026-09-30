@@ -23,6 +23,10 @@ jaetech-bot/
 ├── test_send.py       # 수집→요약→발행 테스트
 ├── test_threads.py    # 쓰레드 초안 생성 테스트
 ├── get_chat_id.py     # 본인 텔레그램 chat_id 확인용 헬퍼
+├── threads_once.py    # 쓰레드 초안 1회 생성+발송 (GitHub Actions용)
+├── .github/
+│   └── workflows/
+│       └── threads_draft.yml  # PC 없이 하루 3번 자동 실행 설정
 ├── requirements.txt   # Python 패키지 목록
 ├── .env.example       # 환경변수 템플릿
 └── .gitignore
@@ -106,6 +110,35 @@ python main.py
 | 18:03 | 저녁 (텔레그램 채널 18:00 발행과 겹치지 않도록 3분 늦춤) |
 
 `TELEGRAM_ADMIN_CHAT_ID`를 설정해두면, 해당 시간마다 대표 소식 1건을 쓰레드용 캐주얼 톤으로 바꿔서 DM으로 보내줍니다. 마지막 해시태그 옆에 `(호재)` / `(악재)` / `(중립)` 태그가 붙어 있으니, 이걸 보고 어울리는 마스코트 이미지를 골라 직접 쓰레드에 게시하면 됩니다.
+
+### PC를 꺼둬도 쓰레드 초안 받기 (GitHub Actions)
+
+`main.py`는 실행 중인 동안에만 동작하지만, 쓰레드 초안 기능만큼은 **GitHub Actions**를 이용해 PC 전원과 무관하게 하루 3번(08:00 / 12:00 / 18:03 KST) 자동 실행되도록 만들어뒀습니다 (`.github/workflows/threads_draft.yml`, 실행 스크립트는 `threads_once.py`). GitHub 서버가 대신 실행해주는 방식이라 PC를 꺼도, 회사에 있어도 그대로 동작합니다.
+
+**설정 방법 (최초 1회만, PC 필요)**
+
+1. GitHub 저장소 페이지 → Settings → Secrets and variables → Actions → "New repository secret"에서 아래 6개를 각각 등록:
+
+| Secret 이름 | 값 |
+|---|---|
+| `TELEGRAM_BOT_TOKEN` | `.env`에 있는 값과 동일 |
+| `TELEGRAM_API_ID` | `.env`에 있는 값과 동일 |
+| `TELEGRAM_API_HASH` | `.env`에 있는 값과 동일 |
+| `TELEGRAM_ADMIN_CHAT_ID` | `.env`에 있는 값과 동일 |
+| `ANTHROPIC_API_KEY` | `.env`에 있는 값과 동일 |
+| `TELETHON_SESSION_B64` | 아래 명령으로 만든 값 |
+
+2. `TELETHON_SESSION_B64` 값 만들기 — 프로젝트 폴더에서 PowerShell에 아래 명령어 입력 (클립보드에 자동 복사됨):
+```powershell
+[Convert]::ToBase64String([IO.File]::ReadAllBytes("session.session")) | Set-Clipboard
+```
+복사된 값을 그대로 `TELETHON_SESSION_B64` 시크릿 값 칸에 붙여넣기.
+
+3. 6개 다 등록했으면, GitHub 저장소의 **Actions 탭** → "쓰레드 초안 발송" 워크플로우 → **Run workflow** 버튼으로 지금 바로 테스트 가능 (PC 없이 폰 브라우저로도 가능).
+
+설정은 한 번만 하면 되고, 그 이후로는 PC를 계속 꺼둬도 GitHub가 알아서 하루 3번 실행해줍니다.
+
+**주의**: PC에서 `main.py`도 동시에 켜두면 같은 시간대에 쓰레드 초안이 중복으로 올 수 있습니다. GitHub Actions를 쓰기로 했다면 `main.py`는 텔레그램 채널 발행 용도로만 쓰고, 쓰레드 초안은 GitHub Actions 쪽에 맡기는 것을 권장합니다.
 
 ## 발행 메시지 형식
 
