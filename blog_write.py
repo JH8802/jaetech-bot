@@ -2,10 +2,9 @@
 사용법: python blog_write.py
 
 주제를 입력하면 관련 브레인스토밍 질문을 먼저 보여주고,
-사실/의견을 입력받아 초안을 만든 뒤 자동 점검까지 돌려서
-drafts/ 폴더에 파일로 저장한다. 초안 자체는 네이버/티스토리/워드프레스
-어디든 똑같이 쓸 수 있고, 발행할 곳을 고르면 붙여넣은 뒤 뭘 해야
-하는지(제목 처리, ALT 입력 위치 등)만 그에 맞게 안내해준다.
+사실/의견을 입력받아 선택한 플랫폼마다 따로 초안을 만든 뒤(네이버/
+티스토리/워드프레스는 문체·소제목 밀도·사진 개수가 실제로 다르게 나옴)
+자동 점검까지 돌려서 drafts/ 폴더에 파일로 저장한다.
 """
 from blog_drafter import draft_post, suggest_questions
 from blog_reviewer import scan_cliches, scan_structure, review_draft, AI_REVIEW_LABELS
@@ -37,9 +36,8 @@ def print_metadata(meta):
     print(f"  메타설명: {meta['meta_description']}")
 
 
-def print_platform_guide(platforms, meta):
-    if "네이버 블로그" in platforms:
-        print("\n[네이버 블로그]")
+def print_platform_guide(platform, meta):
+    if platform == "네이버 블로그":
         print(f"  - 제목란에 위 제목 그대로")
         print(f"  - 카테고리: {meta['category']} 선택(또는 생성)")
         print(f"  - 에디터 하단 태그 입력란에: {meta['tags']}")
@@ -48,8 +46,7 @@ def print_platform_guide(platforms, meta):
         print("     넣기 → 삽입한 사진 클릭 → 뜨는 툴바에서 '대체 텍스트' 클릭 → 팝업에")
         print("     ALT 문구 입력 → '업데이트'.")
 
-    if "티스토리" in platforms:
-        print("\n[티스토리]")
+    elif platform == "티스토리":
         print(f"  - 제목란에 위 제목 그대로")
         print(f"  - 카테고리: {meta['category']} 선택(또는 생성)")
         print(f"  - 에디터 하단 태그 입력란에: {meta['tags']}")
@@ -58,8 +55,7 @@ def print_platform_guide(platforms, meta):
         print("     클릭 → 뜨는 도구모음에서 대체 텍스트 아이콘 클릭 → 팝업에 ALT 문구")
         print("     입력 → 확인.")
 
-    if "워드프레스" in platforms:
-        print("\n[워드프레스]")
+    elif platform == "워드프레스":
         print(f"  - 제목란에 위 제목 그대로")
         print(f"  - 카테고리: {meta['category']}")
         print(f"  - 태그: {meta['tags']}")
@@ -142,23 +138,31 @@ if __name__ == "__main__":
 
     personal_take = input("\n본인 의견/입장 (없으면 그냥 엔터): ").strip()
 
-    print("\n⏳ 초안 생성 중...\n")
-    draft = draft_post(topic, key_points, personal_take)
-    meta = parse_draft_metadata(draft)
-
-    print_metadata(meta)
-    print("\n📄 본문")
-    print("=" * 50)
-    print(meta["body"])
-    print("=" * 50)
-    print(f"\n[본문 글자 수: {len(meta['body'])}자]")
-
-    print_review(draft)
-
     os.makedirs("drafts", exist_ok=True)
-    filename = f"drafts/{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
-    with open(filename, "w", encoding="utf-8") as f:
-        f.write(f"주제: {topic}\n\n{draft}")
 
-    print(f"\n💾 저장됨: {filename}")
-    print_platform_guide(platforms, meta)
+    for platform in platforms:
+        print(f"\n{'#' * 50}")
+        print(f"# {platform}")
+        print(f"{'#' * 50}")
+
+        print(f"\n⏳ {platform}용 초안 생성 중...\n")
+        draft = draft_post(topic, key_points, personal_take, platform=platform)
+        meta = parse_draft_metadata(draft)
+
+        print_metadata(meta)
+        print("\n📄 본문")
+        print("=" * 50)
+        print(meta["body"])
+        print("=" * 50)
+        print(f"\n[본문 글자 수: {len(meta['body'])}자]")
+
+        print_review(draft)
+
+        slug = platform.replace(" ", "")
+        filename = f"drafts/{datetime.now().strftime('%Y%m%d_%H%M%S')}_{slug}.txt"
+        with open(filename, "w", encoding="utf-8") as f:
+            f.write(f"주제: {topic}\n플랫폼: {platform}\n\n{draft}")
+
+        print(f"\n💾 저장됨: {filename}")
+        print(f"\n📌 발행 체크리스트 [{platform}]")
+        print_platform_guide(platform, meta)
