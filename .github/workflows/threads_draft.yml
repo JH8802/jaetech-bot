@@ -15,6 +15,7 @@ permissions:
 jobs:
   send-threads-draft:
     runs-on: ubuntu-latest
+    timeout-minutes: 10  # 이 시간 넘으면 자동 실패 처리 (무한정 멈춰있는 것 방지)
     steps:
       - name: 저장소 체크아웃
         uses: actions/checkout@v4
@@ -23,6 +24,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          cache: 'pip'  # 다음 실행부터는 패키지 재다운로드 없이 캐시로 빠르게
 
       - name: 패키지 설치
         run: pip install -r requirements.txt
