@@ -29,11 +29,11 @@ if st.button("🔄 새로 시작"):
 
 st.divider()
 
-platform_label = st.radio(
-    "어디에 발행할 거야?",
-    ["네이버 블로그 / 티스토리", "워드프레스", "둘 다"],
+platforms = st.multiselect(
+    "어디에 발행할 거야? (여러 개 선택 가능)",
+    ["네이버 블로그", "티스토리", "워드프레스"],
+    default=["네이버 블로그"],
 )
-platform_choice = {"네이버 블로그 / 티스토리": "1", "워드프레스": "2", "둘 다": "3"}[platform_label]
 
 topic = st.text_input("주제", placeholder="예: 홈쇼핑 유산균 표시광고, 뭐가 문제인가")
 
@@ -90,7 +90,7 @@ if st.session_state.draft:
         st.text_input("카테고리", meta["category"])
     with col2:
         st.text_input("태그 (쉼표로 구분)", meta["tags"])
-    if platform_choice in ("2", "3"):
+    if "워드프레스" in platforms:
         st.text_area("메타 설명 (워드프레스 SEO 플러그인의 '메타 설명' 칸에)", meta["meta_description"], height=70)
     else:
         with st.expander("메타 설명 (참고용 — 네이버/티스토리는 보통 안 씀)"):
@@ -123,7 +123,9 @@ if st.session_state.draft:
 
     st.divider()
     st.subheader("📌 발행 체크리스트")
-    if platform_choice in ("1", "3"):
+    if not platforms:
+        st.warning("위에서 발행할 곳을 하나 이상 선택해줘.")
+    if "네이버 블로그" in platforms:
         st.info(
             "**네이버 블로그**\n\n"
             f"- 제목란에 위 제목 그대로 붙여넣기\n"
@@ -134,6 +136,7 @@ if st.session_state.draft:
             "사진 삽입 버튼으로 이미지 넣기 → 삽입한 사진을 클릭하면 뜨는 툴바에서 "
             "'대체 텍스트' 클릭 → 팝업에 안내된 ALT 문구 입력 → '업데이트'."
         )
+    if "티스토리" in platforms:
         st.info(
             "**티스토리**\n\n"
             f"- 제목란에 위 제목 그대로 붙여넣기\n"
@@ -145,7 +148,7 @@ if st.session_state.draft:
             "팝업에 안내된 ALT 문구 입력 → 확인. (HTML 모드로 바꾸면 "
             "`<img alt=\"...\">`로 직접 넣는 것도 가능하지만, 위 방법이 더 쉬움)"
         )
-    if platform_choice in ("2", "3"):
+    if "워드프레스" in platforms:
         st.info(
             "**워드프레스**\n\n"
             f"- 제목란에 위 제목 그대로\n"

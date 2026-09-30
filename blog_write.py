@@ -14,13 +14,19 @@ from datetime import datetime
 import os
 
 
-def choose_platform():
-    print("\n어디에 발행할 거야?")
-    print("  1) 네이버 블로그 / 티스토리")
-    print("  2) 워드프레스")
-    print("  3) 둘 다 (같은 초안으로 각각 발행)")
-    choice = input("선택: ").strip()
-    return choice if choice in ("1", "2", "3") else "1"
+PLATFORM_OPTIONS = {"1": "네이버 블로그", "2": "티스토리", "3": "워드프레스"}
+
+
+def choose_platforms():
+    print("\n어디에 발행할 거야? (여러 개면 쉼표로, 예: 1,2)")
+    print("  1) 네이버 블로그")
+    print("  2) 티스토리")
+    print("  3) 워드프레스")
+    raw = input("선택: ").strip()
+    codes = [c.strip() for c in raw.split(",") if c.strip() in PLATFORM_OPTIONS]
+    if not codes:
+        codes = ["1"]
+    return [PLATFORM_OPTIONS[c] for c in codes]
 
 
 def print_metadata(meta):
@@ -31,8 +37,8 @@ def print_metadata(meta):
     print(f"  메타설명: {meta['meta_description']}")
 
 
-def print_platform_guide(choice, meta):
-    if choice in ("1", "3"):
+def print_platform_guide(platforms, meta):
+    if "네이버 블로그" in platforms:
         print("\n[네이버 블로그]")
         print(f"  - 제목란에 위 제목 그대로")
         print(f"  - 카테고리: {meta['category']} 선택(또는 생성)")
@@ -42,6 +48,7 @@ def print_platform_guide(choice, meta):
         print("     넣기 → 삽입한 사진 클릭 → 뜨는 툴바에서 '대체 텍스트' 클릭 → 팝업에")
         print("     ALT 문구 입력 → '업데이트'.")
 
+    if "티스토리" in platforms:
         print("\n[티스토리]")
         print(f"  - 제목란에 위 제목 그대로")
         print(f"  - 카테고리: {meta['category']} 선택(또는 생성)")
@@ -50,7 +57,8 @@ def print_platform_guide(choice, meta):
         print("     사진 삽입+ALT: [사진/그래프/지도 제안] 자리에서 사진 첨부 → 삽입한 사진")
         print("     클릭 → 뜨는 도구모음에서 대체 텍스트 아이콘 클릭 → 팝업에 ALT 문구")
         print("     입력 → 확인.")
-    if choice in ("2", "3"):
+
+    if "워드프레스" in platforms:
         print("\n[워드프레스]")
         print(f"  - 제목란에 위 제목 그대로")
         print(f"  - 카테고리: {meta['category']}")
@@ -115,7 +123,7 @@ def print_review(draft):
 if __name__ == "__main__":
     print("=== 블로그 초안 생성 === (주제는 뭐든 상관없음)")
 
-    platform_choice = choose_platform()
+    platforms = choose_platforms()
 
     topic = input("\n주제: ").strip()
 
@@ -153,4 +161,4 @@ if __name__ == "__main__":
         f.write(f"주제: {topic}\n\n{draft}")
 
     print(f"\n💾 저장됨: {filename}")
-    print_platform_guide(platform_choice, meta)
+    print_platform_guide(platforms, meta)
