@@ -30,7 +30,9 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: 텔레그램 세션 파일 복원
-        run: echo "${{ secrets.TELETHON_SESSION_B64 }}" | base64 -d > session.session
+        env:
+          SESSION_B64: ${{ secrets.TELETHON_SESSION_B64 }}
+        run: echo "$SESSION_B64" | base64 -d > session.session
 
       - name: 쓰레드 초안 생성 및 DM 발송
         env:
