@@ -7,6 +7,9 @@ import asyncio
 import json
 import os
 from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
+
+KST = ZoneInfo("Asia/Seoul")
 
 from dotenv import load_dotenv
 from telethon import TelegramClient
@@ -45,7 +48,7 @@ def save_last_check():
 
 
 async def main():
-    print(f"🧵 쓰레드 초안 생성 시작... ({datetime.now().strftime('%Y-%m-%d %H:%M')})")
+    print(f"🧵 쓰레드 초안 생성 시작... ({datetime.now(KST).strftime('%Y-%m-%d %H:%M')} KST)")
 
     if not ADMIN_CHAT_ID:
         print("⚠️ TELEGRAM_ADMIN_CHAT_ID가 설정되지 않았습니다. (GitHub Secrets 확인)")
@@ -87,7 +90,7 @@ async def main():
     if draft:
         await bot.send_message(
             chat_id=ADMIN_CHAT_ID,
-            text=f"🧵 쓰레드 초안 ({datetime.now().strftime('%H:%M')})\n\n{draft}"
+            text=f"🧵 쓰레드 초안 ({datetime.now(KST).strftime('%H:%M')})\n\n{draft}"
         )
         print(f"✅ 쓰레드 초안 전송 완료: {pick['channel']}")
     else:
