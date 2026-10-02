@@ -23,6 +23,10 @@ VAT = 1.1
 # 부자재 분류 (기존 엑셀의 컬럼과 동일)
 CATEGORIES = {"pack": "포장지", "split": "소분비", "box": "박스비"}
 
+# 계산 방식 (이력·엑셀 표시용)
+MODE_AUTO = "자동 계산"
+MODE_FIXED = "납품가 직접 지정"
+
 # 납품가 반올림 방식
 ROUNDING = {
     "round": "1원 단위 반올림",
@@ -37,6 +41,11 @@ class IngredientLine:
     ratio: float              # 구성비 (0.35 = 35%)
     price_per_kg: float       # 벌크단가 (원/kg)
     loss_rate: float = 0.0    # 로스율 (0.05 = 5%)
+    # --- 이력 추적용 (계산에는 쓰이지 않음) ---
+    origin: str = ""          # 원산지
+    supplier: str = ""        # 공급처
+    price_date: str = ""      # 단가 기준일 (원료 마스터 최신 단가의 적용일)
+    price_source: str = ""    # '마스터 최신단가' / '제품 직접입력'
 
 
 @dataclass
@@ -94,6 +103,10 @@ class QuoteResult:
         return asdict(self)
 
 
+def calc_mode(q: QuoteInput) -> str:
+    return MODE_FIXED if q.fixed_price is not None else MODE_AUTO
+
+
 def apply_rounding(value: float, mode: str) -> float:
     value = round(value, 6)
     if mode == "round":
@@ -129,6 +142,8 @@ def calculate(q: QuoteInput) -> QuoteResult:
             "name": i.name, "ratio": i.ratio, "unit_g": unit_g,
             "price_per_kg": i.price_per_kg, "cost": cost,
             "loss_rate": i.loss_rate, "loss": loss,
+            "origin": i.origin, "supplier": i.supplier,
+            "price_date": i.price_date, "price_source": i.price_source,
         })
     materials_cost = sum(r["cost"] for r in ingredient_rows)
     loss_cost = sum(r["loss"] for r in ingredient_rows)

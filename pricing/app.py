@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import os
 import sys
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -12,8 +12,10 @@ import pandas as pd
 import streamlit as st
 
 from pricing import db, importer
-from pricing.engine import CATEGORIES, ROUNDING, calculate
-from pricing.export import quotes_to_xlsx
+from pricing.compare import compare_quotes
+from pricing.engine import (CATEGORIES, MODE_AUTO, MODE_FIXED, ROUNDING, calc_mode,
+                            calculate)
+from pricing.export import compare_to_xlsx, quotes_list_to_xlsx, quotes_to_xlsx
 
 st.set_page_config(page_title="납품가 산출", page_icon="🥜", layout="wide")
 db.init_db()
@@ -46,6 +48,8 @@ def pct(v: float) -> str:
 
 
 def show_result(q, r):
+    st.markdown(f"계산 방식: **{calc_mode(q)}**"
+                + (f" · 지정 납품가 {won(q.fixed_price)}" if q.fixed_price is not None else ""))
     c = st.columns(4)
     c[0].metric("납품가", won(r.price))
     c[1].metric("원가합계", won(r.total_cost))
@@ -60,7 +64,10 @@ def show_result(q, r):
         st.dataframe(pd.DataFrame([{
             "원료": x["name"], "구성비": pct(x["ratio"]), "단위중량(g)": round(x["unit_g"], 2),
             "벌크단가": f'{x["price_per_kg"]:,.0f}', "원물가": f'{x["cost"]:,.1f}',
-            "로스율": pct(x["loss_rate"]), "로스": f'{x["loss"]:,.1f}'} for x in r.ingredient_rows]),
+            "로스율": pct(x["loss_rate"]), "로스": f'{x["loss"]:,.1f}',
+            "원산지": x.get("origin", ""), "공급처": x.get("supplier", ""),
+            "단가기준일": x.get("price_date", ""), "단가출처": x.get("price_source", "")}
+            for x in r.ingredient_rows]),
             hide_index=True, width="stretch")
         st.markdown("**부자재**")
         st.dataframe(pd.DataFrame([{
@@ -99,13 +106,15 @@ def page_quote():
     show_result(q, r)
 
     st.divider()
-    c1, c2 = st.columns([1, 2])
-    who = c1.text_input("작성자", key="who")
-    memo = c2.text_input("메모 (예: 아몬드 단가 인상 반영)")
+    who = st.session_state.get("who", "").strip()
+    memo = st.text_input("메모 (예: 아몬드 단가 인상 반영)")
     b1, b2, b3 = st.columns(3)
     if b1.button("💾 견적 이력에 저장"):
-        qid = db.save_quote(q, r, who, memo)
-        st.success(f"견적 #{qid} 저장됨 (그 시점의 단가·규칙이 그대로 보존됩니다)")
+        if not who:
+            st.error("왼쪽 사이드바에 '작성자(내 이름)'를 먼저 입력하세요 (누가 만든 견적인지 이력에 남깁니다)")
+        else:
+            qid = db.save_quote(q, r, who, memo)
+            st.success(f"견적 #{qid} 저장됨 — 작성자 {who} · {calc_mode(q)} (그 시점의 단가·규칙이 그대로 보존됩니다)")
     b2.download_button("⬇ 원가표 엑셀 (사내용)", quotes_to_xlsx([(q, r)], True),
                        f"원가표_{q.product_name}_{date.today()}.xlsx")
     b3.download_button("⬇ 납품가 엑셀 (거래처용)", quotes_to_xlsx([(q, r)], False),
@@ -276,25 +285,140 @@ def page_materials():
 
 
 # ---------- 페이지: 견적 이력 ----------
+def _quote_label(item) -> str:
+    q, r, m = item
+    return f"#{m['id']} · {m['created_at']} · {q.product_name} · {r.price:,.0f}원 · {m['created_by'] or '-'} · {m['mode']}"
+
+
+def _fmt_num(v, rate=False):
+    if v is None:
+        return ""
+    return f"{v * 100:.1f}%" if rate else f"{v:,.1f}"
+
+
+def _show_compare(a, b):
+    c = compare_quotes(a, b)
+    if not c["same_product"]:
+        st.warning("서로 다른 제품의 견적입니다. 제품이 같을 때 비교가 가장 의미 있어요.")
+    st.subheader(c["headline"])
+    st.caption(f"A(기준) #{c['meta_a']['id']} {c['meta_a']['created_at']} [{c['meta_a']['mode']}]  →  "
+               f"B(비교) #{c['meta_b']['id']} {c['meta_b']['created_at']} [{c['meta_b']['mode']}]")
+    if c["drivers"]:
+        st.markdown("**직접원가 변동 요인 (영향 큰 순)**")
+        for i, t in enumerate(c["drivers"][:8], 1):
+            st.markdown(f"{i}. {t}")
+    else:
+        st.info("원가 구성에 차이가 없습니다.")
+
+    st.markdown("**항목별 비교**")
+    rows = []
+    for r in c["summary"]:
+        rate = r["항목"] == "실질 마진율"
+        rows.append({"항목": r["항목"], "A": _fmt_num(r["A"], rate), "B": _fmt_num(r["B"], rate),
+                     "차이": (f"{r['차이'] * 100:+.1f}%p" if rate else f"{r['차이']:+,.1f}"),
+                     "차이%": "" if r["차이%"] is None else f"{r['차이%'] * 100:+.1f}%"})
+    st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
+
+    st.markdown("**원료별 비교**")
+    ing = pd.DataFrame(c["ingredients"])
+    if len(ing):
+        view = pd.DataFrame({
+            "원료": ing["원료"], "상태": ing["상태"],
+            "구성비 A": ing["구성비 A"].map(lambda v: _fmt_num(v, True)),
+            "구성비 B": ing["구성비 B"].map(lambda v: _fmt_num(v, True)),
+            "단가 A": ing["단가 A"].map(_fmt_num), "단가 B": ing["단가 B"].map(_fmt_num),
+            "단가기준일 A": ing["단가기준일 A"], "단가기준일 B": ing["단가기준일 B"],
+            "원물가+로스 A": ing["원물가+로스 A"].map(_fmt_num), "원물가+로스 B": ing["원물가+로스 B"].map(_fmt_num),
+            "차이": ing["차이"].map(lambda v: f"{v:+,.1f}")})
+        st.dataframe(view, hide_index=True, width="stretch")
+    st.markdown("**부자재별 비교**")
+    mat = pd.DataFrame(c["materials"])
+    if len(mat):
+        st.dataframe(pd.DataFrame({"부자재": mat["부자재"], "분류": mat["분류"], "상태": mat["상태"],
+                                   "A": mat["A"].map(_fmt_num), "B": mat["B"].map(_fmt_num),
+                                   "차이": mat["차이"].map(lambda v: f"{v:+,.1f}")}),
+                     hide_index=True, width="stretch")
+    st.markdown("**적용 규칙 비교** (● = 서로 다름)")
+    st.dataframe(pd.DataFrame(c["rules"]), hide_index=True, width="stretch")
+    st.download_button("⬇ 비교 결과 엑셀", compare_to_xlsx(c),
+                       f"견적비교_{c['meta_a']['id']}_vs_{c['meta_b']['id']}.xlsx")
+
+
 def page_history():
     st.header("견적 이력")
-    qs = db.list_quotes()
-    if not qs:
-        st.info("저장된 견적이 없습니다.")
+    opts = db.quote_filter_options()
+    if not opts["products"]:
+        st.info("저장된 견적이 없습니다. '견적 계산' 화면에서 '견적 이력에 저장'을 누르면 쌓입니다.")
         return
-    df = pd.DataFrame(qs).rename(columns={"id": "번호", "created_at": "일시", "created_by": "작성자",
-                                          "product_name": "제품", "price": "납품가", "memo": "메모"})
-    st.dataframe(df, hide_index=True, width="stretch")
-    qid = st.selectbox("상세 볼 견적 번호", [x["id"] for x in qs])
-    q, r, row = db.load_quote(qid)
-    st.caption(f"{row['created_at']} · {row['created_by']} · {row['memo']}")
-    show_result(q, r)
-    c1, c2, c3 = st.columns(3)
-    c1.download_button("⬇ 원가표 엑셀", quotes_to_xlsx([(q, r)], True), f"견적{qid}_원가표.xlsx")
-    c2.download_button("⬇ 납품가 엑셀", quotes_to_xlsx([(q, r)], False), f"견적{qid}_납품가.xlsx")
-    if c3.button("🗑 이 견적 삭제"):
-        db.delete_quote(qid)
-        st.rerun()
+    tab_list, tab_cmp, tab_log = st.tabs(["📋 목록 · 상세", "⚖ 두 견적 비교", "🗂 삭제·권한 기록"])
+    who = st.session_state.get("who", "").strip()
+
+    with tab_list:
+        today = date.today()
+        f = st.columns([2, 2, 2, 2])
+        rng = f[0].date_input("기간", value=(today - timedelta(days=90), today))
+        sel_prod = f[1].multiselect("제품", opts["products"])
+        sel_user = f[2].multiselect("작성자", opts["users"])
+        sel_mode = f[3].multiselect("계산 방식", [MODE_AUTO, MODE_FIXED])
+        d_from = d_to = None
+        if isinstance(rng, (tuple, list)):
+            d_from = rng[0].isoformat() if len(rng) > 0 else None
+            d_to = rng[1].isoformat() if len(rng) > 1 else None
+        items = db.search_quotes(d_from, d_to, sel_prod or None, sel_user or None, sel_mode or None)
+        if not items:
+            st.info("조건에 맞는 견적이 없습니다. 기간을 넓혀 보세요.")
+        else:
+            st.dataframe(pd.DataFrame([{
+                "번호": m["id"], "일시": m["created_at"], "작성자": m["created_by"], "제품": q.product_name,
+                "계산방식": m["mode"], "원가합계": round(r.total_cost), "납품가": round(r.price),
+                "실질마진율": pct(r.effective_margin_rate), "경고": "⚠" if r.warnings else "",
+                "메모": m["memo"]} for q, r, m in items]), hide_index=True, width="stretch")
+            st.download_button(f"⬇ 이력 목록 전체 엑셀 ({len(items)}건 · 원료/부자재 상세 포함)",
+                               quotes_list_to_xlsx(items), f"견적이력_{today}.xlsx")
+
+            st.divider()
+            item = st.selectbox("상세 볼 견적", items, format_func=_quote_label)
+            q, r, m = item
+            st.caption(f"견적 #{m['id']} · {m['created_at']} · 작성자 {m['created_by'] or '-'} · 메모: {m['memo'] or '-'}")
+            show_result(q, r)
+            c1, c2, c3 = st.columns(3)
+            c1.download_button("⬇ 원가표 엑셀 (사내용)", quotes_to_xlsx([(q, r, m)], True), f"견적{m['id']}_원가표.xlsx")
+            c2.download_button("⬇ 납품가 엑셀 (거래처용)", quotes_to_xlsx([(q, r, m)], False), f"견적{m['id']}_납품가.xlsx")
+            with c3:
+                if not db.get_settings()["allow_quote_delete"]:
+                    st.button("🔒 삭제 잠금 상태", disabled=True,
+                              help="설정 메뉴의 '견적 이력 보호'에서 허용해야 삭제할 수 있습니다")
+                else:
+                    sure = st.checkbox("정말 삭제합니다", key=f"sure_{m['id']}")
+                    if st.button("🗑 이 견적 삭제", disabled=not sure):
+                        if not who:
+                            st.error("사이드바에 작성자(내 이름)를 입력하세요 (삭제 기록에 남습니다)")
+                        else:
+                            db.delete_quote(m["id"], user=who)
+                            st.rerun()
+
+    with tab_cmp:
+        allq = db.search_quotes(limit=300)
+        if len(allq) < 2:
+            st.info("비교하려면 저장된 견적이 2건 이상 필요합니다.")
+        else:
+            st.caption("A = 기준(예: 지난달 견적), B = 비교 대상(예: 이번 달 견적). 같은 제품끼리 비교하면 가장 유용합니다.")
+            ca, cb = st.columns(2)
+            a = ca.selectbox("A (기준)", allq, index=1, format_func=_quote_label, key="cmp_a")
+            b = cb.selectbox("B (비교 대상)", allq, index=0, format_func=_quote_label, key="cmp_b")
+            if a[2]["id"] == b[2]["id"]:
+                st.warning("서로 다른 견적을 선택하세요.")
+            else:
+                _show_compare(a, b)
+
+    with tab_log:
+        st.caption("견적 삭제와 '삭제 허용' 설정 변경 기록입니다. (삭제된 견적의 제품·납품가·작성자가 남습니다)")
+        log = db.list_audit()
+        if log:
+            st.dataframe(pd.DataFrame(log).rename(columns={"at": "일시", "user": "실행자", "action": "작업",
+                                                           "detail": "내용"}), hide_index=True, width="stretch")
+        else:
+            st.info("기록이 없습니다.")
 
 
 # ---------- 페이지: 설정 ----------
@@ -319,6 +443,25 @@ def page_settings():
         st.success("저장되었습니다")
     st.info("납품가 = 직접원가 ÷ (1 − 판관비% − 마진% − 물류비%[×1.1])  — "
             "납품가를 기준으로 하는 % 항목이라 한 번에 역산합니다.")
+
+    st.divider()
+    st.subheader("견적 이력 보호")
+    st.caption("기본은 '삭제 잠금'입니다. 잠겨 있으면 견적 이력을 지울 수 없고, 허용 후 삭제하면 삭제 기록이 남습니다.")
+    allow = st.checkbox("견적 이력 삭제 허용", s["allow_quote_delete"])
+    admin_env = os.environ.get("PRICING_ADMIN_PASSWORD", "")
+    admin_in = st.text_input("관리자 비밀번호", type="password") if admin_env else ""
+    if st.button("🔐 보호 설정 저장"):
+        if allow == s["allow_quote_delete"]:
+            st.info("변경된 내용이 없습니다")
+        elif admin_env and admin_in != admin_env:
+            st.error("관리자 비밀번호가 틀렸습니다")
+        else:
+            db.save_settings({"allow_quote_delete": allow})
+            db.log_audit("삭제 허용 설정 변경", "허용" if allow else "잠금", st.session_state.get("who", ""))
+            st.success("저장되었습니다")
+    if not admin_env:
+        st.caption("⚠ 관리자 비밀번호(PRICING_ADMIN_PASSWORD)가 설정되어 있지 않아 누구나 이 잠금을 풀 수 있습니다. "
+                   "여러 명이 쓸 때는 run_shared.bat 실행 시 관리자 비밀번호를 입력하세요.")
     st.caption(f"DB 파일 위치: {db.DB_PATH}")
 
 
@@ -389,5 +532,6 @@ PAGES = {"견적 계산": page_quote, "제품 관리": page_products, "원료 �
 
 if check_password():
     st.sidebar.title("🥜 납품가 산출")
+    st.sidebar.text_input("작성자 (내 이름)", key="who", help="견적 저장·삭제 기록에 남는 이름입니다")
     page = st.sidebar.radio("메뉴", list(PAGES))
     PAGES[page]()
