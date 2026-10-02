@@ -8,7 +8,7 @@ import json
 import os
 import sqlite3
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
 from .engine import (IngredientLine, MaterialLine, QuoteInput, QuoteResult,
@@ -324,3 +324,130 @@ def delete_quote(quote_id: int) -> None:
 def calculate_quote(product_id: int, fixed_price: float | None = None):
     q = build_quote_input(product_id, fixed_price=fixed_price)
     return q, calculate(q)
+
+
+# ---------------- 엑셀 일괄 등록 ----------------
+_ING_FIELDS = ("origin", "supplier", "loss_moisture", "loss_split", "loss_sorting")
+_ING_LABEL = {"origin": "원산지", "supplier": "공급처", "loss_moisture": "수분loss",
+              "loss_split": "소분loss", "loss_sorting": "선별loss"}
+
+
+def _n(x: float) -> str:
+    return f"{x:,.0f}" if float(x).is_integer() else f"{x:,.2f}"
+
+
+def _fmt_field(f: str, v) -> str:
+    if f.startswith("loss"):
+        return f"{(v or 0) * 100:.2f}%"
+    return str(v) if v else "(없음)"
+
+
+def _same(a, b) -> bool:
+    if isinstance(a, str) or isinstance(b, str):
+        return (a or "") == (b or "")
+    return abs((a or 0.0) - (b or 0.0)) < 1e-9
+
+
+def _apply_ingredient(con, row: dict, today: str) -> dict:
+    name = row["name"]
+    out = {"kind": "원료", "name": name, "src": row.get("src", "")}
+    try:
+        cur = con.execute("SELECT * FROM ingredients WHERE name=?", (name,)).fetchone()
+        notes = []
+        if cur is None:
+            vals = {f: (row.get(f) if row.get(f) is not None else ("" if f in ("origin", "supplier") else 0.0))
+                    for f in _ING_FIELDS}
+            cid = con.execute(
+                """INSERT INTO ingredients(name,origin,supplier,loss_moisture,loss_split,loss_sorting)
+                   VALUES(?,?,?,?,?,?)""",
+                (name, vals["origin"], vals["supplier"], vals["loss_moisture"],
+                 vals["loss_split"], vals["loss_sorting"])).lastrowid
+            status = "신규"
+            notes.append("원료 신규")
+        else:
+            cid, status = cur["id"], "변경없음"
+            for f in _ING_FIELDS:
+                v = row.get(f)
+                if v is None or _same(v, cur[f]):
+                    continue
+                con.execute(f"UPDATE ingredients SET {f}=? WHERE id=?", (v, cid))
+                notes.append(f"{_ING_LABEL[f]} {_fmt_field(f, cur[f])}→{_fmt_field(f, v)}")
+                status = "수정"
+
+        price = row.get("price")
+        if price is not None:
+            given = row.get("date")
+            d = given or today
+            last = con.execute("""SELECT price_per_kg, effective_date FROM ingredient_prices
+                                  WHERE ingredient_id=? ORDER BY effective_date DESC, id DESC LIMIT 1""",
+                               (cid,)).fetchone()
+            dup = con.execute("""SELECT 1 FROM ingredient_prices WHERE ingredient_id=?
+                                 AND effective_date=? AND ABS(price_per_kg-?)<1e-9""",
+                              (cid, d, price)).fetchone()
+            unchanged = last is not None and _same(last["price_per_kg"], price) and d >= last["effective_date"]
+            if not dup and not unchanged:
+                con.execute("""INSERT INTO ingredient_prices(ingredient_id,price_per_kg,effective_date,memo)
+                               VALUES(?,?,?,?)""", (cid, price, d, row.get("memo") or ""))
+                old = "" if last is None else f"{_n(last['price_per_kg'])}→"
+                notes.append(f"단가 {old}{_n(price)} ({d})")
+                if status == "변경없음":
+                    status = "수정"
+        out.update(status=status, detail=" / ".join(notes) or "변경 없음")
+    except Exception as e:
+        out.update(status="오류", detail=str(e))
+    return out
+
+
+def _apply_material(con, row: dict) -> dict:
+    name = row["name"]
+    out = {"kind": "부자재", "name": name, "src": row.get("src", "")}
+    try:
+        cur = con.execute("SELECT * FROM materials WHERE name=?", (name,)).fetchone()
+        notes = []
+        if cur is None:
+            if not row.get("category"):
+                raise ValueError("신규 부자재는 '분류'(포장지/소분비/박스비)가 필요합니다")
+            price = row.get("unit_price")
+            con.execute("""INSERT INTO materials(name,category,unit_price,loss_rate,memo)
+                           VALUES(?,?,?,?,?)""",
+                        (name, row["category"], price or 0.0, row.get("loss_rate") or 0.0,
+                         row.get("memo") or ""))
+            status = "신규"
+            notes.append("부자재 신규" + ("" if price is not None else " (단가 미입력 → 0)"))
+        else:
+            status = "변경없음"
+            for f, label in (("category", "분류"), ("unit_price", "단가"),
+                             ("loss_rate", "loss"), ("memo", "메모")):
+                v = row.get(f)
+                if v is None or _same(v, cur[f]):
+                    continue
+                con.execute(f"UPDATE materials SET {f}=? WHERE id=?", (v, cur["id"]))
+                if f == "unit_price":
+                    notes.append(f"단가 {_n(cur[f])}→{_n(v)}")
+                elif f == "loss_rate":
+                    notes.append(f"loss {cur[f] * 100:.2f}%→{v * 100:.2f}%")
+                elif f == "category":
+                    notes.append(f"분류 {cur[f]}→{v}")
+                else:
+                    notes.append(label + " 변경")
+                status = "수정"
+        out.update(status=status, detail=" / ".join(notes) or "변경 없음")
+    except Exception as e:
+        out.update(status="오류", detail=str(e))
+    return out
+
+
+def bulk_apply(ingredients: list[dict], materials: list[dict], dry_run: bool = False,
+               today: str | None = None) -> list[dict]:
+    """원료/부자재를 이름 기준으로 신규 등록 또는 수정한다 (엑셀 일괄 등록용).
+    비어 있는 칸(None)은 기존 값을 그대로 둔다. 하나라도 오류가 있으면 전부 취소(rollback)."""
+    today = today or date.today().isoformat()
+    results = []
+    with connect() as con:
+        for r in ingredients:
+            results.append(_apply_ingredient(con, r, today))
+        for r in materials:
+            results.append(_apply_material(con, r))
+        if dry_run or any(r["status"] == "오류" for r in results):
+            con.rollback()
+    return results
