@@ -1,15 +1,13 @@
 name: 쓰레드 초안 발송
 
-# 개인 PC를 켜두지 않아도, GitHub 서버가 대신 하루 3번 실행해줌.
-# 시간은 UTC 기준이라 한국시간(KST, UTC+9)에서 9시간을 뺀 값으로 적음.
-# 정각(00분)은 전 세계적으로 요청이 몰려 GitHub가 지연/누락시키는 경우가
-# 많다고 공식 문서에 명시돼 있어, 일부러 애매한 분으로 분산해둠.
+# 개인 PC를 켜두지 않아도 하루 3번 실행되도록, 외부 서비스(cron-job.org)가
+# 정확한 시각(08:00/12:00/18:03 KST)에 이 워크플로우를 직접 호출해줌.
+#
+# GitHub 자체 schedule 트리거는 "best-effort"라 정각 근처에 지연·누락이
+# 잦다는 걸 실제로 여러 번 확인해서(최대 3시간 지연, 일부는 아예 누락)
+# 제거함. 외부 트리거와 중복 실행되는 것도 방지하는 목적.
 on:
-  schedule:
-    - cron: '7 23 * * *'   # 매일 08:07 KST (목표 08:00)
-    - cron: '12 3 * * *'   # 매일 12:12 KST (목표 12:00)
-    - cron: '18 9 * * *'   # 매일 18:18 KST (목표 18:03)
-  workflow_dispatch: {}    # GitHub 웹사이트/앱에서 "Run workflow" 버튼으로 수동 실행도 가능
+  workflow_dispatch: {}    # GitHub 웹사이트/앱에서 수동 실행 + cron-job.org가 API로 호출
 
 permissions:
   contents: write  # threads_state.json을 다시 커밋하기 위해 필요
