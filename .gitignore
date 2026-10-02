@@ -19,3 +19,14 @@ last_threads_check.json
 # OS 자동 생성 파일
 .DS_Store
 Thumbs.db
+
+# ---- 납품가 산출 프로그램: 원가 데이터는 절대 git에 올리지 않는다 ----
+pricing/data/
+pricing/.venv/
+pricing/tests/private/
+*.db
+*.db-wal
+*.db-shm
+*.xls
+*.xlsx
+.pytest_cache/
