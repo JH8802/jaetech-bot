@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import pandas as pd
 import streamlit as st
 
-from pricing import db
+from pricing import db, importer
 from pricing.engine import CATEGORIES, ROUNDING, calculate
 from pricing.export import quotes_to_xlsx
 
@@ -128,7 +128,7 @@ def page_products():
     st.header("제품 관리 (배합표 · 부자재)")
     ings, mats = db.list_ingredients(), db.list_materials()
     if not ings or not mats:
-        st.info("먼저 '원료 단가'와 '부자재'를 등록하세요.")
+        st.info("먼저 '원료 단가'와 '부자재'를 등록하세요. (많으면 '엑셀 일괄 등록'이 편합니다)")
         return
     products = db.list_products()
     pmap = {p["name"]: p["id"] for p in products}
@@ -322,8 +322,70 @@ def page_settings():
     st.caption(f"DB 파일 위치: {db.DB_PATH}")
 
 
+# ---------- 페이지: 엑셀 일괄 등록 ----------
+def page_bulk():
+    st.header("엑셀 일괄 등록 (원료 단가 · 부자재)")
+    st.caption("회사에서 쓰는 원료 단가표/부자재 목록을 엑셀로 한 번에 올립니다. "
+               "이름이 같으면 수정, 없으면 신규 등록이고, 빈 칸은 기존 값을 유지합니다.")
+
+    c1, c2 = st.columns(2)
+    c1.download_button("⬇ 빈 양식 받기 (.xlsx)", importer.build_workbook(), "원료_부자재_등록양식.xlsx",
+                       help="원료 / 부자재 시트가 있는 양식입니다. 작성방법 시트를 참고하세요.")
+    c2.download_button("⬇ 현재 등록된 마스터 내보내기", importer.build_workbook(
+        db.list_ingredients(), db.list_materials()), f"마스터_{date.today()}.xlsx",
+        help="내보낸 파일을 엑셀에서 고쳐서 다시 올리면 일괄 수정할 수 있습니다.")
+
+    up = st.file_uploader("엑셀 파일 선택 (.xlsx / .xls / .csv)", type=["xlsx", "xls", "csv"])
+    if up is None:
+        st.info("양식에 맞춰 작성한 파일을 올리면 '미리보기'가 나오고, 확인 후 등록할 수 있습니다. "
+                "기존에 쓰던 단가표도 헤더가 '원료명, 단가(원/kg)…'처럼 비슷하면 그대로 읽습니다.")
+        return
+
+    parsed = importer.parse_file(up.getvalue(), up.name)
+    for n in parsed.notes:
+        st.caption("• " + n)
+
+    if parsed.errors:
+        st.error(f"오류 {len(parsed.errors)}건 — 아래를 고친 뒤 다시 올려주세요. (오류가 있으면 아무것도 등록되지 않습니다)")
+        st.dataframe(pd.DataFrame({"오류 내용": parsed.errors}), hide_index=True, width="stretch")
+        return
+    for w in parsed.warnings:
+        st.warning(w)
+
+    results = db.bulk_apply(parsed.ingredients, parsed.materials, dry_run=True)   # 미리보기 (DB 변경 없음)
+    df = pd.DataFrame(results)
+    errs = df[df["status"] == "오류"]
+    cnt = df["status"].value_counts()
+    m = st.columns(4)
+    m[0].metric("신규", int(cnt.get("신규", 0)))
+    m[1].metric("수정", int(cnt.get("수정", 0)))
+    m[2].metric("변경없음", int(cnt.get("변경없음", 0)))
+    m[3].metric("오류", int(cnt.get("오류", 0)))
+
+    show = st.multiselect("보기 필터", ["신규", "수정", "변경없음", "오류"], default=["신규", "수정", "오류"])
+    view = df[df["status"].isin(show)][["kind", "name", "status", "detail", "src"]].rename(columns={
+        "kind": "구분", "name": "이름", "status": "상태", "detail": "내용", "src": "파일 위치"})
+    st.dataframe(view, hide_index=True, width="stretch")
+
+    if len(errs):
+        st.error("등록할 수 없는 행이 있습니다. 파일을 고쳐서 다시 올려주세요.")
+        return
+    if cnt.get("신규", 0) + cnt.get("수정", 0) == 0:
+        st.info("바뀌는 내용이 없습니다 (이미 모두 등록되어 있어요).")
+        return
+    if st.button("✅ 이 내용으로 등록 실행", type="primary"):
+        done = db.bulk_apply(parsed.ingredients, parsed.materials)
+        if any(r["status"] == "오류" for r in done):
+            st.error("등록 중 오류가 발생해 전체 취소되었습니다.")
+        else:
+            st.success(f"등록 완료 — 신규 {sum(r['status'] == '신규' for r in done)}건, "
+                       f"수정 {sum(r['status'] == '수정' for r in done)}건. "
+                       "다음은 '제품 관리'에서 배합표를 만드세요.")
+            st.balloons()
+
+
 PAGES = {"견적 계산": page_quote, "제품 관리": page_products, "원료 단가": page_ingredients,
-         "부자재": page_materials, "견적 이력": page_history, "설정": page_settings}
+         "부자재": page_materials, "엑셀 일괄 등록": page_bulk, "견적 이력": page_history, "설정": page_settings}
 
 if check_password():
     st.sidebar.title("🥜 납품가 산출")
