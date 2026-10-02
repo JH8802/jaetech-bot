@@ -12,7 +12,7 @@ from datetime import date, datetime
 from pathlib import Path
 
 from .engine import (IngredientLine, MaterialLine, QuoteInput, QuoteResult,
-                     calculate)
+                     calc_mode, calculate)
 
 DB_PATH = Path(os.environ.get(
     "PRICING_DB", Path(__file__).resolve().parent / "data" / "pricing.db"))
@@ -80,6 +80,13 @@ CREATE TABLE IF NOT EXISTS quotes (               -- 견적 스냅샷 (그 시�
     input_json TEXT NOT NULL,
     result_json TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS audit_log (            -- 삭제·권한 변경 기록
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    at TEXT NOT NULL,
+    user TEXT DEFAULT '',
+    action TEXT NOT NULL,
+    detail TEXT DEFAULT ''
+);
 """
 
 # 판관비/물류비/마진은 '선택 사항' -> 기본값은 모두 꺼짐
@@ -88,6 +95,7 @@ DEFAULT_SETTINGS = {
     "use_logistics": "0", "logistics_rate": "0.0275", "logistics_vat": "0",
     "use_margin": "0", "margin_rate": "0.05",
     "rounding": "round",
+    "allow_quote_delete": "0",          # 견적 이력 삭제 잠금 (기본: 삭제 불가)
 }
 
 
@@ -128,6 +136,7 @@ def get_settings() -> dict:
         "logistics_vat": s["logistics_vat"] == "1",
         "use_margin": s["use_margin"] == "1", "margin_rate": float(s["margin_rate"]),
         "rounding": s["rounding"],
+        "allow_quote_delete": s["allow_quote_delete"] == "1",
     }
 
 
@@ -249,9 +258,12 @@ def get_product_detail(product_id: int) -> dict:
     with connect() as con:
         p = dict(con.execute("SELECT * FROM products WHERE id=?", (product_id,)).fetchone())
         p["ingredients"] = [dict(r) for r in con.execute("""
-            SELECT pi.*, i.name, i.loss_moisture+i.loss_split+i.loss_sorting AS master_loss,
+            SELECT pi.*, i.name, i.origin, i.supplier,
+                   i.loss_moisture+i.loss_split+i.loss_sorting AS master_loss,
                    (SELECT price_per_kg FROM ingredient_prices x WHERE x.ingredient_id=i.id
-                    ORDER BY effective_date DESC, id DESC LIMIT 1) AS latest_price
+                    ORDER BY effective_date DESC, id DESC LIMIT 1) AS latest_price,
+                   (SELECT effective_date FROM ingredient_prices x WHERE x.ingredient_id=i.id
+                    ORDER BY effective_date DESC, id DESC LIMIT 1) AS latest_price_date
             FROM product_ingredients pi JOIN ingredients i ON i.id=pi.ingredient_id
             WHERE pi.product_id=? ORDER BY pi.id""", (product_id,))]
         p["materials"] = [dict(r) for r in con.execute("""
@@ -268,9 +280,14 @@ def build_quote_input(product_id: int, settings: dict | None = None,
     p = get_product_detail(product_id)
     ings = []
     for r in p["ingredients"]:
-        price = r["price_override"] if r["price_override"] is not None else (r["latest_price"] or 0.0)
+        override = r["price_override"] is not None
+        price = r["price_override"] if override else (r["latest_price"] or 0.0)
         loss = r["loss_rate"] if r["loss_rate"] is not None else r["master_loss"]
-        ings.append(IngredientLine(r["name"], r["ratio"], price, loss))
+        ings.append(IngredientLine(
+            r["name"], r["ratio"], price, loss,
+            origin=r["origin"] or "", supplier=r["supplier"] or "",
+            price_date="" if override else (r["latest_price_date"] or ""),
+            price_source="제품 직접입력" if override else "마스터 최신단가"))
     mats = []
     for r in p["materials"]:
         loss = r["loss_rate"] if r["loss_rate"] is not None else r["master_loss"]
@@ -297,6 +314,18 @@ def save_quote(q: QuoteInput, r: QuoteResult, created_by="", memo="") -> int:
         return cur.lastrowid
 
 
+def _row_to_quote(row) -> tuple[QuoteInput, QuoteResult, dict]:
+    d = json.loads(row["input_json"])
+    q = QuoteInput(**{**d,
+                      "ingredients": [IngredientLine(**x) for x in d["ingredients"]],
+                      "materials": [MaterialLine(**x) for x in d["materials"]]})
+    # 저장된 결과를 그대로 복원 (스냅샷). 예전 이력에 없는 새 필드는 기본값으로 채워진다.
+    r = QuoteResult(**json.loads(row["result_json"]))
+    meta = {k: row[k] for k in ("id", "created_at", "created_by", "product_name", "price", "memo")}
+    meta["mode"] = calc_mode(q)
+    return q, r, meta
+
+
 def list_quotes(limit=200) -> list[dict]:
     with connect() as con:
         return [dict(r) for r in con.execute(
@@ -304,21 +333,67 @@ def list_quotes(limit=200) -> list[dict]:
                ORDER BY id DESC LIMIT ?""", (limit,))]
 
 
+def search_quotes(date_from: str | None = None, date_to: str | None = None,
+                  products: list[str] | None = None, users: list[str] | None = None,
+                  modes: list[str] | None = None, limit: int | None = None
+                  ) -> list[tuple[QuoteInput, QuoteResult, dict]]:
+    """조건에 맞는 견적을 (입력, 결과, 메타) 로 반환 (최신순). 날짜는 'YYYY-MM-DD'."""
+    sql, args = "SELECT * FROM quotes WHERE 1=1", []
+    if date_from:
+        sql += " AND created_at >= ?"
+        args.append(date_from + " 00:00")
+    if date_to:
+        sql += " AND created_at <= ?"
+        args.append(date_to + " 23:59")
+    if products:
+        sql += f" AND product_name IN ({','.join('?' * len(products))})"
+        args += products
+    if users:
+        sql += f" AND created_by IN ({','.join('?' * len(users))})"
+        args += users
+    sql += " ORDER BY id DESC"
+    with connect() as con:
+        rows = con.execute(sql, args).fetchall()
+    out = [_row_to_quote(r) for r in rows]
+    if modes:
+        out = [x for x in out if x[2]["mode"] in modes]
+    return out[:limit] if limit else out
+
+
+def quote_filter_options() -> dict:
+    with connect() as con:
+        prods = [r[0] for r in con.execute("SELECT DISTINCT product_name FROM quotes ORDER BY 1")]
+        users = [r[0] for r in con.execute("SELECT DISTINCT created_by FROM quotes ORDER BY 1")]
+    return {"products": prods, "users": [u for u in users if u]}
+
+
 def load_quote(quote_id: int) -> tuple[QuoteInput, QuoteResult, dict]:
     with connect() as con:
         row = con.execute("SELECT * FROM quotes WHERE id=?", (quote_id,)).fetchone()
-    d = json.loads(row["input_json"])
-    q = QuoteInput(**{**d,
-                      "ingredients": [IngredientLine(**x) for x in d["ingredients"]],
-                      "materials": [MaterialLine(**x) for x in d["materials"]]})
-    # 저장된 결과를 그대로 복원 (스냅샷)
-    r = QuoteResult(**json.loads(row["result_json"]))
-    return q, r, dict(row)
+    return _row_to_quote(row)
 
 
-def delete_quote(quote_id: int) -> None:
+def log_audit(action: str, detail: str = "", user: str = "") -> None:
+    with connect() as con:
+        con.execute("INSERT INTO audit_log(at,user,action,detail) VALUES(?,?,?,?)",
+                    (datetime.now().strftime("%Y-%m-%d %H:%M"), user, action, detail))
+
+
+def list_audit(limit=100) -> list[dict]:
+    with connect() as con:
+        return [dict(r) for r in con.execute(
+            "SELECT at,user,action,detail FROM audit_log ORDER BY id DESC LIMIT ?", (limit,))]
+
+
+def delete_quote(quote_id: int, user: str = "") -> None:
+    """견적 이력 삭제. 설정에서 '삭제 허용'을 켜지 않으면 거부하고, 삭제하면 기록을 남긴다."""
+    if not get_settings()["allow_quote_delete"]:
+        raise PermissionError("견적 이력 삭제가 잠겨 있습니다 (설정에서 허용해야 합니다)")
+    q, r, meta = load_quote(quote_id)
     with connect() as con:
         con.execute("DELETE FROM quotes WHERE id=?", (quote_id,))
+    log_audit("견적 삭제", f"#{quote_id} {q.product_name} / 납품가 {r.price:,.0f}원 / "
+                         f"작성 {meta['created_by']} {meta['created_at']}", user)
 
 
 def calculate_quote(product_id: int, fixed_price: float | None = None):
