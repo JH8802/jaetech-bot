@@ -40,33 +40,34 @@ def check_password() -> bool:
 
 # ---------- 페이지: 견적 계산 ----------
 def page_quote():
-    st.header("견적 계산")
+    st.header("견적 계산", help="제품·판매처·기준일을 고르면 그 시점의 원료·부자재 단가와 환율로 원가와 납품가를 계산합니다. 저장하면 견적 이력에 남습니다.")
     products = db.list_products()
     if not products:
         st.info("먼저 '제품 관리'에서 제품을 등록하세요.")
         return
     names = {p["name"]: p["id"] for p in products}
     c = st.columns([2, 2, 2])
-    sel = c[0].selectbox("제품", list(names))
+    sel = c[0].selectbox("제품", list(names), help="'제품 관리'에 등록한 제품입니다.")
     chans = {"(기본 설정 · 판매처 미선택)": None,
              **{f"{CHANNEL_KINDS[ch['kind']]} · {ch['name']}": ch["id"] for ch in db.list_channels()}}
     ch_label = c[1].selectbox("판매처", list(chans),
                               help="마트는 물류비, 온라인 업체는 수수료·홍보비·기획전·택배비가 반영됩니다 ('판매처' 메뉴에서 등록)")
     as_of = c[2].date_input("단가·환율 기준일", date.today(),
                             help="이 날짜에 유효한 원료·부자재 단가와 환율로 계산합니다. 과거 날짜를 고르면 그때의 원가를 재현합니다.")
-    mode = st.radio("계산 방식", ["납품가 자동 계산", "납품가 직접 지정 (손익 확인)"], horizontal=True)
+    mode = st.radio("계산 방식", ["납품가 자동 계산", "납품가 직접 지정 (손익 확인)"], horizontal=True,
+                    help="자동 계산: 원가에 판관비·마진·판매처 비용을 얹어 납품가를 역산합니다.\n직접 지정: 이미 정해진 납품가에서 얼마가 남는지(또는 적자인지) 확인합니다.")
     fixed = None
     if mode.startswith("납품가 직접"):
-        fixed = st.number_input("지정 납품가(원)", min_value=0.0, step=10.0, format="%.0f")
+        fixed = st.number_input("지정 납품가(원)", min_value=0.0, step=10.0, format="%.0f", help="거래처와 정해진 납품가(VAT 별도). 원가보다 낮으면 적자 경고가 뜹니다.")
     cid, as_of_s = chans[ch_label], as_of.isoformat()
     q, r = db.calculate_quote(names[sel], fixed_price=fixed, channel_id=cid, as_of=as_of_s)
     show_result(q, r)
 
     st.divider()
     who = st.session_state.get("who", "").strip()
-    memo = st.text_input("메모 (예: 아몬드 단가 인상 반영)")
+    memo = st.text_input("메모 (예: 아몬드 단가 인상 반영)", help="견적 이력 목록에 같이 표시되는 메모입니다.")
     b1, b2, b3 = st.columns(3)
-    if b1.button("💾 견적 이력에 저장"):
+    if b1.button("💾 견적 이력에 저장", help="지금 화면의 견적을 그 시점의 단가·환율·규칙 그대로 이력에 저장합니다. 사이드바에 작성자 이름이 필요합니다."):
         if not who:
             st.error("왼쪽 사이드바에 '작성자(내 이름)'를 먼저 입력하세요 (누가 만든 견적인지 이력에 남깁니다)")
         else:
@@ -74,9 +75,11 @@ def page_quote():
             st.success(f"견적 #{qid} 저장됨 — 작성자 {who} · {calc_mode(q)} · 기준일 {as_of_s} "
                        "(그 시점의 단가·환율·규칙이 그대로 보존됩니다)")
     b2.download_button("⬇ 원가표 엑셀 (사내용)", quotes_to_xlsx([(q, r)], True),
-                       f"원가표_{q.product_name}_{date.today()}.xlsx")
+                       f"원가표_{q.product_name}_{date.today()}.xlsx",
+                       help="원료·부자재·원가 구성이 모두 담긴 사내용 엑셀입니다. 거래처에는 보내지 마세요.")
     b3.download_button("⬇ 납품가 엑셀 (거래처용)", quotes_to_xlsx([(q, r)], False),
-                       f"납품가_{q.product_name}_{date.today()}.xlsx")
+                       f"납품가_{q.product_name}_{date.today()}.xlsx",
+                       help="제품명과 납품가만 담긴 거래처 제출용 엑셀입니다. 원가 정보는 들어 있지 않습니다.")
 
     with st.expander("전체 제품 한눈에 비교 (같은 판매처·기준일)"):
         rows, items = [], []
@@ -159,7 +162,7 @@ def _show_compare(a, b):
 
 
 def page_history():
-    st.header("견적 이력")
+    st.header("견적 이력", help="'견적 계산'에서 저장한 견적이 쌓이는 곳입니다. 저장 시점의 단가·환율·규칙이 그대로 보존되어, 나중에 단가가 바뀌어도 당시 견적을 다시 볼 수 있습니다.")
     opts = db.quote_filter_options()
     if not opts["products"]:
         st.info("저장된 견적이 없습니다. '견적 계산' 화면에서 '견적 이력에 저장'을 누르면 쌓입니다.")
@@ -170,10 +173,10 @@ def page_history():
     with tab_list:
         today = date.today()
         f = st.columns([2, 2, 2, 2])
-        rng = f[0].date_input("기간", value=(today - timedelta(days=90), today))
-        sel_prod = f[1].multiselect("제품", opts["products"])
-        sel_user = f[2].multiselect("작성자", opts["users"])
-        sel_mode = f[3].multiselect("계산 방식", [MODE_AUTO, MODE_FIXED])
+        rng = f[0].date_input("기간", value=(today - timedelta(days=90), today), help="견적을 저장한 날짜 범위")
+        sel_prod = f[1].multiselect("제품", opts["products"], help="비워 두면 전체 제품")
+        sel_user = f[2].multiselect("작성자", opts["users"], help="견적을 저장한 사람. 비워 두면 전체")
+        sel_mode = f[3].multiselect("계산 방식", [MODE_AUTO, MODE_FIXED], help="자동 계산 / 납품가 직접 지정")
         d_from = d_to = None
         if isinstance(rng, (tuple, list)):
             d_from = rng[0].isoformat() if len(rng) > 0 else None
@@ -188,7 +191,8 @@ def page_history():
                 "실질마진율": pct(r.effective_margin_rate), "경고": "⚠" if r.warnings else "",
                 "메모": m["memo"]} for q, r, m in items]), hide_index=True, width="stretch")
             st.download_button(f"⬇ 이력 목록 전체 엑셀 ({len(items)}건 · 원료/부자재 상세 포함)",
-                               quotes_list_to_xlsx(items), f"견적이력_{today}.xlsx")
+                               quotes_list_to_xlsx(items), f"견적이력_{today}.xlsx",
+                               help="위 조건으로 걸러진 견적 전체를 견적목록·원료상세·부자재상세 3개 시트로 저장합니다.")
 
             st.divider()
             item = st.selectbox("상세 볼 견적", items, format_func=_quote_label)
@@ -237,19 +241,19 @@ def page_history():
 
 # ---------- 페이지: 설정 ----------
 def page_settings():
-    st.header("계산 규칙 설정")
+    st.header("계산 규칙 설정", help="견적 계산의 기본 규칙입니다. 판매처를 고르지 않았을 때 쓰이며, 판매처에서 따로 지정한 판관비·마진은 그 판매처 견적에서 우선합니다.")
     st.caption("판관비·물류비·마진은 모두 '납품가 기준 %' 입니다. 체크를 끄면 계산에서 빠집니다.")
     s = db.get_settings()
     c = st.columns(3)
-    use_sga = c[0].checkbox("판관비 사용", s["use_sga"])
-    sga = c[0].number_input("판관비율(%)", 0.0, 50.0, s["sga_rate"] * 100, 0.05)
-    use_log = c[1].checkbox("물류비 사용", s["use_logistics"])
-    log = c[1].number_input("물류비율(%)", 0.0, 50.0, s["logistics_rate"] * 100, 0.01)
-    vat = c[1].checkbox("물류비를 VAT 포함 납품가(×1.1) 기준으로 계산", s["logistics_vat"])
-    use_mar = c[2].checkbox("마진 사용", s["use_margin"])
-    mar = c[2].number_input("마진율(%)", 0.0, 50.0, s["margin_rate"] * 100, 0.05)
+    use_sga = c[0].checkbox("판관비 사용", s["use_sga"], help="판관비(판매관리비)를 납품가에 포함할지 여부")
+    sga = c[0].number_input("판관비율(%)", 0.0, 50.0, s["sga_rate"] * 100, 0.05, help="납품가에 대한 판관비 % (예: 5 → 납품가의 5%)")
+    use_log = c[1].checkbox("물류비 사용", s["use_logistics"], help="판매처를 고르지 않았을 때 기본 물류비를 포함할지 여부 (선택 사항)")
+    log = c[1].number_input("물류비율(%)", 0.0, 50.0, s["logistics_rate"] * 100, 0.01, help="납품가에 대한 물류비 % (예: 2.75)")
+    vat = c[1].checkbox("물류비를 VAT 포함 납품가(×1.1) 기준으로 계산", s["logistics_vat"], help="물류비율을 부가세 포함 금액에 적용하는 계약일 때 체크 (예전 일부 견적표 방식)")
+    use_mar = c[2].checkbox("마진 사용", s["use_margin"], help="납품가에 마진(이익)을 따로 붙일지 여부 (선택 사항)")
+    mar = c[2].number_input("마진율(%)", 0.0, 50.0, s["margin_rate"] * 100, 0.05, help="납품가에 대한 마진 % (예: 5 → 납품가의 5%)")
     keys = list(ROUNDING)
-    rnd = st.selectbox("납품가 반올림", keys, index=keys.index(s["rounding"]), format_func=ROUNDING.get)
+    rnd = st.selectbox("납품가 반올림", keys, index=keys.index(s["rounding"]), format_func=ROUNDING.get, help="계산된 납품가를 어떻게 끊을지. 10원 올림은 항상 원가 이상이 되도록 올려서 약간의 추가 이익이 남습니다.")
     if st.button("💾 설정 저장", type="primary"):
         db.save_settings({"use_sga": use_sga, "sga_rate": sga / 100, "use_logistics": use_log,
                           "logistics_rate": log / 100, "logistics_vat": vat, "use_margin": use_mar,
@@ -259,11 +263,11 @@ def page_settings():
             "납품가를 기준으로 하는 % 항목이라 한 번에 역산합니다.")
 
     st.divider()
-    st.subheader("견적 이력 보호")
+    st.subheader("견적 이력 보호", help="여러 명이 쓸 때 실수로 견적 이력이 지워지는 것을 막습니다.")
     st.caption("기본은 '삭제 잠금'입니다. 잠겨 있으면 견적 이력을 지울 수 없고, 허용 후 삭제하면 삭제 기록이 남습니다.")
-    allow = st.checkbox("견적 이력 삭제 허용", s["allow_quote_delete"])
+    allow = st.checkbox("견적 이력 삭제 허용", s["allow_quote_delete"], help="기본은 잠금입니다. 허용하면 견적 이력 화면에서 삭제할 수 있고, 삭제하면 삭제 기록이 남습니다.")
     admin_env = os.environ.get("PRICING_ADMIN_PASSWORD", "")
-    admin_in = st.text_input("관리자 비밀번호", type="password") if admin_env else ""
+    admin_in = st.text_input("관리자 비밀번호", type="password", help="실행할 때 정한 관리자 비밀번호. 이 설정을 바꿀 수 있는 사람을 제한합니다.") if admin_env else ""
     if st.button("🔐 보호 설정 저장"):
         if allow == s["allow_quote_delete"]:
             st.info("변경된 내용이 없습니다")
@@ -277,7 +281,7 @@ def page_settings():
         st.caption("⚠ 관리자 비밀번호(PRICING_ADMIN_PASSWORD)가 설정되어 있지 않아 누구나 이 잠금을 풀 수 있습니다. "
                    "여러 명이 쓸 때는 run_shared.bat 실행 시 관리자 비밀번호를 입력하세요.")
     st.divider()
-    st.subheader("전체 데이터 엑셀 내보내기 (백업 · 외부 분석)")
+    st.subheader("전체 데이터 엑셀 내보내기 (백업 · 외부 분석)", help="원료·부자재 단가 이력, 환율 이력, 판매처, 제품 구성, 견적 이력 요약을 한 파일(여러 시트)로 저장합니다.")
     st.caption("원료·부자재 마스터와 단가 이력, 환율 이력, 판매처, 제품 구성(BOM), 견적 이력 요약을 한 파일로 내려받습니다.")
     if st.button("📦 전체 데이터 엑셀 만들기"):
         st.session_state["all_xlsx"] = all_data_xlsx(db.collect_all_data())
@@ -288,7 +292,7 @@ def page_settings():
 
 # ---------- 페이지: 엑셀 일괄 등록 ----------
 def page_bulk():
-    st.header("엑셀 일괄 등록 (원료 · 부자재 · 환율)")
+    st.header("엑셀 일괄 등록 (원료 · 부자재 · 환율)", help="엑셀 파일로 원료 단가, 부자재 단가, 일별 환율을 한 번에 등록·수정합니다. 올리면 먼저 미리보기가 나오고, 확인 후 등록됩니다. 오류가 하나라도 있으면 아무것도 등록되지 않습니다.")
     st.caption("회사에서 쓰는 원료 단가표 · 부자재 목록 · 일별 환율을 엑셀로 한 번에 올립니다. "
                "이름이 같으면 수정, 없으면 신규 등록이고, 빈 칸은 기존 값을 유지합니다. "
                "수입 품목은 통화와 외화 단가로 올리면 환율로 자동 환산됩니다.")
@@ -301,7 +305,8 @@ def page_bulk():
         f"마스터_{date.today()}.xlsx",
         help="내보낸 파일을 엑셀에서 고쳐서 다시 올리면 일괄 수정할 수 있습니다.")
 
-    up = st.file_uploader("엑셀 파일 선택 (.xlsx / .xls / .csv)", type=["xlsx", "xls", "csv"])
+    up = st.file_uploader("엑셀 파일 선택 (.xlsx / .xls / .csv)", type=["xlsx", "xls", "csv"],
+                          help="'빈 양식' 형식(원료/부자재/환율 시트)으로 작성한 파일을 올리세요. 헤더가 비슷한 기존 단가표도 읽습니다.")
     if up is None:
         st.info("양식에 맞춰 작성한 파일을 올리면 '미리보기'가 나오고, 확인 후 등록할 수 있습니다. "
                 "기존에 쓰던 단가표도 헤더가 '원료명, 단가(원/kg)…'처럼 비슷하면 그대로 읽습니다.")
@@ -328,7 +333,8 @@ def page_bulk():
     m[2].metric("변경없음", int(cnt.get("변경없음", 0)))
     m[3].metric("오류", int(cnt.get("오류", 0)))
 
-    show = st.multiselect("보기 필터", ["신규", "수정", "변경없음", "오류"], default=["신규", "수정", "오류"])
+    show = st.multiselect("보기 필터", ["신규", "수정", "변경없음", "오류"], default=["신규", "수정", "오류"],
+                          help="신규=새로 등록, 수정=값이 바뀜, 변경없음=이미 같은 값, 오류=등록 불가(파일을 고쳐야 함)")
     view = df[df["status"].isin(show)][["kind", "name", "status", "detail", "src"]].rename(columns={
         "kind": "구분", "name": "이름", "status": "상태", "detail": "내용", "src": "파일 위치"})
     st.dataframe(view, hide_index=True, width="stretch")
@@ -339,7 +345,7 @@ def page_bulk():
     if cnt.get("신규", 0) + cnt.get("수정", 0) == 0:
         st.info("바뀌는 내용이 없습니다 (이미 모두 등록되어 있어요).")
         return
-    if st.button("✅ 이 내용으로 등록 실행", type="primary"):
+    if st.button("✅ 이 내용으로 등록 실행", type="primary", help="위 미리보기 내용을 실제로 저장합니다."):
         done = db.bulk_apply(parsed.ingredients, parsed.materials, parsed.fx_rates)
         if any(r["status"] == "오류" for r in done):
             st.error("등록 중 오류가 발생해 전체 취소되었습니다.")

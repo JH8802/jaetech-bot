@@ -15,7 +15,7 @@ KIND_LABEL = {"ingredient": "원료", "material": "부자재"}
 
 def _range(key: str, days: int = 180):
     rng = st.date_input("조회 기간 (시작일 ~ 종료일)", value=(date.today() - timedelta(days=days), date.today()),
-                        key=key)
+                        key=key, help="조회할 시작일과 종료일을 차례로 클릭하세요. 예: 2026-01-03 ~ 2026-06-05. 최대 약 10년까지 조회됩니다.")
     if not isinstance(rng, (tuple, list)) or len(rng) != 2:
         st.info("종료일까지 선택하세요.")
         return None
@@ -35,12 +35,13 @@ def _dated_df(rows: list[dict], date_key: str, cols: dict[str, str]) -> pd.DataF
 
 def _tab_item(pb) -> None:
     c = st.columns([1, 2])
-    kind = c[0].radio("구분", list(KIND_LABEL), format_func=KIND_LABEL.get, horizontal=True, key="tr_kind1")
+    kind = c[0].radio("구분", list(KIND_LABEL), format_func=KIND_LABEL.get, horizontal=True, key="tr_kind1",
+                    help="가격 추이를 볼 대상: 원료(kg당 단가) 또는 부자재(개당 단가)")
     names = _names(kind)
     if not names:
         st.info("등록된 품목이 없습니다.")
         return
-    item_id = c[1].selectbox("품목", list(names), format_func=names.get, key="tr_item1")
+    item_id = c[1].selectbox("품목", list(names), format_func=names.get, key="tr_item1", help="조회할 품목. 단가를 입력한 품목만 의미 있는 그래프가 나옵니다.")
     rng = _range("tr_rng1")
     if rng is None:
         return
@@ -56,17 +57,18 @@ def _tab_item(pb) -> None:
     dec = trends.decompose(series)
 
     m = st.columns(4)
-    m[0].metric("시작 단가", won(st_["start"]), help=st_["start_date"])
-    m[1].metric("종료 단가", won(st_["end"]), help=st_["end_date"])
-    m[2].metric("변동", f"{st_['delta']:+,.0f}원", signed_pct(st_["rate"]))
+    m[0].metric("시작 단가", won(st_["start"]), help=f"조회 시작 시점({st_['start_date']})의 원화 단가. 수입 품목은 그날 환율로 환산한 값입니다.")
+    m[1].metric("종료 단가", won(st_["end"]), help=f"조회 종료 시점({st_['end_date']})의 원화 단가.")
+    m[2].metric("변동", f"{st_['delta']:+,.0f}원", signed_pct(st_["rate"]), help="종료 단가 − 시작 단가 (원), 아래 %는 시작 단가 대비 변동률입니다.")
     m[3].metric("가격이 바뀐 날", f"{st_['change_days']}일", help="단가 변경 또는 환율 변동으로 원화 단가가 달라진 날")
     m2 = st.columns(3)
-    m2[0].metric("최저", won(st_["min"]), help=st_["min_date"])
-    m2[1].metric("최고", won(st_["max"]), help=st_["max_date"])
-    m2[2].metric("평균", won(st_["avg"]))
+    m2[0].metric("최저", won(st_["min"]), help=f"조회 기간 중 가장 낮았던 단가 ({st_['min_date']})")
+    m2[1].metric("최고", won(st_["max"]), help=f"조회 기간 중 가장 높았던 단가 ({st_['max_date']})")
+    m2[2].metric("평균", won(st_["avg"]), help="조회 기간 일별 단가의 단순 평균")
 
     views = {"선 그래프 (일별)": "D", "막대 그래프 (주별 평균)": "W", "막대 그래프 (월별 평균)": "M"}
-    view = st.radio("그래프", list(views), horizontal=True, key="tr_view1")
+    view = st.radio("그래프", list(views), horizontal=True, key="tr_view1",
+                    help="선 그래프: 하루 단위로 가격이 바뀌는 모습 / 막대 그래프: 주별·월별 평균 단가를 비교")
     freq = views[view]
     freq_label = {"D": "일별", "W": "주별", "M": "월별"}[freq]
     agg = trends.aggregate(series, freq)
@@ -78,12 +80,16 @@ def _tab_item(pb) -> None:
         st.bar_chart(df)
 
     if dec:
-        st.markdown(f"#### 💱 변동 원인 분해 — {dec['currency']} 단가 × 환율")
+        st.markdown(f"#### 💱 변동 원인 분해 — {dec['currency']} 단가 × 환율",
+                    help="수입 품목의 원화 단가 = 외화(현지) 단가 × 환율. 원화 단가가 오른 이유가 '현지 가격이 올라서'인지 '환율이 올라서'인지 나눠 보여줍니다. 환율은 '자동' 방식 단가는 일별 환율, '고정' 방식은 입력한 환율을 씁니다.")
         d = st.columns(3)
-        d[0].metric("현지 단가 변동", signed_pct(dec["foreign_rate"]),
+        d[0].metric("현지 단가 변동", signed_pct(dec["foreign_rate"]), help="외화 단가 자체의 변동률 (환율 영향 제외)",
+                    delta=
                     f"{dec['foreign_start']:,.2f} → {dec['foreign_end']:,.2f} {dec['currency']}")
-        d[1].metric("환율 변동", signed_pct(dec["fx_rate"]), f"{dec['fx_start']:,.2f} → {dec['fx_end']:,.2f}원")
-        d[2].metric("원화 단가 변동", signed_pct(dec["krw_rate"]), f"{dec['total']:+,.0f}원")
+        d[1].metric("환율 변동", signed_pct(dec["fx_rate"]), f"{dec['fx_start']:,.2f} → {dec['fx_end']:,.2f}원",
+                    help="적용된 환율(원/외화 1단위)의 변동률")
+        d[2].metric("원화 단가 변동", signed_pct(dec["krw_rate"]), f"{dec['total']:+,.0f}원",
+                    help="현지 단가 변동과 환율 변동이 합쳐진 최종 원화 단가 변동률")
         st.caption(f"원화 단가 변동 {dec['total']:+,.0f}원 = 현지 단가 변동 효과 {dec['price_effect']:+,.0f}원 "
                    f"+ 환율 변동 효과 {dec['fx_effect']:+,.0f}원")
         idx = pd.DataFrame(dec["index"])
@@ -105,7 +111,7 @@ def _tab_item(pb) -> None:
 
 
 def _tab_ranking(pb) -> None:
-    kind = st.radio("구분", list(KIND_LABEL), format_func=KIND_LABEL.get, horizontal=True, key="tr_kind2")
+    kind = st.radio("구분", list(KIND_LABEL), format_func=KIND_LABEL.get, horizontal=True, key="tr_kind2", help="변동률을 비교할 대상 (원료 전체 또는 부자재 전체)")
     rng = _range("tr_rng2", 365)
     if rng is None:
         return
@@ -121,10 +127,10 @@ def _tab_ranking(pb) -> None:
     up = [r for r in rows if (r["rate"] or 0) > 0]
     down = [r for r in rows if (r["rate"] or 0) < 0]
     m = st.columns(3)
-    m[0].metric("상승 품목", f"{len(up)}개")
-    m[1].metric("하락 품목", f"{len(down)}개")
-    m[2].metric("변동 없음", f"{len(rows) - len(up) - len(down)}개")
-    st.markdown("**기간 변동률 (막대)**")
+    m[0].metric("상승 품목", f"{len(up)}개", help="조회 기간 동안 단가가 오른 품목 수")
+    m[1].metric("하락 품목", f"{len(down)}개", help="조회 기간 동안 단가가 내린 품목 수")
+    m[2].metric("변동 없음", f"{len(rows) - len(up) - len(down)}개", help="단가가 그대로인 품목 수")
+    st.markdown("**기간 변동률 (막대)**", help="조회 기간 시작 대비 종료 단가의 변동률(%)입니다. 막대가 높을수록 많이 오른 품목, 아래로 향하면 내린 품목입니다.")
     st.bar_chart(pd.DataFrame({"변동률(%)": [(r["rate"] or 0) * 100 for r in rows]}, index=[r["name"] for r in rows]))
     st.dataframe(pd.DataFrame([{
         "품목": r["name"], "시작일": r["start_date"], "시작 단가": num(r["start"], 1), "종료 단가": num(r["end"], 1),
@@ -140,10 +146,10 @@ def _tab_ranking(pb) -> None:
 
 def _tab_yearly(pb) -> None:
     c = st.columns([1, 3])
-    kind = c[0].radio("구분", list(KIND_LABEL), format_func=KIND_LABEL.get, horizontal=True, key="tr_kind3")
+    kind = c[0].radio("구분", list(KIND_LABEL), format_func=KIND_LABEL.get, horizontal=True, key="tr_kind3", help="연도별 변동을 볼 대상")
     this = date.today().year
     years = c[1].multiselect("연도", list(range(this - 9, this + 1)), default=list(range(max(this - 2, this - 9), this + 1)),
-                             key="tr_years")
+                             key="tr_years", help="보고 싶은 연도를 고르세요. 변동률 = 전년 말 단가 대비 해당 연도 말 단가입니다.")
     if not years:
         return
     names = _names(kind)
@@ -159,7 +165,8 @@ def _tab_yearly(pb) -> None:
                                          for y in ys}} for n in sorted({r["name"] for r in rows})])
     st.markdown("**연도별 변동률**")
     st.dataframe(pivot, hide_index=True, width="stretch")
-    one = st.selectbox("연도별 막대그래프로 볼 품목", sorted({r["name"] for r in rows}), key="tr_year_item")
+    one = st.selectbox("연도별 막대그래프로 볼 품목", sorted({r["name"] for r in rows}), key="tr_year_item",
+                       help="아래 연도별 막대그래프로 볼 품목")
     one_rows = [r for r in rows if r["name"] == one]
     st.bar_chart(pd.DataFrame({"연말 단가(원)": [r["end"] for r in one_rows]}, index=[f"{r['year']}년" for r in one_rows]))
     st.bar_chart(pd.DataFrame({"변동률(%)": [(r["rate"] or 0) * 100 for r in one_rows]},
@@ -180,10 +187,11 @@ def _tab_product(pb) -> None:
         return
     c = st.columns([2, 2, 1])
     pmap = {p["name"]: p["id"] for p in products}
-    pname = c[0].selectbox("제품", list(pmap), key="tr_prod")
+    pname = c[0].selectbox("제품", list(pmap), key="tr_prod", help="원가 추이를 볼 제품")
     chans = {"(기본 설정)": None, **{ch["name"]: ch["id"] for ch in db.list_channels()}}
-    cname = c[1].selectbox("판매처", list(chans), key="tr_chan")
-    step = c[2].radio("간격", ["일", "주", "월"], index=1, horizontal=True, key="tr_step")
+    cname = c[1].selectbox("판매처", list(chans), key="tr_chan", help="판매처를 고르면 그 판매처 비용까지 포함한 납품가 추이를 봅니다.")
+    step = c[2].radio("간격", ["일", "주", "월"], index=1, horizontal=True, key="tr_step",
+                    help="계산할 간격. 일=매일, 주=7일마다, 월=매월 말. 기간이 길면 주·월을 쓰세요.")
     rng = _range("tr_rng4", 180)
     if rng is None:
         return
@@ -197,12 +205,12 @@ def _tab_product(pb) -> None:
     first, last = rows[0], rows[-1]
     d = last["price"] - first["price"]
     m = st.columns(3)
-    m[0].metric("시작 납품가", won(first["price"]), help=first["date"])
-    m[1].metric("종료 납품가", won(last["price"]), help=last["date"])
+    m[0].metric("시작 납품가", won(first["price"]), help=f"{first['date']} 단가·환율로 계산한 납품가")
+    m[1].metric("종료 납품가", won(last["price"]), help=f"{last['date']} 단가·환율로 계산한 납품가")
     m[2].metric("변동", f"{d:+,.0f}원", signed_pct(d / first["price"] if first["price"] else None))
-    st.markdown("**납품가 · 직접원가 추이 (선)**")
+    st.markdown("**납품가 · 직접원가 추이 (선)**", help="각 날짜의 원료·부자재 단가와 환율로 제품 납품가를 다시 계산해 이은 선입니다. 직접원가 = 원료+로스팅·선별+부자재+운송·3PL.")
     line_chart(_dated_df(rows, "date", {"납품가": "price", "직접원가": "direct_cost", "원가합계": "total_cost"}))
-    st.markdown("**원가 구성 변화 (막대, 누적)**")
+    st.markdown("**원가 구성 변화 (막대, 누적)**", help="직접원가가 어떤 항목으로 이루어졌고 시간에 따라 어떻게 달라졌는지 쌓아서 보여줍니다.")
     st.bar_chart(_dated_df(rows, "date", {"원료(원물가+로스)": "ingredients", "로스팅·선별": "roasting_sorting",
                                           "부자재": "materials", "운송·3PL": "logistics_etc"}))
     st.caption("각 날짜의 단가·환율로 다시 계산한 값입니다 (저장된 견적 이력이 아니라 그 날짜 기준 재계산). "
@@ -220,7 +228,8 @@ def _tab_product(pb) -> None:
 
 
 def page_trends() -> None:
-    st.header("📈 가격 추이 · 변동률 · 환율 영향")
+    st.header("📈 가격 추이 · 변동률 · 환율 영향",
+              help="원료·부자재 단가와 환율 이력을 바탕으로 기간별 가격 변화를 분석합니다. 데이터는 '원료 단가'·'부자재' 메뉴의 단가 이력과 '환율' 메뉴의 환율 이력입니다.")
     st.caption("원료·부자재 가격이 기간 동안 어떻게 변했는지 일별로 보고, 몇 % 올랐는지, 환율 때문인지 현지 가격 때문인지 확인합니다. "
                "모든 화면의 결과는 엑셀로 내려받을 수 있습니다.")
     pb = db.load_pricebook()

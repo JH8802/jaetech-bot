@@ -30,3 +30,6 @@ pricing/tests/private/
 *.xls
 *.xlsx
 .pytest_cache/
+
+# 모의 테스트용 랜덤 예제 엑셀은 가짜 데이터라 저장소에 포함
+!pricing/sample/*.xlsx
