@@ -1,17 +1,11 @@
 """견적 2건 비교 (A=기준, B=비교 대상). 화면과 엑셀에서 공통으로 사용."""
 from __future__ import annotations
 
-from .engine import CATEGORIES, QuoteInput, QuoteResult, calc_mode
+from .engine import CATEGORIES, COST_LINES, QuoteInput, QuoteResult, calc_mode
 
 Quote = tuple[QuoteInput, QuoteResult, dict]
 
-SUMMARY_FIELDS = [
-    ("원물가", "materials_cost"), ("선별비", "sorting_cost"), ("로스", "loss_cost"),
-    ("포장지", "pack_cost"), ("소분비", "split_cost"), ("박스비", "box_cost"),
-    ("운송비", "shipping_cost"), ("직접원가", "direct_cost"), ("판관비", "sga"),
-    ("마진", "margin"), ("센터도착가", "center_cost"), ("물류비", "logistics"),
-    ("원가합계", "total_cost"), ("납품가", "price"), ("실질 마진", "effective_margin"),
-]
+SUMMARY_FIELDS = [(label, attr) for label, attr, _ in COST_LINES]
 
 
 def _diff(a: float, b: float) -> tuple[float, float | None]:
@@ -38,8 +32,8 @@ def compare_quotes(a: Quote, b: Quote) -> dict:
     ingredients = []
     for name in list(ia) + [n for n in ib if n not in ia]:
         x, y = ia.get(name), ib.get(name)
-        ca = (x["cost"] + x["loss"]) if x else 0.0
-        cb = (y["cost"] + y["loss"]) if y else 0.0
+        ca = (x["cost"] + x["loss"] + x.get("roasting", 0.0) + x.get("sorting", 0.0)) if x else 0.0
+        cb = (y["cost"] + y["loss"] + y.get("roasting", 0.0) + y.get("sorting", 0.0)) if y else 0.0
         status = "추가" if x is None else "삭제" if y is None else None
         if status is None:
             same = (abs(x["price_per_kg"] - y["price_per_kg"]) < 1e-9 and abs(x["ratio"] - y["ratio"]) < 1e-9
@@ -51,7 +45,10 @@ def compare_quotes(a: Quote, b: Quote) -> dict:
             "단가 A": x["price_per_kg"] if x else None, "단가 B": y["price_per_kg"] if y else None,
             "단가기준일 A": (x or {}).get("price_date", ""), "단가기준일 B": (y or {}).get("price_date", ""),
             "공급처 A": (x or {}).get("supplier", ""), "공급처 B": (y or {}).get("supplier", ""),
-            "원물가+로스 A": ca, "원물가+로스 B": cb, "차이": cb - ca,
+            "통화 A": (x or {}).get("currency", "KRW"), "통화 B": (y or {}).get("currency", "KRW"),
+            "외화단가 A": (x or {}).get("foreign_price"), "외화단가 B": (y or {}).get("foreign_price"),
+            "환율 A": (x or {}).get("fx_rate"), "환율 B": (y or {}).get("fx_rate"),
+            "원료비 A": ca, "원료비 B": cb, "차이": cb - ca,
         })
 
     # ---- 부자재 (이름 기준) ----
@@ -79,6 +76,15 @@ def compare_quotes(a: Quote, b: Quote) -> dict:
         ("물류비율", pct(qa.logistics_rate), pct(qb.logistics_rate)),
         ("물류비 VAT 포함 기준", "예" if qa.logistics_vat else "아니오", "예" if qb.logistics_vat else "아니오"),
         ("반올림", qa.rounding, qb.rounding),
+        ("판매처", qa.channel_name or "(기본 설정)", qb.channel_name or "(기본 설정)"),
+        ("견적 기준일", qa.as_of_date or "-", qb.as_of_date or "-"),
+        ("3PL 이용료(원)", f"{qa.three_pl_cost:,.0f}", f"{qb.three_pl_cost:,.0f}"),
+        ("마트 정액 물류비(원)", f"{qa.logistics_fixed:,.0f}", f"{qb.logistics_fixed:,.0f}"),
+        ("온라인 수수료율", pct(qa.fee_rate), pct(qb.fee_rate)),
+        ("홍보비율", pct(qa.promo_rate), pct(qb.promo_rate)),
+        ("기획전 비용률", pct(qa.event_rate), pct(qb.event_rate)),
+        ("기획전 정액(원)", f"{qa.event_fixed:,.0f}", f"{qb.event_fixed:,.0f}"),
+        ("택배비(원)", f"{qa.parcel_cost:,.0f}", f"{qb.parcel_cost:,.0f}"),
     ]
     rules = [{"항목": k, "A": x, "B": y, "다름": "●" if x != y else ""} for k, x, y in rules_raw]
 
@@ -89,22 +95,28 @@ def compare_quotes(a: Quote, b: Quote) -> dict:
             why = {"추가": "원료 추가", "삭제": "원료 삭제"}.get(r["상태"])
             if why is None:
                 parts = []
-                if r["단가 A"] is not None and abs(r["단가 A"] - r["단가 B"]) > 1e-9:
+                same_cur = r["통화 A"] == r["통화 B"] != "KRW"
+                if same_cur and r["환율 A"] and r["환율 B"] and abs(r["환율 A"] - r["환율 B"]) > 1e-9:
+                    parts.append(f"환율 {r['환율 A']:,.2f}→{r['환율 B']:,.2f}")
+                    if r["외화단가 A"] is not None and r["외화단가 B"] is not None \
+                            and abs(r["외화단가 A"] - r["외화단가 B"]) > 1e-9:
+                        parts.append(f"{r['통화 A']} 단가 {r['외화단가 A']:,.2f}→{r['외화단가 B']:,.2f}")
+                elif r["단가 A"] is not None and abs(r["단가 A"] - r["단가 B"]) > 1e-9:
                     parts.append(f"단가 {r['단가 A']:,.0f}→{r['단가 B']:,.0f}")
                 if abs((r["구성비 A"] or 0) - (r["구성비 B"] or 0)) > 1e-9:
                     parts.append(f"구성비 {r['구성비 A'] * 100:.1f}%→{r['구성비 B'] * 100:.1f}%")
                 why = ", ".join(parts) or "봉수/중량/로스 변경"
-            drivers.append((abs(r["차이"]), f"원료 {r['원료']} (원물가+로스) {r['차이']:+,.0f}원 — {why}"))
+            drivers.append((abs(r["차이"]), f"원료 {r['원료']} (원물가·로스·가공비) {r['차이']:+,.0f}원 — {why}"))
     for r in materials:
         if abs(r["차이"]) >= 0.5:
             drivers.append((abs(r["차이"]), f"부자재 {r['부자재']} {r['차이']:+,.0f}원 — {r['상태']}"))
-    for label, x, y in (("선별비", ra.sorting_cost, rb.sorting_cost), ("운송비", ra.shipping_cost, rb.shipping_cost)):
+    for label, x, y in (("운송비", ra.shipping_cost, rb.shipping_cost), ("3PL 이용료", ra.three_pl_cost, rb.three_pl_cost)):
         if abs(y - x) >= 0.5:
             drivers.append((abs(y - x), f"{label} {y - x:+,.0f}원"))
-    rate_a = ra.sga + ra.margin + ra.logistics
-    rate_b = rb.sga + rb.margin + rb.logistics
+    rate_a = ra.sga + ra.margin + ra.channel_cost
+    rate_b = rb.sga + rb.margin + rb.channel_cost
     if abs(rate_b - rate_a) >= 0.5:
-        drivers.append((abs(rate_b - rate_a), f"판관비·마진·물류비 합계 {rate_b - rate_a:+,.0f}원 (납품가 기준 %)"))
+        drivers.append((abs(rate_b - rate_a), f"판관비·마진·판매처 비용 합계 {rate_b - rate_a:+,.0f}원 (납품가 연동)"))
     drivers = [t for _, t in sorted(drivers, key=lambda x: -x[0])]
 
     dprice, pprice = _diff(ra.price, rb.price)

@@ -13,16 +13,15 @@ import streamlit as st
 
 from pricing import db, importer
 from pricing.compare import compare_quotes
-from pricing.engine import (CATEGORIES, MODE_AUTO, MODE_FIXED, ROUNDING, calc_mode,
-                            calculate)
-from pricing.export import compare_to_xlsx, quotes_list_to_xlsx, quotes_to_xlsx
+from pricing.engine import CHANNEL_KINDS, MODE_AUTO, MODE_FIXED, ROUNDING, calc_mode, calculate
+from pricing.export import (all_data_xlsx, compare_to_xlsx, quotes_list_to_xlsx, quotes_to_xlsx)
+from pricing.ui_common import pct, show_result, won
+from pricing.ui_masters import (page_channels, page_fx, page_ingredients, page_materials,
+                                page_products)
+from pricing.ui_trends import page_trends
 
 st.set_page_config(page_title="납품가 산출", page_icon="🥜", layout="wide")
 db.init_db()
-
-CAT_LABEL = CATEGORIES                       # pack -> 포장지
-CAT_KEY = {v: k for k, v in CATEGORIES.items()}
-
 
 # ---------- 공통 ----------
 def check_password() -> bool:
@@ -39,56 +38,6 @@ def check_password() -> bool:
     return False
 
 
-def won(v: float) -> str:
-    return f"{v:,.0f}원"
-
-
-def pct(v: float) -> str:
-    return f"{v * 100:.1f}%"
-
-
-def show_result(q, r):
-    st.markdown(f"계산 방식: **{calc_mode(q)}**"
-                + (f" · 지정 납품가 {won(q.fixed_price)}" if q.fixed_price is not None else ""))
-    c = st.columns(4)
-    c[0].metric("납품가", won(r.price))
-    c[1].metric("원가합계", won(r.total_cost))
-    c[2].metric("센터도착가", won(r.center_cost))
-    c[3].metric("실질 마진", f"{won(r.effective_margin)} ({pct(r.effective_margin_rate)})")
-    for w in r.warnings:
-        st.warning(w)
-
-    left, right = st.columns(2)
-    with left:
-        st.markdown("**원료 (원물가 · 로스)**")
-        st.dataframe(pd.DataFrame([{
-            "원료": x["name"], "구성비": pct(x["ratio"]), "단위중량(g)": round(x["unit_g"], 2),
-            "벌크단가": f'{x["price_per_kg"]:,.0f}', "원물가": f'{x["cost"]:,.1f}',
-            "로스율": pct(x["loss_rate"]), "로스": f'{x["loss"]:,.1f}',
-            "원산지": x.get("origin", ""), "공급처": x.get("supplier", ""),
-            "단가기준일": x.get("price_date", ""), "단가출처": x.get("price_source", "")}
-            for x in r.ingredient_rows]),
-            hide_index=True, width="stretch")
-        st.markdown("**부자재**")
-        st.dataframe(pd.DataFrame([{
-            "부자재": x["name"], "분류": CAT_LABEL[x["category"]], "기본": f'{x["base"]:,.1f}',
-            "loss": f'{x["loss"]:,.1f}', "합계": f'{x["total"]:,.1f}'} for x in r.material_rows]),
-            hide_index=True, width="stretch")
-    with right:
-        st.markdown("**원가 구성**")
-        rows = [("원물가", r.materials_cost), ("선별비", r.sorting_cost), ("로스", r.loss_cost),
-                ("포장지", r.pack_cost), ("소분비", r.split_cost), ("박스비", r.box_cost),
-                ("운송비", r.shipping_cost), ("직접원가", r.direct_cost),
-                (f"판관비 ({pct(q.sga_rate)})", r.sga), (f"마진 ({pct(q.margin_rate)})", r.margin),
-                ("센터도착가", r.center_cost),
-                (f"물류비 ({pct(q.logistics_rate)}{' · VAT포함 기준' if q.logistics_vat else ''})", r.logistics),
-                ("원가합계", r.total_cost), ("납품가", r.price)]
-        st.dataframe(pd.DataFrame([{"항목": a, "금액(원)": f"{b:,.1f}"} for a, b in rows]),
-                     hide_index=True, width="stretch")
-        if q.fixed_price is None:
-            st.caption(f"계산 납품가 {r.exact_price:,.2f}원 → {ROUNDING[q.rounding]} → {r.price:,.0f}원")
-
-
 # ---------- 페이지: 견적 계산 ----------
 def page_quote():
     st.header("견적 계산")
@@ -97,12 +46,20 @@ def page_quote():
         st.info("먼저 '제품 관리'에서 제품을 등록하세요.")
         return
     names = {p["name"]: p["id"] for p in products}
-    sel = st.selectbox("제품", list(names))
+    c = st.columns([2, 2, 2])
+    sel = c[0].selectbox("제품", list(names))
+    chans = {"(기본 설정 · 판매처 미선택)": None,
+             **{f"{CHANNEL_KINDS[ch['kind']]} · {ch['name']}": ch["id"] for ch in db.list_channels()}}
+    ch_label = c[1].selectbox("판매처", list(chans),
+                              help="마트는 물류비, 온라인 업체는 수수료·홍보비·기획전·택배비가 반영됩니다 ('판매처' 메뉴에서 등록)")
+    as_of = c[2].date_input("단가·환율 기준일", date.today(),
+                            help="이 날짜에 유효한 원료·부자재 단가와 환율로 계산합니다. 과거 날짜를 고르면 그때의 원가를 재현합니다.")
     mode = st.radio("계산 방식", ["납품가 자동 계산", "납품가 직접 지정 (손익 확인)"], horizontal=True)
     fixed = None
     if mode.startswith("납품가 직접"):
         fixed = st.number_input("지정 납품가(원)", min_value=0.0, step=10.0, format="%.0f")
-    q, r = db.calculate_quote(names[sel], fixed_price=fixed)
+    cid, as_of_s = chans[ch_label], as_of.isoformat()
+    q, r = db.calculate_quote(names[sel], fixed_price=fixed, channel_id=cid, as_of=as_of_s)
     show_result(q, r)
 
     st.divider()
@@ -114,174 +71,27 @@ def page_quote():
             st.error("왼쪽 사이드바에 '작성자(내 이름)'를 먼저 입력하세요 (누가 만든 견적인지 이력에 남깁니다)")
         else:
             qid = db.save_quote(q, r, who, memo)
-            st.success(f"견적 #{qid} 저장됨 — 작성자 {who} · {calc_mode(q)} (그 시점의 단가·규칙이 그대로 보존됩니다)")
+            st.success(f"견적 #{qid} 저장됨 — 작성자 {who} · {calc_mode(q)} · 기준일 {as_of_s} "
+                       "(그 시점의 단가·환율·규칙이 그대로 보존됩니다)")
     b2.download_button("⬇ 원가표 엑셀 (사내용)", quotes_to_xlsx([(q, r)], True),
                        f"원가표_{q.product_name}_{date.today()}.xlsx")
     b3.download_button("⬇ 납품가 엑셀 (거래처용)", quotes_to_xlsx([(q, r)], False),
                        f"납품가_{q.product_name}_{date.today()}.xlsx")
 
-    with st.expander("전체 제품 한눈에 비교"):
+    with st.expander("전체 제품 한눈에 비교 (같은 판매처·기준일)"):
         rows, items = [], []
+        pb = db.load_pricebook()
+        settings = db.get_settings()
+        channel = db.get_channel(cid) if cid else None
         for p in products:
-            qq, rr = db.calculate_quote(p["id"])
+            qq = db.assemble_quote(db.get_product_detail(p["id"]), settings, channel, pb, as_of_s)
+            rr = calculate(qq)
             items.append((qq, rr))
             rows.append({"제품": p["name"], "직접원가": round(rr.direct_cost), "원가합계": round(rr.total_cost),
                          "납품가": round(rr.price), "실질마진율": pct(rr.effective_margin_rate)})
         st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
         st.download_button("⬇ 전체 제품 원가표 엑셀", quotes_to_xlsx(items, True),
                            f"원가표_전체_{date.today()}.xlsx")
-
-
-# ---------- 페이지: 제품 관리 ----------
-def page_products():
-    st.header("제품 관리 (배합표 · 부자재)")
-    ings, mats = db.list_ingredients(), db.list_materials()
-    if not ings or not mats:
-        st.info("먼저 '원료 단가'와 '부자재'를 등록하세요. (많으면 '엑셀 일괄 등록'이 편합니다)")
-        return
-    products = db.list_products()
-    pmap = {p["name"]: p["id"] for p in products}
-    choice = st.selectbox("제품 선택", ["➕ 새 제품"] + list(pmap))
-    pid = pmap.get(choice)
-    detail = db.get_product_detail(pid) if pid else {
-        "name": "", "bag_count": 1, "unit_weight_g": 20, "sorting_cost_per_kg": 0,
-        "shipping_cost": 0, "memo": "", "ingredients": [], "materials": []}
-
-    c = st.columns(5)
-    name = c[0].text_input("제품명", detail["name"])
-    bags = c[1].number_input("봉수 (30입=30)", min_value=1.0, value=float(detail["bag_count"]), step=1.0)
-    uw = c[2].number_input("1봉 중량(g)", min_value=0.0, value=float(detail["unit_weight_g"]), step=1.0)
-    sort_c = c[3].number_input("선별단가(원/kg)", min_value=0.0, value=float(detail["sorting_cost_per_kg"]), step=10.0)
-    ship = c[4].number_input("운송비(원)", min_value=0.0, value=float(detail["shipping_cost"]), step=10.0)
-    memo = st.text_input("메모", detail["memo"] or "")
-
-    iname = {i["id"]: i["name"] for i in ings}
-    iid = {v: k for k, v in iname.items()}
-    st.markdown("**배합표** — 구성비는 % 로 입력 (합계 100). 로스율·단가를 비워 두면 원료 마스터 값을 씁니다.")
-    ing_df = pd.DataFrame([{
-        "원료": iname[r["ingredient_id"]], "구성비(%)": r["ratio"] * 100,
-        "로스율(%)": None if r["loss_rate"] is None else r["loss_rate"] * 100,
-        "단가 직접입력(원/kg)": r["price_override"]} for r in detail["ingredients"]],
-        columns=["원료", "구성비(%)", "로스율(%)", "단가 직접입력(원/kg)"])
-    ing_ed = st.data_editor(ing_df, num_rows="dynamic", width="stretch", key=f"ing_{pid}",
-                            column_config={"원료": st.column_config.SelectboxColumn(options=list(iid), required=True)})
-
-    mname = {m["id"]: m["name"] for m in mats}
-    mid = {v: k for k, v in mname.items()}
-    st.markdown("**부자재** — 수량(봉수 등), 나누는 수(카톤 입수 등). 금액 = 단가 × 수량 ÷ 나누는 수 × (1+loss)")
-    mat_df = pd.DataFrame([{
-        "부자재": mname[r["material_id"]], "수량": r["qty"], "나누는 수": r["divisor"],
-        "loss(%)": None if r["loss_rate"] is None else r["loss_rate"] * 100} for r in detail["materials"]],
-        columns=["부자재", "수량", "나누는 수", "loss(%)"])
-    mat_ed = st.data_editor(mat_df, num_rows="dynamic", width="stretch", key=f"mat_{pid}",
-                            column_config={"부자재": st.column_config.SelectboxColumn(options=list(mid), required=True)})
-
-    b1, b2 = st.columns([1, 5])
-    if b1.button("💾 저장", type="primary"):
-        if not name.strip():
-            st.error("제품명을 입력하세요")
-            return
-        ing_rows = [{"ingredient_id": iid[r["원료"]], "ratio": float(r["구성비(%)"]) / 100,
-                     "loss_rate": None if pd.isna(r["로스율(%)"]) else float(r["로스율(%)"]) / 100,
-                     "price_override": None if pd.isna(r["단가 직접입력(원/kg)"]) else float(r["단가 직접입력(원/kg)"])}
-                    for _, r in ing_ed.dropna(subset=["원료", "구성비(%)"]).iterrows()]
-        mat_rows = [{"material_id": mid[r["부자재"]],
-                     "qty": 1.0 if pd.isna(r["수량"]) else float(r["수량"]),
-                     "divisor": 1.0 if pd.isna(r["나누는 수"]) or r["나누는 수"] == 0 else float(r["나누는 수"]),
-                     "loss_rate": None if pd.isna(r["loss(%)"]) else float(r["loss(%)"]) / 100}
-                    for _, r in mat_ed.dropna(subset=["부자재"]).iterrows()]
-        try:
-            db.save_product(name.strip(), bags, uw, sort_c, ship, memo, ing_rows, mat_rows, pid)
-            st.success("저장되었습니다")
-            st.rerun()
-        except Exception as e:  # 제품명 중복 등
-            st.error(f"저장 실패: {e}")
-    if pid and b2.button("🗑 이 제품 삭제"):
-        db.delete_product(pid)
-        st.rerun()
-
-
-# ---------- 페이지: 원료 단가 ----------
-def page_ingredients():
-    st.header("원료 단가 마스터")
-    ings = db.list_ingredients()
-    if ings:
-        df = pd.DataFrame([{
-            "원료": i["name"], "최신단가(원/kg)": i["price_per_kg"], "단가 기준일": i["price_date"],
-            "원산지": i["origin"], "공급처": i["supplier"],
-            "수분loss(%)": i["loss_moisture"] * 100, "소분loss(%)": i["loss_split"] * 100,
-            "선별loss(%)": i["loss_sorting"] * 100,
-            "loss합계(%)": (i["loss_moisture"] + i["loss_split"] + i["loss_sorting"]) * 100} for i in ings])
-        st.dataframe(df, hide_index=True, width="stretch")
-
-    st.subheader("원료 등록 / 수정")
-    names = [i["name"] for i in ings]
-    pick = st.selectbox("수정할 원료 (새 원료는 아래에 이름 입력)", ["➕ 새 원료"] + names)
-    cur = next((i for i in ings if i["name"] == pick), None)
-    c = st.columns(5)
-    name = c[0].text_input("원료명", cur["name"] if cur else "")
-    origin = c[1].text_input("원산지", cur["origin"] if cur else "")
-    supplier = c[2].text_input("공급처", cur["supplier"] if cur else "")
-    lm = c[3].number_input("수분 loss(%)", 0.0, 100.0, (cur["loss_moisture"] * 100) if cur else 0.0, 0.1)
-    ls = c[4].number_input("소분 loss(%)", 0.0, 100.0, (cur["loss_split"] * 100) if cur else 0.0, 0.1)
-    lso = st.number_input("선별 loss(%)", 0.0, 100.0, (cur["loss_sorting"] * 100) if cur else 0.0, 0.01)
-    b1, b2 = st.columns([1, 6])
-    if b1.button("💾 원료 저장") and name.strip():
-        db.upsert_ingredient(name.strip(), origin, supplier, lm / 100, ls / 100, lso / 100)
-        st.rerun()
-    if cur and b2.button("🗑 이 원료 삭제"):
-        try:
-            db.delete_ingredient(cur["id"])
-            st.rerun()
-        except Exception:
-            st.error("제품 배합표에서 사용 중인 원료는 삭제할 수 없습니다")
-
-    if cur:
-        st.subheader(f"'{cur['name']}' 단가 추가 · 이력")
-        c = st.columns(4)
-        price = c[0].number_input("단가(원/kg)", 0.0, step=100.0, format="%.0f")
-        d = c[1].date_input("적용일", date.today())
-        pm = c[2].text_input("메모 (공급처 견적 등)")
-        if c[3].button("단가 추가"):
-            db.add_price(cur["id"], price, d.isoformat(), pm)
-            st.rerun()
-        hist = db.price_history(cur["id"])
-        if hist:
-            st.dataframe(pd.DataFrame(hist).rename(columns={
-                "effective_date": "적용일", "price_per_kg": "단가(원/kg)", "memo": "메모"}),
-                hide_index=True, width="stretch")
-
-
-# ---------- 페이지: 부자재 ----------
-def page_materials():
-    st.header("부자재 마스터")
-    mats = db.list_materials()
-    if mats:
-        st.dataframe(pd.DataFrame([{
-            "부자재": m["name"], "분류": CAT_LABEL[m["category"]], "단가": m["unit_price"],
-            "기본 loss(%)": m["loss_rate"] * 100, "메모": m["memo"]} for m in mats]),
-            hide_index=True, width="stretch")
-    names = [m["name"] for m in mats]
-    pick = st.selectbox("수정할 부자재", ["➕ 새 부자재"] + names)
-    cur = next((m for m in mats if m["name"] == pick), None)
-    c = st.columns(4)
-    name = c[0].text_input("부자재명", cur["name"] if cur else "")
-    cats = list(CAT_KEY)
-    cat = c[1].selectbox("분류 (원가표의 어느 컬럼에 들어가나)", cats,
-                         index=cats.index(CAT_LABEL[cur["category"]]) if cur else 0)
-    price = c[2].number_input("단가(원)", 0.0, value=float(cur["unit_price"]) if cur else 0.0, step=1.0)
-    loss = c[3].number_input("기본 loss(%)", 0.0, 100.0, (cur["loss_rate"] * 100) if cur else 3.0, 0.1)
-    memo = st.text_input("메모", cur["memo"] if cur else "")
-    b1, b2 = st.columns([1, 6])
-    if b1.button("💾 부자재 저장") and name.strip():
-        db.upsert_material(name.strip(), CAT_KEY[cat], price, loss / 100, memo)
-        st.rerun()
-    if cur and b2.button("🗑 이 부자재 삭제"):
-        try:
-            db.delete_material(cur["id"])
-            st.rerun()
-        except Exception:
-            st.error("제품에서 사용 중인 부자재는 삭제할 수 없습니다")
 
 
 # ---------- 페이지: 견적 이력 ----------
@@ -291,7 +101,7 @@ def _quote_label(item) -> str:
 
 
 def _fmt_num(v, rate=False):
-    if v is None:
+    if v is None or (isinstance(v, float) and v != v):
         return ""
     return f"{v * 100:.1f}%" if rate else f"{v:,.1f}"
 
@@ -328,7 +138,11 @@ def _show_compare(a, b):
             "구성비 B": ing["구성비 B"].map(lambda v: _fmt_num(v, True)),
             "단가 A": ing["단가 A"].map(_fmt_num), "단가 B": ing["단가 B"].map(_fmt_num),
             "단가기준일 A": ing["단가기준일 A"], "단가기준일 B": ing["단가기준일 B"],
-            "원물가+로스 A": ing["원물가+로스 A"].map(_fmt_num), "원물가+로스 B": ing["원물가+로스 B"].map(_fmt_num),
+            "통화 A": ing["통화 A"], "외화단가 A": ing["외화단가 A"].map(lambda v: _fmt_num(v)),
+            "환율 A": ing["환율 A"].map(lambda v: "" if v is None or pd.isna(v) else f"{v:,.2f}"),
+            "통화 B": ing["통화 B"], "외화단가 B": ing["외화단가 B"].map(lambda v: _fmt_num(v)),
+            "환율 B": ing["환율 B"].map(lambda v: "" if v is None or pd.isna(v) else f"{v:,.2f}"),
+            "원료비 A": ing["원료비 A"].map(_fmt_num), "원료비 B": ing["원료비 B"].map(_fmt_num),
             "차이": ing["차이"].map(lambda v: f"{v:+,.1f}")})
         st.dataframe(view, hide_index=True, width="stretch")
     st.markdown("**부자재별 비교**")
@@ -462,20 +276,29 @@ def page_settings():
     if not admin_env:
         st.caption("⚠ 관리자 비밀번호(PRICING_ADMIN_PASSWORD)가 설정되어 있지 않아 누구나 이 잠금을 풀 수 있습니다. "
                    "여러 명이 쓸 때는 run_shared.bat 실행 시 관리자 비밀번호를 입력하세요.")
-    st.caption(f"DB 파일 위치: {db.DB_PATH}")
+    st.divider()
+    st.subheader("전체 데이터 엑셀 내보내기 (백업 · 외부 분석)")
+    st.caption("원료·부자재 마스터와 단가 이력, 환율 이력, 판매처, 제품 구성(BOM), 견적 이력 요약을 한 파일로 내려받습니다.")
+    if st.button("📦 전체 데이터 엑셀 만들기"):
+        st.session_state["all_xlsx"] = all_data_xlsx(db.collect_all_data())
+    if "all_xlsx" in st.session_state:
+        st.download_button("⬇ 전체 데이터 엑셀 받기", st.session_state["all_xlsx"], f"전체데이터_{date.today()}.xlsx")
+    st.caption(f"DB 파일 위치: {db.DB_PATH} (이 파일 하나를 복사해 두면 모든 데이터가 백업됩니다)")
 
 
 # ---------- 페이지: 엑셀 일괄 등록 ----------
 def page_bulk():
-    st.header("엑셀 일괄 등록 (원료 단가 · 부자재)")
-    st.caption("회사에서 쓰는 원료 단가표/부자재 목록을 엑셀로 한 번에 올립니다. "
-               "이름이 같으면 수정, 없으면 신규 등록이고, 빈 칸은 기존 값을 유지합니다.")
+    st.header("엑셀 일괄 등록 (원료 · 부자재 · 환율)")
+    st.caption("회사에서 쓰는 원료 단가표 · 부자재 목록 · 일별 환율을 엑셀로 한 번에 올립니다. "
+               "이름이 같으면 수정, 없으면 신규 등록이고, 빈 칸은 기존 값을 유지합니다. "
+               "수입 품목은 통화와 외화 단가로 올리면 환율로 자동 환산됩니다.")
 
     c1, c2 = st.columns(2)
     c1.download_button("⬇ 빈 양식 받기 (.xlsx)", importer.build_workbook(), "원료_부자재_등록양식.xlsx",
-                       help="원료 / 부자재 시트가 있는 양식입니다. 작성방법 시트를 참고하세요.")
+                       help="원료 / 부자재 / 환율 시트가 있는 양식입니다. 작성방법 시트를 참고하세요.")
     c2.download_button("⬇ 현재 등록된 마스터 내보내기", importer.build_workbook(
-        db.list_ingredients(), db.list_materials()), f"마스터_{date.today()}.xlsx",
+        db.list_ingredients(), db.list_materials(), sorted(db.list_fx_rates(), key=lambda r: (r["currency"], r["rate_date"]))),
+        f"마스터_{date.today()}.xlsx",
         help="내보낸 파일을 엑셀에서 고쳐서 다시 올리면 일괄 수정할 수 있습니다.")
 
     up = st.file_uploader("엑셀 파일 선택 (.xlsx / .xls / .csv)", type=["xlsx", "xls", "csv"])
@@ -495,7 +318,7 @@ def page_bulk():
     for w in parsed.warnings:
         st.warning(w)
 
-    results = db.bulk_apply(parsed.ingredients, parsed.materials, dry_run=True)   # 미리보기 (DB 변경 없음)
+    results = db.bulk_apply(parsed.ingredients, parsed.materials, parsed.fx_rates, dry_run=True)   # 미리보기 (DB 변경 없음)
     df = pd.DataFrame(results)
     errs = df[df["status"] == "오류"]
     cnt = df["status"].value_counts()
@@ -517,18 +340,19 @@ def page_bulk():
         st.info("바뀌는 내용이 없습니다 (이미 모두 등록되어 있어요).")
         return
     if st.button("✅ 이 내용으로 등록 실행", type="primary"):
-        done = db.bulk_apply(parsed.ingredients, parsed.materials)
+        done = db.bulk_apply(parsed.ingredients, parsed.materials, parsed.fx_rates)
         if any(r["status"] == "오류" for r in done):
             st.error("등록 중 오류가 발생해 전체 취소되었습니다.")
         else:
             st.success(f"등록 완료 — 신규 {sum(r['status'] == '신규' for r in done)}건, "
                        f"수정 {sum(r['status'] == '수정' for r in done)}건. "
-                       "다음은 '제품 관리'에서 배합표를 만드세요.")
+                       "다음은 '제품 관리'에서 배합표를 만들거나 '가격 추이'에서 변동을 확인하세요.")
             st.balloons()
 
 
 PAGES = {"견적 계산": page_quote, "제품 관리": page_products, "원료 단가": page_ingredients,
-         "부자재": page_materials, "엑셀 일괄 등록": page_bulk, "견적 이력": page_history, "설정": page_settings}
+         "부자재": page_materials, "환율": page_fx, "판매처": page_channels, "가격 추이": page_trends,
+         "엑셀 일괄 등록": page_bulk, "견적 이력": page_history, "설정": page_settings}
 
 if check_password():
     st.sidebar.title("🥜 납품가 산출")

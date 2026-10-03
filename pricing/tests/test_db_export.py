@@ -66,4 +66,4 @@ def test_xlsx_export(tmpdb):
     assert wb.sheetnames[0] == "요약" and len(wb.sheetnames) == 2
     wb2 = load_workbook(BytesIO(quotes_to_xlsx([(q, r)], False)))
     assert wb2.sheetnames == ["납품가"]
-    assert [c.value for c in wb2.active[2]] == ["테스트제품", r.price]   # 원가 정보 없음
+    assert [c.value for c in wb2.active[2]] == ["테스트제품", None, r.price]   # 제품명·판매처·납품가만 (원가 정보 없음)

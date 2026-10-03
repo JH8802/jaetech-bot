@@ -59,9 +59,9 @@ def test_apply_new_then_unchanged(tmpdb):
 def test_update_blank_keeps_existing(tmpdb):
     db.bulk_apply(*[importer.parse_file(make_xlsx(ING, MAT), "x.xlsx").__dict__[k] for k in ("ingredients", "materials")],
                   today="2026-10-01")
-    new = [("아몬드", None, None, None, None, None, 11000, "2026-10-15", None)]
+    new = [("아몬드", None, None, None, None, None, 11000, "2026-09-30", None)]
     p = importer.parse_file(make_xlsx(new, []), "x.xlsx")
-    r = db.bulk_apply(p.ingredients, [], today="2026-10-20")
+    r = db.bulk_apply(p.ingredients, [], today="2026-09-20")
     assert r[0]["status"] == "수정" and "10,500→11,000" in r[0]["detail"]
     a = next(i for i in db.list_ingredients() if i["name"] == "아몬드")
     assert a["origin"] == "미국" and a["loss_moisture"] == pytest.approx(.025)   # 빈 칸 → 유지
@@ -133,7 +133,7 @@ def test_export_roundtrip_is_noop(tmpdb):
 
 def test_blank_template_has_no_rows():
     wb = load_workbook(io.BytesIO(importer.build_workbook()))
-    assert wb.sheetnames == ["작성방법", "원료", "부자재"]
+    assert wb.sheetnames == ["작성방법", "원료", "부자재", "환율"]
     p = importer.parse_file(importer.build_workbook(), "t.xlsx")
     assert p.errors                              # 빈 양식은 '데이터 없음' (예시 행이 섞여 들어가지 않음)
 
