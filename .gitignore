@@ -33,3 +33,6 @@ pricing/tests/private/
 
 # 모의 테스트용 랜덤 예제 엑셀은 가짜 데이터라 저장소에 포함
 !pricing/sample/*.xlsx
+
+# 배포용 ZIP 산출물
+dist/
