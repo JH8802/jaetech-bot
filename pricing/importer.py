@@ -286,6 +286,8 @@ def parse_file(data: bytes, filename: str) -> ImportData:
         h_ing, h_mat = _find_header(rows, ING_NAME), _find_header(rows, MAT_NAME)
         h_fx = _find_header(rows, FX_RATE_NAMES) if (h_ing is None and h_mat is None) else None
         if h_ing is None and h_mat is None and h_fx is None:
+            if sname in ("작성방법", "안내", "설명"):
+                continue
             res.notes.append(f"시트 '{sname}': 헤더('원료명' / '부자재명' / '환율')가 없어 건너뜀")
             continue
         for kind, h, colspec in (("원료", h_ing, ING_COLS), ("부자재", h_mat, MAT_COLS), ("환율", h_fx, FX_COLS)):
@@ -376,9 +378,17 @@ def parse_file(data: bytes, filename: str) -> ImportData:
     if not res.ingredients and not res.materials and not res.fx_rates and not res.errors:
         res.errors.append("등록할 원료/부자재/환율 데이터를 찾지 못했습니다. 양식(템플릿)의 헤더를 확인하세요.")
 
-    names = [r["name"] for r in res.materials]
-    for n in sorted({n for n in names if names.count(n) > 1}):
-        res.warnings.append(f"부자재 '{n}' 이(가) 파일 안에 여러 번 있습니다 (마지막 값이 적용됨)")
+    # 같은 품목이 여러 줄인 것은 정상(날짜별 단가 이력). '같은 날짜'에 서로 다른 값이 있을 때만 경고한다.
+    for label, rows_ in (("원료", res.ingredients), ("부자재", res.materials)):
+        seen: dict[tuple, dict] = {}
+        for r in rows_:
+            key = (r["name"], r.get("date"))
+            price = (r.get("price", r.get("unit_price")), r.get("foreign_price"))
+            if key in seen and seen[key] != price and (price != (None, None)):
+                res.warnings.append(f"{label} '{r['name']}' 의 같은 적용일({r.get('date') or '비움'})에 서로 다른 단가가 "
+                                    f"여러 줄 있습니다 (파일 순서대로 적용되어 마지막 값이 남습니다)")
+            if price != (None, None):
+                seen[key] = price
     keys = [(r["currency"], r["date"]) for r in res.fx_rates]
     for k in sorted({k for k in keys if keys.count(k) > 1}):
         res.warnings.append(f"환율 {k[0]} {k[1]} 이(가) 파일 안에 여러 번 있습니다 (마지막 값이 적용됨)")

@@ -159,3 +159,18 @@ def test_price_returning_to_old_value_later_is_recorded(tmpdb):
     p = importer.parse_file(xlsx(rows), "x.xlsx")
     assert [r["status"] for r in db.bulk_apply(p.ingredients, [], [])] == ["신규", "수정", "수정"]
     assert len(db.price_history(db.list_ingredients()[0]["id"])) == 3
+
+
+def test_multiple_price_lines_per_material_do_not_warn_but_same_day_conflict_does():
+    mats = [("롤필름", "롤포장지", 10, 3, None, "2026-01-01", None, None, None),
+            ("롤필름", None, 11, None, None, "2026-04-01", None, None, None),        # 날짜별 이력 → 정상
+            ("박스", "카톤박스", 100, 3, None, "2026-01-01", None, None, None),
+            ("박스", None, 120, None, None, "2026-01-01", None, None, None)]          # 같은 날 다른 값 → 경고
+    p = importer.parse_file(xlsx([], mats), "x.xlsx")
+    text = "\n".join(p.warnings)
+    assert "롤필름" not in text and "박스" in text and "같은 적용일" in text
+
+
+def test_guide_sheet_is_silently_skipped():
+    p = importer.parse_file(importer.build_workbook() , "t.xlsx")
+    assert not any("작성방법" in n for n in p.notes)
