@@ -77,8 +77,8 @@ def test_trends_page_draws_charts_and_downloads(app_db):
 
 def test_fx_page_saves_rate_for_selected_currency_and_adds_other_currency(app_db):
     at = open_page("환율")
-    sb = [s for s in at.selectbox if s.label == "통화"][0]
-    assert "USD" in sb.options[0]                                  # 미국이 맨 위 (미국 → 베트남 → 튀르키예)
+    sb = [x for x in at.selectbox if x.label == "통화"][0]
+    assert sb.options[0] == "미국 ($)" and sb.options[1] == "베트남 (₫)" and sb.options[2] == "튀르키예 (₺)"
     sb.set_value(sb.options[0])
     [n for n in at.number_input if n.label.startswith("환율")][0].set_value(1450.0)
     at.run()
@@ -89,23 +89,156 @@ def test_fx_page_saves_rate_for_selected_currency_and_adds_other_currency(app_db
             ti.set_value("eur")
         elif ti.label == "통화 이름":
             ti.set_value("유로")
+        elif ti.label == "국가":
+            ti.set_value("유럽연합")
+        elif ti.label == "통화 기호":
+            ti.set_value("€")
     at.run()
     [b for b in at.button if b.label == "통화 추가"][0].click().run()
-    assert "EUR" in {c["code"] for c in db.list_currencies()}
+    eur = next(c for c in db.list_currencies() if c["code"] == "EUR")
+    assert eur["symbol"] == "€" and db.currency_label(eur) == "(기타) 유럽연합 (€)"
 
 
-def test_ingredient_foreign_price_form(app_db):
+def test_fx_history_help_explains_data_source(app_db):
+    at = open_page("환율")
+    helps = " ".join(getattr(e, "help", "") or "" for e in at.subheader)
+    assert "인터넷에서 자동으로 가져오지 않습니다" in helps and "직전에 입력한 환율" in helps
+
+
+def _fill(at, label_startswith, value):
+    for n in at.number_input:
+        if n.label.startswith(label_startswith):
+            n.set_value(value)
+            return
+    raise AssertionError(f"number_input not found: {label_startswith}")
+
+
+def _text(at, label, value):
+    [t for t in at.text_input if t.label == label][0].set_value(value)
+
+
+def _click(at, label_part):
+    [b for b in at.button if label_part in b.label][0].click().run()
+
+
+def test_ingredient_form_has_base_price_before_roasting_and_fx_options(app_db):
     at = open_page("원료 단가")
-    at.selectbox[0].set_value("수입A(가상)").run()
-    cur = [s for s in at.selectbox if s.label == "통화"][0]
-    cur.set_value([o for o in cur.options if "USD" in o][0]).run()
-    [n for n in at.number_input if n.label.startswith("외화 단가")][0].set_value(8.0)
+    labels = [n.label for n in at.number_input]
+    assert "기본 원료 단가(원/kg)" in labels
+    assert labels.index("기본 원료 단가(원/kg)") < labels.index("로스팅비(원/kg)")        # 로스팅비 앞쪽
+    fx = [x for x in at.selectbox if x.label.startswith("환율 (수입")][0]
+    assert list(fx.options) == ["해당 없음 (원화 ₩)", "미국 ($)", "베트남 (₫)", "튀르키예 (₺)", "(기타) 새 통화 직접 입력"]
+
+
+def test_new_domestic_ingredient_with_base_price(app_db):
+    at = open_page("원료 단가")
+    _text(at, "원료명", "국산땅콩(가상)")
+    _fill(at, "기본 원료 단가", 5200.0)
     at.run()
-    [b for b in at.button if "단가 추가" in b.label][0].click().run()
-    assert not at.exception
-    ing = next(i for i in db.list_ingredients() if i["name"] == "수입A(가상)")
-    assert ing["foreign_price"] == 8.0 and ing["currency"] == "USD"
-    assert ing["price_per_kg"] == pytest.approx(8.0 * ing["fx"])
+    _click(at, "원료 저장")
+    assert not at.exception and not at.error
+    ing = next(i for i in db.list_ingredients() if i["name"] == "국산땅콩(가상)")
+    assert ing["currency"] == "KRW" and ing["price_per_kg"] == 5200.0
+
+
+def test_new_foreign_ingredient_with_typed_fx_rate_is_fixed(app_db):
+    at = open_page("원료 단가")
+    _text(at, "원료명", "수입피스타치오")
+    fx = [x for x in at.selectbox if x.label.startswith("환율 (수입")][0]
+    fx.set_value("미국 ($)").run()
+    rate_input = [n for n in at.number_input if n.label.startswith("환율 (원 /")][0]
+    assert rate_input.value == 1420.0                      # 환율 메뉴의 최근 값이 기본으로 채워짐 (고쳐 쓸 수 있음)
+    assert [n for n in at.number_input if n.label.startswith("기본 원료 단가")] == []   # 외화 선택 시 원화칸은 자동계산(잠금)
+    _fill(at, "외화 단가", 8.0)
+    _fill(at, "환율 (원 /", 1400.0)                         # 단가를 받은 당시 환율을 직접 입력
+    at.run()
+    assert any("11,200.00원" in c.value for c in at.caption)  # 8$ × 1,400원 = 11,200원 미리보기
+    _click(at, "원료 저장")
+    assert not at.exception and not at.error
+    ing = next(i for i in db.list_ingredients() if i["name"] == "수입피스타치오")
+    assert (ing["currency"], ing["foreign_price"], ing["fx_mode"], ing["fx_fixed_rate"]) == ("USD", 8.0, "fixed", 1400.0)
+    assert ing["price_per_kg"] == pytest.approx(11200.0)   # 환율 메뉴(1420)가 아니라 입력한 1400으로 환산
+
+
+def test_vnd_rate_is_per_100_dong(app_db):
+    at = open_page("원료 단가")
+    _text(at, "원료명", "베트남캐슈")
+    [x for x in at.selectbox if x.label.startswith("환율 (수입")][0].set_value("베트남 (₫)").run()
+    labels = [n.label for n in at.number_input]
+    assert any("외화 단가 (₫/kg)" in l for l in labels) and any("환율 (원 / 100₫)" in l for l in labels)
+    _fill(at, "외화 단가", 250000.0)
+    _fill(at, "환율 (원 /", 5.6)
+    at.run()
+    _click(at, "원료 저장")
+    ing = next(i for i in db.list_ingredients() if i["name"] == "베트남캐슈")
+    assert ing["price_per_kg"] == pytest.approx(250000 * 5.6 / 100)
+
+
+def test_other_currency_new_entry_creates_currency_with_symbol(app_db):
+    at = open_page("원료 단가")
+    _text(at, "원료명", "유럽올리브")
+    [x for x in at.selectbox if x.label.startswith("환율 (수입")][0].set_value("(기타) 새 통화 직접 입력").run()
+    _text(at, "통화 코드 (영문 2~6자)", "eur")
+    _text(at, "통화 이름", "유로")
+    _text(at, "국가", "유럽연합")
+    _text(at, "통화 기호", "€")
+    _fill(at, "외화 단가", 6.0)
+    _fill(at, "환율 (원 /", 1500.0)
+    at.run()
+    _click(at, "원료 저장")
+    assert not at.exception and not at.error, [e.value for e in at.error]
+    eur = next(c for c in db.list_currencies() if c["code"] == "EUR")
+    assert eur["symbol"] == "€"
+    ing = next(i for i in db.list_ingredients() if i["name"] == "유럽올리브")
+    assert ing["currency"] == "EUR" and ing["price_per_kg"] == pytest.approx(9000.0)
+
+
+def test_editing_master_only_does_not_add_price_history(app_db):
+    at = open_page("원료 단가")
+    at.selectbox(key="ing_pick").set_value("국내B(가상)").run()
+    before = len(db.price_history(next(i for i in db.list_ingredients() if i["name"] == "국내B(가상)")["id"]))
+    [n for n in at.number_input if n.label == "수분 loss(%)"][0].set_value(4.0)
+    at.run()
+    _click(at, "원료 저장")
+    ing = next(i for i in db.list_ingredients() if i["name"] == "국내B(가상)")
+    assert ing["loss_moisture"] == pytest.approx(0.04)
+    assert len(db.price_history(ing["id"])) == before        # 단가는 그대로 → 이력 줄이 늘지 않음
+
+
+def test_changing_price_adds_dated_history_row(app_db):
+    at = open_page("원료 단가")
+    at.selectbox(key="ing_pick").set_value("국내B(가상)").run()
+    _fill(at, "기본 원료 단가", 10500.0)
+    at.run()
+    _click(at, "원료 저장")
+    ing = next(i for i in db.list_ingredients() if i["name"] == "국내B(가상)")
+    assert ing["price_per_kg"] == 10500.0 and len(db.price_history(ing["id"])) == 3
+
+
+def test_material_form_has_same_fx_options_and_saves_foreign_price(app_db):
+    at = open_page("부자재")
+    fx = [x for x in at.selectbox if x.label.startswith("환율 (수입")][0]
+    assert list(fx.options)[:4] == ["해당 없음 (원화 ₩)", "미국 ($)", "베트남 (₫)", "튀르키예 (₺)"]
+    assert "기본 부자재 단가(원)" in [n.label for n in at.number_input]
+    _text(at, "부자재명", "수입스티커")
+    fx.set_value("튀르키예 (₺)").run()
+    _fill(at, "외화 단가", 2.0)
+    _fill(at, "환율 (원 /", 33.0)
+    at.run()
+    _click(at, "부자재 저장")
+    assert not at.exception and not at.error
+    m = next(x for x in db.list_materials() if x["name"] == "수입스티커")
+    assert (m["currency"], m["foreign_price"], m["fx_mode"]) == ("TRY", 2.0, "fixed") and m["unit_price"] == pytest.approx(66.0)
+
+
+def test_help_icons_present_on_key_pages(app_db):
+    def helps(page):
+        at = open_page(page)
+        els = list(at.header) + list(at.subheader) + list(at.number_input) + list(at.selectbox) + list(at.metric)
+        return [e for e in els if getattr(e, "help", None)]
+    for page in PAGES:
+        assert len(helps(page)) >= 1, page                       # 메뉴마다 (?) 설명이 하나 이상
+    assert len(helps("원료 단가")) >= 8 and len(helps("견적 계산")) >= 6 and len(helps("가격 추이")) >= 6
 
 
 def test_bulk_page_with_fx_sheet(app_db, monkeypatch):

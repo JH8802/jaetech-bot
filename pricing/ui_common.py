@@ -50,12 +50,11 @@ def currency_options(include_krw: bool = True) -> dict[str, str]:
 
 
 def unit_note(code: str) -> str:
-    """환율 입력 단위 안내. 예: 'VND → 100동당 원', 'USD → 1달러당 원'"""
+    """환율 입력 단위 안내. 예: USD → '원 / 1$', VND → '원 / 100₫'"""
     cur = next((c for c in db.list_currencies() if c["code"] == code), None)
     if cur is None:
         return ""
-    unit = cur["quote_unit"]
-    return f"외화 {unit:g}단위({code})당 원"
+    return f"원 / {cur['quote_unit']:g}{db.currency_symbol(cur)}"
 
 
 def show_fx_sensitivity(q) -> None:
@@ -63,7 +62,7 @@ def show_fx_sensitivity(q) -> None:
     if not rows:
         st.caption("외화 단가가 연동된 원료·부자재가 없어 환율 영향은 없습니다 (모두 원화 단가).")
         return
-    st.markdown("**환율이 변하면 원가·납품가가 얼마나 변하나** (해당 통화 환율만 변할 때, 단가 기준일의 값 기준)")
+    st.markdown("**환율이 변하면 원가·납품가가 얼마나 변하나**", help="수입 원료·부자재 중 해당 통화로 단가를 받은 항목만 환율 변동의 영향을 받습니다. 한 통화의 환율만 ±5%·±10% 변한다고 가정하고 다시 계산한 결과입니다. 원화 단가 품목은 영향이 없습니다.")
     exposure = {}
     for r in rows:
         exposure[r["currency"]] = (r["exposure"], r["share"])
@@ -84,16 +83,16 @@ def show_result(q, r, fx: bool = True) -> None:
     st.markdown(f"계산 방식: **{calc_mode(q)}**"
                 + (f" (지정 납품가 {won(q.fixed_price)})" if q.fixed_price is not None else "") + ch + asof)
     c = st.columns(4)
-    c[0].metric("납품가", won(r.price))
-    c[1].metric("원가합계", won(r.total_cost))
-    c[2].metric("센터도착가", won(r.center_cost))
-    c[3].metric("실질 마진", f"{won(r.effective_margin)} ({pct(r.effective_margin_rate)})")
+    c[0].metric("납품가", won(r.price), help="거래처에 청구할 공급가(VAT 별도). 판관비·마진·판매처 비용을 모두 포함해 역산한 값입니다.")
+    c[1].metric("원가합계", won(r.total_cost), help="직접원가 + 판관비 + 마진 + 판매처 비용(물류비·수수료·홍보비·기획전·택배비). 자동 계산이면 납품가와 거의 같습니다.")
+    c[2].metric("센터도착가", won(r.center_cost), help="직접원가 + 판관비 + 마진. 물류센터에 도착한 시점의 가격이며 판매처 비용은 아직 포함되지 않습니다.")
+    c[3].metric("실질 마진", f"{won(r.effective_margin)} ({pct(r.effective_margin_rate)})", help="설정한 마진 + 납품가 반올림으로 남는 차익. 마이너스면 원가보다 싸게 파는 적자입니다.")
     for w in r.warnings:
         st.warning(w)
 
     left, right = st.columns(2)
     with left:
-        st.markdown("**원료 (원물가 · 로스 · 가공비 · 환율)**")
+        st.markdown("**원료 (원물가 · 로스 · 가공비 · 환율)**", help="원물가 = 단가(원/kg) × 구성 중량. 로스 = 원물가 × 로스율. 로스팅비·선별비는 원료별 가공비. 수입 원료는 통화·외화 단가·적용 환율과 환율 기준일이 함께 표시됩니다.")
         st.dataframe(pd.DataFrame([{
             "원료": x["name"], "구성비": pct(x["ratio"]), "단위중량(g)": round(x["unit_g"], 2),
             "벌크단가(원/kg)": num(x["price_per_kg"]), "통화": x.get("currency", "KRW"),
@@ -104,7 +103,7 @@ def show_result(q, r, fx: bool = True) -> None:
             "단가기준일": x.get("price_date", ""), "환율기준일": x.get("fx_date", ""),
             "단가출처": x.get("price_source", "")} for x in r.ingredient_rows]),
             hide_index=True, width="stretch")
-        st.markdown("**부자재**")
+        st.markdown("**부자재**", help="금액 = 단가 × 수량 ÷ 나누는 수 × (1+loss). 수량에 (봉수연동)이 붙어 있으면 수량 × 봉수로 계산된 값입니다.")
         st.dataframe(pd.DataFrame([{
             "부자재": x["name"], "분류": CAT_LABEL[x["category"]],
             "수량": f'{x.get("qty", 0):g}' + (" (봉수연동)" if x.get("per_bag") else ""),
@@ -113,7 +112,7 @@ def show_result(q, r, fx: bool = True) -> None:
             "적용환율": num(x.get("fx_rate"), 4), "단가기준일": x.get("price_date", "")}
             for x in r.material_rows]), hide_index=True, width="stretch")
     with right:
-        st.markdown("**원가 구성**")
+        st.markdown("**원가 구성**", help="원가가 어떤 항목으로 이루어졌는지 보여줍니다. 값이 0인 선택 항목(로스팅비·3PL·수수료 등)은 생략됩니다. 판관비·마진·수수료류는 납품가 기준 %입니다.")
         lines = cost_lines(q, r)
         st.dataframe(pd.DataFrame([{"항목": label, "금액(원)": f"{val:,.1f}"} for label, val in lines]),
                      hide_index=True, width="stretch", height=38 + 35 * len(lines))

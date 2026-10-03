@@ -167,13 +167,14 @@ MIGRATIONS = {
                           "fx_mode": "TEXT DEFAULT 'auto'", "fx_fixed_rate": "REAL"},
     "products": {"three_pl_cost": "REAL DEFAULT 0"},
     "product_materials": {"qty_basis": "TEXT DEFAULT 'fixed'"},
+    "currencies": {"symbol": "TEXT DEFAULT ''"},
 }
 
-SEED_CURRENCIES = [                       # code, 이름, 국가, 표기단위
-    ("KRW", "원", "대한민국", 1),
-    ("USD", "미국 달러", "미국", 1),
-    ("VND", "베트남 동", "베트남", 100),
-    ("TRY", "튀르키예 리라", "튀르키예", 1),
+SEED_CURRENCIES = [                       # code, 이름, 국가, 표기단위, 기호
+    ("KRW", "원", "대한민국", 1, "₩"),
+    ("USD", "미국 달러", "미국", 1, "$"),
+    ("VND", "베트남 동", "베트남", 100, "₫"),
+    ("TRY", "튀르키예 리라", "튀르키예", 1, "₺"),
 ]
 
 
@@ -185,9 +186,11 @@ def init_db() -> None:
             for col, ddl in cols.items():
                 if col not in have:
                     con.execute(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}")
-        for code, name, country, unit in SEED_CURRENCIES:
-            con.execute("""INSERT OR IGNORE INTO currencies(code,name,country,quote_unit,builtin)
-                           VALUES(?,?,?,?,1)""", (code, name, country, unit))
+        for code, name, country, unit, symbol in SEED_CURRENCIES:
+            con.execute("""INSERT OR IGNORE INTO currencies(code,name,country,quote_unit,builtin,symbol)
+                           VALUES(?,?,?,?,1,?)""", (code, name, country, unit, symbol))
+            con.execute("UPDATE currencies SET symbol=? WHERE code=? AND (symbol IS NULL OR symbol='')",
+                        (symbol, code))
         for k, v in DEFAULT_SETTINGS.items():
             con.execute("INSERT OR IGNORE INTO settings(key,value) VALUES(?,?)", (k, v))
         # 예전 버전(단가 이력 없이 단가 1개만 있던 부자재)을 이력 1건으로 이관 (단가가 있는 것만)
@@ -231,15 +234,19 @@ def list_currencies(include_krw: bool = True) -> list[dict]:
     return rows if include_krw else [r for r in rows if r["code"] != KRW]
 
 
+def currency_symbol(c: dict) -> str:
+    return (c.get("symbol") or "").strip() or c["code"]
+
+
 def currency_label(c: dict) -> str:
-    unit = f" (원/{c['quote_unit']:g}{c['name'].split()[-1] if c['quote_unit'] != 1 else ''})" if False else ""
+    """화면 표시용. 기본 통화: '미국 ($)', (기타) 통화: '(기타) 유럽연합 (€)'"""
+    country = c["country"] or c["name"]
     tag = "" if c["builtin"] else "(기타) "
-    country = f"{c['country']} · " if c["country"] else ""
-    return f"{tag}{country}{c['code']} {c['name']}"
+    return f"{tag}{country} ({currency_symbol(c)})"
 
 
-def add_currency(code: str, name: str, country: str = "", quote_unit: float = 1.0) -> None:
-    """(기타) 통화 추가. 예: EUR / 유로 / 유럽연합 / 1"""
+def add_currency(code: str, name: str, country: str = "", quote_unit: float = 1.0, symbol: str = "") -> None:
+    """(기타) 통화 추가. 예: EUR / 유로 / 유럽연합 / 1 / €"""
     code = code.strip().upper()
     if not code.isalnum() or not 2 <= len(code) <= 6:
         raise ValueError("통화 코드는 영문/숫자 2~6자로 입력하세요 (예: EUR, CNY, AUD)")
@@ -250,8 +257,9 @@ def add_currency(code: str, name: str, country: str = "", quote_unit: float = 1.
     with connect() as con:
         if con.execute("SELECT 1 FROM currencies WHERE code=?", (code,)).fetchone():
             raise ValueError(f"이미 등록된 통화입니다: {code}")
-        con.execute("INSERT INTO currencies(code,name,country,quote_unit,builtin) VALUES(?,?,?,?,0)",
-                    (code, name.strip(), country.strip(), quote_unit))
+        con.execute("""INSERT INTO currencies(code,name,country,quote_unit,builtin,symbol)
+                       VALUES(?,?,?,?,0,?)""",
+                    (code, name.strip(), country.strip(), quote_unit, symbol.strip()))
 
 
 def delete_currency(code: str) -> None:
@@ -859,11 +867,10 @@ def _apply_price(con, kind: str, item_id: int, row: dict, price_key: str, today:
                     and (not fixed or _same(r["fx_fixed_rate"], fixed)))
         return (r["currency"] or KRW) == KRW and r["foreign_price"] is None and _same(r[krw_col], krw_in)
 
-    last = con.execute(f"SELECT * FROM {table} WHERE {id_col}=? ORDER BY effective_date DESC, id DESC LIMIT 1",
-                       (item_id,)).fetchone()
-    dup = [r for r in con.execute(f"SELECT * FROM {table} WHERE {id_col}=? AND effective_date=?", (item_id, d))
-           if same_def(r)]
-    if dup or (last is not None and same_def(last) and d >= last["effective_date"]):
+    # 그 날짜(d) 시점에 유효한 단가가 이미 같은 정의라면 변경 없음 (재업로드·중복 줄에도 안전)
+    last = con.execute(f"""SELECT * FROM {table} WHERE {id_col}=? AND effective_date<=?
+                           ORDER BY effective_date DESC, id DESC LIMIT 1""", (item_id, d)).fetchone()
+    if last is not None and same_def(last):
         return None
     krw, cur2, foreign2, mode2, fixed2 = _price_args(con, krw_in, d, cur, foreign, mode, fixed)
     con.execute(f"""INSERT INTO {table}({id_col},{krw_col},effective_date,memo,currency,foreign_price,

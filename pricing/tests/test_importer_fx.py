@@ -137,3 +137,25 @@ def test_old_style_single_sheet_still_parses():
     b = io.BytesIO(); wb.save(b)
     p = importer.parse_file(b.getvalue(), "old.xlsx")
     assert not p.errors and p.ingredients[0]["price"] == 10500 and p.ingredients[0]["currency"] is None
+
+
+def test_reimport_is_noop_even_when_file_has_redundant_unchanged_price_lines(tmpdb):
+    """값이 안 바뀐 줄(0.05→0.05)이 있고 이후 날짜에 다른 단가가 있어도, 같은 파일 재업로드는 '변경없음'."""
+    rows = [("A원료", None, None, None, None, None, 100, "2026-01-01", None, None, None, None, None, None),
+            ("A원료", None, None, None, None, None, 100, "2026-02-01", None, None, None, None, None, None),   # 변동 없음
+            ("A원료", None, None, None, None, None, 120, "2026-03-01", None, None, None, None, None, None)]
+    p = importer.parse_file(xlsx(rows), "x.xlsx")
+    first = db.bulk_apply(p.ingredients, [], [], today="2026-09-01")
+    assert first[0]["status"] == "신규" and first[1]["status"] == "변경없음" and first[2]["status"] == "수정"
+    assert {r["status"] for r in db.bulk_apply(p.ingredients, [], [], today="2026-09-02")} == {"변경없음"}
+    ing = db.list_ingredients()[0]
+    assert len(db.price_history(ing["id"])) == 2                       # 중복 줄은 이력으로 쌓이지 않음
+
+
+def test_price_returning_to_old_value_later_is_recorded(tmpdb):
+    rows = [("B원료", None, None, None, None, None, 100, "2026-01-01", None, None, None, None, None, None),
+            ("B원료", None, None, None, None, None, 120, "2026-03-01", None, None, None, None, None, None),
+            ("B원료", None, None, None, None, None, 100, "2026-05-01", None, None, None, None, None, None)]  # 다시 100으로
+    p = importer.parse_file(xlsx(rows), "x.xlsx")
+    assert [r["status"] for r in db.bulk_apply(p.ingredients, [], [])] == ["신규", "수정", "수정"]
+    assert len(db.price_history(db.list_ingredients()[0]["id"])) == 3
