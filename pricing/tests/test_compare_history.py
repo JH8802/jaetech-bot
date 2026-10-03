@@ -11,7 +11,7 @@ from pricing.export import quotes_list_to_xlsx, quotes_to_xlsx
 
 def make(price_a=10000, ratio_a=.6, **kw):
     d = dict(product_name="테스트", bag_count=10, unit_weight_g=20,
-             ingredients=[I("A", ratio_a, price_a, .05, "미국", "가상상사", "2026-09-01", "마스터 최신단가"),
+             ingredients=[I("A", ratio_a, price_a, .05, "미국", "가상상사", "2026-09-01", "마스터 단가"),
                           I("B", 1 - ratio_a, 20000, .02)],
              materials=[M("소포장", "pack", 10, 10, 1, .03), M("박스", "box", 1000, 1, 10, .03)],
              shipping_cost=100, sga_rate=.05, rounding="round")
@@ -84,7 +84,7 @@ def test_quote_records_source_info(tmpdb):
     q, r = db.calculate_quote(pid)
     by = {i.name: i for i in q.ingredients}
     assert (by["아몬드"].origin, by["아몬드"].supplier, by["아몬드"].price_date, by["아몬드"].price_source) == \
-        ("미국", "가상상사", "2026-06-01", "마스터 최신단가")
+        ("미국", "가상상사", "2026-06-01", "마스터 단가")
     assert by["호두"].price_source == "제품 직접입력" and by["호두"].price_date == ""
     qid = db.save_quote(q, r, "tester")
     q2, r2, meta = db.load_quote(qid)
