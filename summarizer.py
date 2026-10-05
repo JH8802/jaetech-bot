@@ -271,12 +271,18 @@ def summarize_for_threads(channel, text):
         count_api_call()
         message = client.messages.create(
             model="claude-haiku-4-5-20251001",
-            max_tokens=400,
+            max_tokens=700,
             messages=[{"role": "user", "content": prompt}]
         )
         result = message.content[0].text.strip()
     except Exception as e:
         print(f"❌ 쓰레드 초안 API 오류: {e}")
+        return None
+
+    # 토큰 한도에 걸려 문장이 중간에 잘린 경우 (해시태그/디스클레이머 누락
+    # 등으로 이어짐) — 어설프게 자른 글 보내느니 이번 타임슬롯은 건너뜀
+    if message.stop_reason == "max_tokens":
+        print("⚠️ 쓰레드 초안이 길이 제한으로 중간에 잘림 → 이번 건 건너뜀")
         return None
 
     if not result or len(result.strip()) < 10:
