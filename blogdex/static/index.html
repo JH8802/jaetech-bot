@@ -1,0 +1,452 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>블덱스라이터 — 블로그 원고를 자동으로</title>
+<style>
+  :root {
+    --bg: #f7f8fa;
+    --card: #ffffff;
+    --line: #e6e8ec;
+    --text: #1b1d21;
+    --sub: #6b7280;
+    --primary: #2a5db0;
+    --primary-dark: #1f4a92;
+    --brand: #3b4fc7;
+    --chip-bg: #f1f3f5;
+    --custom-bg: #ede9fe;
+    --custom-text: #6d28d9;
+    --danger: #c0392b;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: Pretendard, "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", system-ui, sans-serif;
+  }
+  button { font-family: inherit; cursor: pointer; }
+
+  /* 상단 바 */
+  header {
+    background: #fff; border-bottom: 1px solid var(--line);
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 28px; height: 56px;
+  }
+  .nav { display: flex; align-items: center; gap: 22px; height: 100%; }
+  .logo { font-weight: 800; font-size: 18px; letter-spacing: -0.5px; }
+  .logo small { font-size: 9px; color: var(--sub); font-weight: 600; margin-left: 4px; }
+  .tab {
+    background: none; border: 0; height: 100%; padding: 0 2px; font-size: 13px; color: var(--sub);
+    border-bottom: 2px solid transparent;
+  }
+  .tab.active { color: var(--primary); font-weight: 700; border-bottom-color: var(--primary); }
+  .tab:disabled { cursor: not-allowed; opacity: .75; }
+  .pill { background: var(--primary); color: #fff; border: 0; border-radius: 999px; height: 30px; padding: 0 14px; font-size: 12px; font-weight: 700; }
+  .pill:disabled { cursor: not-allowed; opacity: .85; }
+  .right { display: flex; align-items: center; gap: 14px; font-size: 12px; color: var(--sub); }
+  .free { border: 1px solid var(--line); border-radius: 4px; padding: 3px 8px; font-weight: 700; color: var(--text); font-size: 11px; }
+
+  /* 히어로 */
+  .hero { text-align: center; padding: 84px 16px 44px; }
+  .hero h1 { margin: 0; font-size: 44px; font-weight: 800; letter-spacing: -1.5px; }
+  .hero h1 em { font-style: normal; color: var(--brand); }
+  .hero p { margin: 14px 0 0; color: var(--sub); font-size: 14px; }
+
+  /* 카드 */
+  main { max-width: 880px; margin: 0 auto; padding: 0 16px 80px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 26px 28px; margin-bottom: 20px; }
+  .card h2 { margin: 0 0 18px; font-size: 16px; font-weight: 700; }
+  label.cap { display: block; font-size: 11px; font-weight: 600; color: #4b5563; margin: 14px 0 8px; }
+
+  /* 글 종류 칩 */
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip {
+    border: 0; background: var(--chip-bg); color: #4b5563; border-radius: 999px;
+    padding: 8px 16px; font-size: 12px; font-weight: 600; display: inline-flex; align-items: center; gap: 6px;
+  }
+  .chip.custom { background: var(--custom-bg); color: var(--custom-text); }
+  .chip.active { background: var(--primary); color: #fff; }
+  .chip .q {
+    width: 16px; height: 16px; border-radius: 50%; background: #dbe4f5; color: var(--primary);
+    font-size: 10px; font-weight: 800; display: inline-flex; align-items: center; justify-content: center; position: relative;
+  }
+  .chip.active .q { background: rgba(255,255,255,.25); color: #fff; }
+  .q:hover::after {
+    content: attr(data-tip); position: absolute; top: 24px; left: 50%; transform: translateX(-50%);
+    width: 220px; padding: 8px 10px; background: #1f2937; color: #fff; border-radius: 8px;
+    font-size: 11px; font-weight: 500; line-height: 1.5; text-align: left; z-index: 5; white-space: normal;
+  }
+
+  /* 입력 */
+  input[type=text], textarea {
+    width: 100%; border: 1px solid var(--line); border-radius: 10px; padding: 13px 14px;
+    font-size: 13px; font-family: inherit; background: #fff; color: var(--text); outline: none;
+  }
+  input[type=text]:focus, textarea:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(42,93,176,.12); }
+  textarea { resize: vertical; min-height: 96px; line-height: 1.6; }
+  /* 매장 검색 (맛집글) */
+  #placeWrap { display: none; }
+  #placeWrap.show { display: block; }
+  .place-row { display: flex; gap: 8px; }
+  .btn-place { background: var(--primary); color: #fff; border: 0; border-radius: 10px; padding: 0 18px; font-size: 12px; font-weight: 700; white-space: nowrap; }
+  .btn-place:disabled { opacity: .6; cursor: wait; }
+  #placeStatus { font-size: 12px; margin: 10px 0 8px; color: #0f9d7a; }
+  #placeStatus.warn { color: var(--danger); }
+  .place {
+    display: block; width: 100%; text-align: left; background: #fff; border: 1px solid var(--line);
+    border-radius: 10px; padding: 12px 16px; margin-bottom: 8px; box-shadow: 0 1px 3px rgba(0,0,0,.04);
+  }
+  .place:hover { border-color: var(--primary); }
+  .place.selected { border-color: var(--primary); background: #f5f9ff; box-shadow: 0 0 0 2px rgba(42,93,176,.15); }
+  .place b { display: block; font-size: 12px; font-weight: 600; color: var(--text); }
+  .place span { display: block; margin-top: 4px; font-size: 11px; color: var(--sub); }
+  #extraWrap { display: none; }
+  #extraWrap.show { display: block; }
+
+  .actions { background: #eef4fd; border: 1px solid #cfe0f7; border-radius: 12px; padding: 12px; display: flex; gap: 10px; margin-top: 12px; }
+  .btn-main {
+    flex: 1; background: var(--primary); color: #fff; border: 0; border-radius: 8px; height: 38px;
+    font-size: 12px; font-weight: 700;
+  }
+  .btn-main:hover:not(:disabled) { background: var(--primary-dark); }
+  .btn-main:disabled { opacity: .6; cursor: wait; }
+  .btn-regen {
+    background: #fff; border: 1px solid var(--line); border-radius: 8px; height: 38px; padding: 0 12px;
+    display: inline-flex; align-items: center; gap: 8px; font-size: 14px; color: #374151;
+  }
+  .btn-regen:disabled { opacity: .6; cursor: wait; }
+  kbd { font: 700 10px/1 inherit; background: #f3f4f6; border: 1px solid var(--line); border-radius: 4px; padding: 3px 5px; }
+
+  /* 제목 후보 */
+  #candidates { display: none; margin-top: 14px; }
+  #candidates.show { display: block; }
+  #candidates .cap { margin: 0 0 8px; }
+  .cand {
+    display: block; width: 100%; text-align: left; background: #fff; border: 1px solid var(--line);
+    border-radius: 10px; padding: 11px 14px; margin-bottom: 8px; font-size: 13px; color: var(--text);
+  }
+  .cand:hover { border-color: var(--primary); background: #f5f9ff; }
+  .btn-write {
+    width: 100%; margin-top: 16px; background: #111827; color: #fff; border: 0; border-radius: 10px;
+    height: 46px; font-size: 14px; font-weight: 700;
+  }
+  .btn-write:disabled { opacity: .6; cursor: wait; }
+
+  .error { display: none; margin-top: 12px; color: var(--danger); font-size: 12px; }
+  .error.show { display: block; }
+
+  /* 결과 */
+  .result-box { border: 1px solid var(--line); border-radius: 10px; min-height: 210px; }
+  .empty { text-align: center; padding: 48px 16px; color: var(--sub); }
+  .empty .icon {
+    width: 48px; height: 48px; margin: 0 auto 14px; border: 1px solid var(--line); border-radius: 12px;
+    display: flex; align-items: center; justify-content: center; font-size: 22px; color: #9ca3af; background: #fafafa;
+  }
+  .empty b { display: block; color: var(--text); font-size: 14px; margin-bottom: 6px; }
+  .empty span { font-size: 12px; }
+  .spinner {
+    width: 26px; height: 26px; margin: 0 auto 14px; border-radius: 50%;
+    border: 3px solid #dbe4f5; border-top-color: var(--primary); animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .out { padding: 22px 24px; }
+  .out-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; font-size: 12px; color: var(--sub); }
+  .out-bar button { border: 1px solid var(--line); background: #fff; border-radius: 8px; padding: 7px 12px; font-size: 12px; font-weight: 600; margin-left: 6px; }
+  #article { white-space: pre-wrap; line-height: 1.85; font-size: 14px; word-break: keep-all; margin: 0; }
+
+  @media (max-width: 640px) {
+    header { padding: 0 14px; }
+    .nav { gap: 12px; overflow-x: auto; }
+    .right .hide-sm { display: none; }
+    .hero h1 { font-size: 32px; }
+    .card { padding: 20px 16px; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="nav">
+    <div class="logo">블덱스라이터<small>BETA</small></div>
+    <button class="tab active">원고 작성</button>
+    <button class="tab" disabled title="준비 중">자동발행</button>
+    <button class="tab" disabled title="준비 중">내 원고</button>
+    <button class="tab" disabled title="준비 중">플랜</button>
+    <button class="pill" disabled title="준비 중">비즈니스</button>
+  </div>
+  <div class="right">
+    <span class="free">FREE</span>
+    <span class="hide-sm">회원가입</span>
+    <span class="hide-sm">로그인</span>
+  </div>
+</header>
+
+<div class="hero">
+  <h1>블덱스<em>라이터</em> BETA</h1>
+  <p>고퀄리티 원고를 무료로 만들어보세요</p>
+</div>
+
+<main>
+  <section class="card">
+    <h2>새 원고 만들기</h2>
+
+    <label class="cap">글 종류</label>
+    <div class="chips" id="chips"></div>
+
+    <div id="placeWrap">
+      <label class="cap" for="placeQuery">매장 이름</label>
+      <div class="place-row">
+        <input type="text" id="placeQuery" maxlength="100" placeholder="예) 마포 릭희옥" autocomplete="off">
+        <button class="btn-place" id="btnPlace">자동 입력</button>
+      </div>
+      <div id="placeStatus"></div>
+      <div id="placeList"></div>
+    </div>
+
+    <div id="extraWrap">
+      <label class="cap" id="extraCap">추가 정보 (선택)</label>
+      <textarea id="extra" maxlength="2000"></textarea>
+    </div>
+
+    <label class="cap" for="title">제목</label>
+    <input type="text" id="title" maxlength="200" placeholder="블로그 글 제목을 입력해주세요" autocomplete="off">
+
+    <div class="actions">
+      <button class="btn-main" id="btnTitles">제목 자동 생성</button>
+      <button class="btn-regen" id="btnRegen" title="제목 다시 생성 (R)">⟳ <kbd>R</kbd></button>
+    </div>
+
+    <div id="candidates">
+      <label class="cap">제목 후보 — 클릭하면 제목 칸에 들어가요</label>
+      <div id="candList"></div>
+    </div>
+
+    <button class="btn-write" id="btnWrite">원고 생성</button>
+    <div class="error" id="error"></div>
+  </section>
+
+  <section class="card">
+    <h2>생성 결과</h2>
+    <div class="result-box" id="resultBox">
+      <div class="empty">
+        <div class="icon">▤</div>
+        <b>원고 제목을 입력하세요</b>
+        <span>원고를 생성하면 결과가 여기에 표시됩니다.</span>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script>
+// 글 종류별 칩 설정 (tip이 있으면 ? 툴팁 표시). 툴팁 문구는 임의로 작성한 것이라 원본과 다를 수 있어요.
+const TYPES = [
+  { key: 'info',   label: '정보글' },
+  { key: 'food',   label: '맛집글', tip: '다녀온 맛집 후기 형식이에요. 상호·메뉴·가격을 추가 정보에 적어주세요.',
+    extraCap: '추가 정보 (상호명, 메뉴, 가격, 위치 등 · 선택)', extraPh: '예) 성수동 OO식당 / 대표메뉴 8,000원 / 주차 불가' },
+  { key: 'pro',    label: '전문직', tip: '세무·법률·의료 등 전문가 칼럼 형식이에요.',
+    extraCap: '추가 정보 (분야, 사례, 상담 안내 문구 등 · 선택)', extraPh: '예) 세무사 / 양도세 비과세 요건 / 상담 문의는 프로필 링크' },
+  { key: 'promo',  label: '홍보글', tip: '제품·서비스·매장을 알리는 홍보 형식이에요. 스펙·가격을 추가 정보에 적어주세요.',
+    extraCap: '추가 정보 (제품명, 특징, 가격, 구매처 등 · 선택)', extraPh: '예) OO 단백질 쉐이크 / 1회 30g / 3종 맛 / 스마트스토어 판매' },
+  { key: 'custom', label: '커스텀', custom: true,
+    extraCap: '커스텀 지침 (필수)', extraPh: '예) 친근한 말투, 소제목 4개, 표 대신 목록, 마지막에 구독 유도 문구' },
+  { key: 'etc',    label: '기타',
+    extraCap: '추가 정보 (선택)', extraPh: '원하는 방향이나 참고할 내용을 적어주세요' },
+];
+
+const $ = (id) => document.getElementById(id);
+const state = { kind: 'info', titles: [], busy: false, place: null };
+
+function renderChips() {
+  const box = $('chips');
+  box.innerHTML = '';
+  TYPES.forEach((t) => {
+    const b = document.createElement('button');
+    b.className = 'chip' + (t.custom ? ' custom' : '') + (state.kind === t.key ? ' active' : '');
+    b.append(t.label);
+    if (t.tip) {
+      const q = document.createElement('span');
+      q.className = 'q'; q.textContent = '?'; q.dataset.tip = t.tip;
+      b.append(q);
+    }
+    b.onclick = () => { state.kind = t.key; renderChips(); renderExtra(); };
+    box.append(b);
+  });
+}
+
+function renderExtra() {
+  const t = TYPES.find((x) => x.key === state.kind);
+  const wrap = $('extraWrap');
+  wrap.classList.toggle('show', !!t.extraCap);
+  if (t.extraCap) { $('extraCap').textContent = t.extraCap; $('extra').placeholder = t.extraPh; }
+  $('placeWrap').classList.toggle('show', state.kind === 'food');
+}
+
+// ---- 맛집글: 매장 이름 → 주소 검색 ----
+function placeStatus(msg, warn) {
+  const el = $('placeStatus');
+  el.textContent = msg || '';
+  el.classList.toggle('warn', !!warn);
+}
+
+function renderPlaces(places) {
+  const list = $('placeList');
+  list.innerHTML = '';
+  places.forEach((p) => {
+    const b = document.createElement('button');
+    b.className = 'place';
+    const name = document.createElement('b');
+    name.textContent = p.name;
+    const addr = document.createElement('span');
+    addr.textContent = [p.category, p.address].filter(Boolean).join(' · ');
+    b.append(name, addr);
+    b.onclick = () => {
+      state.place = p;
+      list.querySelectorAll('.place').forEach((x) => x.classList.remove('selected'));
+      b.classList.add('selected');
+      placeStatus(`선택됨: ${p.name} — 이 정보가 원고에 사실로 반영돼요.`);
+    };
+    list.append(b);
+  });
+}
+
+async function searchPlace() {
+  const q = $('placeQuery').value.trim();
+  if (!q) { placeStatus('매장 이름을 입력해 주세요.', true); return; }
+  state.place = null;
+  $('placeList').innerHTML = '';
+  placeStatus('검색 중...');
+  $('btnPlace').disabled = true;
+  try {
+    const res = await fetch('/api/places?query=' + encodeURIComponent(q));
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || '검색에 실패했어요.');
+    if (!data.places.length) { placeStatus('검색 결과가 없어요. 상호를 다시 확인하거나 추가 정보에 직접 적어주세요.', true); return; }
+    placeStatus(`${data.places.length}곳 찾았어요 — 주소를 보고 골라주세요`);
+    renderPlaces(data.places);
+    if (data.places.length === 1) $('placeList').querySelector('.place').click();
+  } catch (e) {
+    placeStatus(e.message, true);
+  } finally {
+    $('btnPlace').disabled = false;
+  }
+}
+
+$('btnPlace').onclick = searchPlace;
+$('placeQuery').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) searchPlace(); });
+$('placeQuery').addEventListener('input', () => { state.place = null; });
+
+// 맛집글이고 매장을 골랐을 때만 서버로 보냄
+const placeValue = () => (state.kind === 'food' ? state.place : null);
+
+function showError(msg) {
+  const el = $('error');
+  el.textContent = msg || '';
+  el.classList.toggle('show', !!msg);
+}
+
+function setBusy(busy) {
+  state.busy = busy;
+  ['btnTitles', 'btnRegen', 'btnWrite'].forEach((id) => { $(id).disabled = busy; });
+}
+
+async function post(url, body) {
+  const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || '요청에 실패했어요.');
+  return data;
+}
+
+const extraValue = () => ($('extraWrap').classList.contains('show') ? $('extra').value.trim() : '');
+
+async function makeTitles(regen) {
+  if (state.busy) return;
+  showError('');
+  setBusy(true);
+  const label = $('btnTitles').textContent;
+  $('btnTitles').textContent = '생성 중...';
+  try {
+    const data = await post('/api/titles', {
+      kind: state.kind, keyword: $('title').value.trim() || (placeValue() ? placeValue().name : ''),
+      extra: extraValue(), place: placeValue(), exclude: regen ? state.titles : [],
+    });
+    state.titles = data.titles;
+    const list = $('candList');
+    list.innerHTML = '';
+    data.titles.forEach((t) => {
+      const b = document.createElement('button');
+      b.className = 'cand'; b.textContent = t;
+      b.onclick = () => { $('title').value = t; };
+      list.append(b);
+    });
+    $('candidates').classList.add('show');
+  } catch (e) {
+    showError(e.message);
+  } finally {
+    $('btnTitles').textContent = label;
+    setBusy(false);
+  }
+}
+
+async function makeArticle() {
+  if (state.busy) return;
+  showError('');
+  setBusy(true);
+  const box = $('resultBox');
+  box.innerHTML = '<div class="empty"><div class="spinner"></div><b>원고를 작성하고 있어요</b><span>보통 30초~1분 정도 걸려요.</span></div>';
+  try {
+    const data = await post('/api/article', { kind: state.kind, title: $('title').value.trim(), extra: extraValue(), place: placeValue() });
+    renderArticle(data.text);
+  } catch (e) {
+    showError(e.message);
+    box.innerHTML = '<div class="empty"><div class="icon">▤</div><b>원고를 만들지 못했어요</b><span>위 오류 메시지를 확인하고 다시 시도해 주세요.</span></div>';
+  } finally {
+    setBusy(false);
+  }
+}
+
+function renderArticle(text) {
+  const box = $('resultBox');
+  box.innerHTML = '';
+  const out = document.createElement('div');
+  out.className = 'out';
+  const bar = document.createElement('div');
+  bar.className = 'out-bar';
+  const count = document.createElement('span');
+  count.textContent = `공백 포함 ${text.length.toLocaleString()}자 · 공백 제외 ${text.replace(/\s/g, '').length.toLocaleString()}자`;
+  const btns = document.createElement('div');
+  const copy = document.createElement('button');
+  copy.textContent = '복사';
+  copy.onclick = async () => {
+    try { await navigator.clipboard.writeText(text); copy.textContent = '복사됨 ✓'; }
+    catch { copy.textContent = '복사 실패'; }
+    setTimeout(() => { copy.textContent = '복사'; }, 1500);
+  };
+  const again = document.createElement('button');
+  again.textContent = '다시 생성';
+  again.onclick = makeArticle;
+  btns.append(copy, again);
+  bar.append(count, btns);
+  const pre = document.createElement('pre');   // textContent로 넣어 XSS 방지
+  pre.id = 'article';
+  pre.textContent = text;
+  out.append(bar, pre);
+  box.append(out);
+}
+
+$('btnTitles').onclick = () => makeTitles(false);
+$('btnRegen').onclick = () => makeTitles(true);
+$('btnWrite').onclick = makeArticle;
+$('title').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) makeArticle(); });
+
+// R 키: 입력 중이 아닐 때 제목 다시 생성
+document.addEventListener('keydown', (e) => {
+  const tag = (e.target.tagName || '').toLowerCase();
+  if (tag === 'input' || tag === 'textarea' || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.key.toLowerCase() === 'r') { e.preventDefault(); makeTitles(true); }
+});
+
+renderChips();
+renderExtra();
+</script>
+</body>
+</html>
