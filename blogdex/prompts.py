@@ -60,7 +60,8 @@ SYSTEM_PROMPT = """당신은 네이버 블로그 상위 노출 원고를 쓰는 
 - 출력은 순수 텍스트입니다. 마크다운 기호(#, *, **, -, >, 표)를 쓰지 마세요.
   (네이버 블로그 에디터에 그대로 붙여 넣을 수 있어야 합니다.)
 - 소제목은 줄 앞에 '■ ' 를 붙이세요.
-- 사진이 들어가면 좋은 위치에 [이미지: 어떤 사진인지 설명] 을 한 줄로 넣으세요.
+- 사진 위치 표시: 사용자가 사진을 첨부했다면 지시받은 [사진 N] 형식만 쓰고,
+  첨부하지 않았다면 사진이 들어가면 좋은 위치에 [이미지: 어떤 사진인지 설명] 을 한 줄로 넣으세요.
 - 문단은 2~4문장으로 짧게 끊고, 문단 사이에는 빈 줄을 두세요.
 - 제목 키워드는 도입부와 소제목에 자연스럽게 반복하되, 억지로 끼워 넣지 마세요.
 - 글 마지막 줄에 해시태그 8~10개를 한 줄로 넣으세요.
@@ -102,7 +103,7 @@ def build_title_prompt(kind: str, keyword: str, extra: str, exclude: list[str]) 
     return "\n".join(parts)
 
 
-def build_article_prompt(kind: str, title: str, extra: str) -> str:
+def build_article_prompt(kind: str, title: str, extra: str, n_photos: int = 0) -> str:
     t = POST_TYPES[kind]
     parts = [
         f"글 종류: {t['label']}",
@@ -112,5 +113,15 @@ def build_article_prompt(kind: str, title: str, extra: str) -> str:
     if extra:
         label = "커스텀 지침" if kind == "custom" else "추가 정보"
         parts.append(f"{label}:\n{extra}")
+    if n_photos:
+        parts.append(
+            f"[첨부 사진 지침]\n"
+            f"사진 {n_photos}장이 위에 '사진 1' ~ '사진 {n_photos}' 순서로 첨부되어 있습니다.\n"
+            "- 사진 내용을 보고, 글 흐름에 어울리는 위치에 [사진 N] 을 한 줄로 단독으로 넣으세요. "
+            "모든 사진을 한 번씩만 쓰고, 사진 바로 앞뒤 문단은 그 사진 내용과 맞게 쓰세요.\n"
+            "- 사진에서 실제로 보이는 음식·분위기·구도만 묘사하세요. "
+            "메뉴명·가격·원산지가 사진(메뉴판 등)에서 읽히지 않거나 다른 정보에 없으면 지어내지 마세요.\n"
+            "- 이 경우 [이미지: ...] 표기는 쓰지 마세요."
+        )
     parts.append("\n위 제목으로 블로그 원고를 작성하세요. 첫 줄은 제목 그대로 쓰고, 한 줄 띄운 뒤 본문을 시작하세요.")
     return "\n\n".join(parts)
