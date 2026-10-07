@@ -3,6 +3,8 @@
 실행:  python blogdex/app.py   →  http://127.0.0.1:5000
 API 키는 서버(.env)에만 두고, 브라우저에는 절대 내려보내지 않습니다.
 """
+import base64
+import binascii
 import html
 import json
 import os
@@ -14,6 +16,7 @@ import urllib.request
 import anthropic
 from dotenv import load_dotenv
 from flask import Flask, jsonify, request, send_from_directory
+from werkzeug.exceptions import HTTPException
 
 from prompts import POST_TYPES, SYSTEM_PROMPT, build_article_prompt, build_title_prompt, format_place
 
@@ -28,8 +31,12 @@ FALLBACK_MODELS = {"claude-fable-5-1", "claude-opus-5-5", "claude-opus-5", "clau
 
 MAX_KEYWORD = 200
 MAX_EXTRA = 2000
+MAX_PHOTOS = 10                        # 프런트엔드(index.html)의 MAX_PHOTOS와 같게 유지
+MAX_PHOTO_BYTES = 3 * 1024 * 1024      # 사진 1장당 (브라우저에서 1280px로 줄여 보내므로 보통 0.5MB 이하)
+PHOTO_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
 
 app = Flask(__name__, static_folder="static", static_url_path="/static")
+app.config["MAX_CONTENT_LENGTH"] = 30 * 1024 * 1024
 _client = None
 
 
@@ -42,13 +49,20 @@ def get_client() -> anthropic.Anthropic:
     return _client
 
 
-def ask_claude(user_prompt: str, max_tokens: int, effort: str) -> str:
-    """Claude를 1회 호출해 텍스트만 돌려줍니다."""
+def ask_claude(user_prompt: str, max_tokens: int, effort: str, photos: list | None = None) -> str:
+    """Claude를 1회 호출해 텍스트만 돌려줍니다. photos가 있으면 사진을 함께 보여줍니다."""
+    content: list | str = user_prompt
+    if photos:
+        content = []
+        for i, p in enumerate(photos, 1):
+            content.append({"type": "text", "text": f"사진 {i}"})
+            content.append({"type": "image", "source": {"type": "base64", "media_type": p["media_type"], "data": p["data"]}})
+        content.append({"type": "text", "text": user_prompt})
     kwargs = dict(
         model=MODEL,
         max_tokens=max_tokens,
         system=SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": user_prompt}],
+        messages=[{"role": "user", "content": content}],
         output_config={"effort": effort},
     )
     if MODEL in FALLBACK_MODELS:
@@ -83,6 +97,28 @@ def read_json():
     return data, kind, extra
 
 
+def read_photos(data: dict) -> list:
+    """요청의 photos([{media_type, data(base64)}])를 검증해서 돌려줍니다."""
+    raw = data.get("photos") or []
+    if not isinstance(raw, list):
+        raise ValueError("사진 형식이 올바르지 않아요.")
+    if len(raw) > MAX_PHOTOS:
+        raise ValueError(f"사진은 최대 {MAX_PHOTOS}장까지 올릴 수 있어요.")
+    photos = []
+    for p in raw:
+        if not isinstance(p, dict) or p.get("media_type") not in PHOTO_TYPES:
+            raise ValueError("지원하지 않는 사진 형식이에요. (JPG, PNG, WEBP, GIF만 가능)")
+        b64 = str(p.get("data", ""))
+        try:
+            size = len(base64.b64decode(b64, validate=True))
+        except (binascii.Error, ValueError):
+            raise ValueError("사진 데이터가 손상됐어요. 다시 올려주세요.") from None
+        if size > MAX_PHOTO_BYTES:
+            raise ValueError("사진 한 장의 용량이 너무 커요. (3MB 이하)")
+        photos.append({"media_type": p["media_type"], "data": b64})
+    return photos
+
+
 def clean_title(line: str) -> str:
     line = re.sub(r"^\s*(?:\d+[.)]|[-•*])\s*", "", line)  # 번호/불릿 제거
     return line.strip().strip("\"'“”‘’")
@@ -90,6 +126,9 @@ def clean_title(line: str) -> str:
 
 @app.errorhandler(Exception)
 def handle_error(e):
+    if isinstance(e, HTTPException):  # 404, 413(업로드 용량 초과) 등은 원래 상태코드 유지
+        msg = "업로드 용량이 너무 커요. 사진 수를 줄여주세요." if e.code == 413 else e.description
+        return jsonify(error=msg), e.code
     if isinstance(e, ValueError):
         return jsonify(error=str(e)), 400
     if isinstance(e, anthropic.AuthenticationError):
@@ -189,10 +228,13 @@ def article():
     if len(title) > MAX_KEYWORD:
         raise ValueError(f"제목은 {MAX_KEYWORD}자 이내로 입력해 주세요.")
 
-    if MOCK:
-        return jsonify(text=f"{title}\n\n■ 샘플 소제목\n화면 테스트용 샘플 원고입니다.\n\n#샘플 #테스트")
+    photos = read_photos(data)
 
-    text = ask_claude(build_article_prompt(kind, title, extra), max_tokens=8000, effort="medium")
+    if MOCK:
+        marks = "".join(f"\n\n[사진 {i}]\n사진 {i}번 설명 문단입니다." for i in range(1, len(photos) + 1))
+        return jsonify(text=f"{title}\n\n■ 샘플 소제목\n화면 테스트용 샘플 원고입니다.{marks}\n\n#샘플 #테스트")
+
+    text = ask_claude(build_article_prompt(kind, title, extra, len(photos)), max_tokens=8000, effort="medium", photos=photos)
     return jsonify(text=text)
 
 
