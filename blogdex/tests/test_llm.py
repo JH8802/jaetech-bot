@@ -65,6 +65,16 @@ class LlmTests(unittest.TestCase):
     def test_estimate_cost_unknown_model(self):
         self.assertIsNone(llm.estimate_cost("unknown", 1, 1))
 
+    def test_placeholder_key_gives_clear_error(self):
+        llm._client = None
+        with mock.patch.dict(os.environ, {"ANTHROPIC_API_KEY": "sk-ant-여기에_API_키_입력"}):
+            with self.assertRaises(RuntimeError) as cm:
+                llm.get_client()
+        self.assertIn("예시 문구", str(cm.exception))
+        with mock.patch.dict(os.environ, {"ANTHROPIC_API_KEY": ""}):
+            with self.assertRaises(RuntimeError):
+                llm.get_client()
+
 
 if __name__ == "__main__":
     unittest.main()

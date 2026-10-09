@@ -58,9 +58,12 @@ _client = None
 def get_client() -> anthropic.Anthropic:
     global _client
     if _client is None:
-        if not os.getenv("ANTHROPIC_API_KEY"):
-            raise RuntimeError("ANTHROPIC_API_KEY가 설정되지 않았어요. 루트의 .env 파일을 확인하세요.")
-        _client = anthropic.Anthropic()
+        key = os.getenv("ANTHROPIC_API_KEY", "").strip()
+        if not key:
+            raise RuntimeError("ANTHROPIC_API_KEY가 설정되지 않았어요. 루트의 .env 파일에 실제 키(sk-ant-로 시작)를 넣고 서버를 다시 시작하세요.")
+        if not key.isascii() or "여기에" in key:
+            raise RuntimeError("ANTHROPIC_API_KEY가 아직 .env.example의 예시 문구예요. .env 파일에 실제 API 키(sk-ant-로 시작)를 넣고 서버를 다시 시작하세요.")
+        _client = anthropic.Anthropic(api_key=key)
     return _client
 
 
