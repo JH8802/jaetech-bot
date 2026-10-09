@@ -1,10 +1,8 @@
-"""블덱스라이터 BETA 재현용 로컬 웹 서버.
+"""블로그 원고 생성 웹 서버 (개인용).
 
 실행:  python blogdex/app.py   →  http://127.0.0.1:5000
-API 키는 서버(.env)에만 두고, 브라우저에는 절대 내려보내지 않습니다.
+API 키는 서버(.env)에만 두고, 브라우저에는 내려보내지 않습니다.
 """
-import base64
-import binascii
 import html
 import json
 import os
@@ -14,145 +12,97 @@ import urllib.parse
 import urllib.request
 
 import anthropic
-from dotenv import load_dotenv
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, Response, jsonify, request, send_from_directory, stream_with_context
 from werkzeug.exceptions import HTTPException
 
-from prompts import POST_TYPES, SYSTEM_PROMPT, build_article_prompt, build_title_prompt, format_place
+import eval_style
+import llm
+import postprocess
+import prompts
+import storage
 
-load_dotenv()
-
-# 모델은 .env 의 BLOGDEX_MODEL 로 바꿀 수 있습니다. (비용 절감: claude-sonnet-5-5 등)
-MODEL = os.getenv("BLOGDEX_MODEL", "claude-opus-5-5")
-# BLOGDEX_MOCK=1 이면 API를 호출하지 않고 샘플 결과를 돌려줍니다. (화면 테스트용, 비용 0원)
-MOCK = os.getenv("BLOGDEX_MOCK") == "1"
-# 안전 분류기 거절 시 서버가 대체 모델로 자동 재시도하는 기능을 지원하는 모델들
-FALLBACK_MODELS = {"claude-fable-5-1", "claude-opus-5-5", "claude-opus-5", "claude-sonnet-5-5"}
-
-MAX_KEYWORD = 200
-MAX_EXTRA = 2000
-MAX_PHOTOS = 10                        # 프런트엔드(index.html)의 MAX_PHOTOS와 같게 유지
-MAX_PHOTO_BYTES = 3 * 1024 * 1024      # 사진 1장당 (브라우저에서 1280px로 줄여 보내므로 보통 0.5MB 이하)
-PHOTO_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
+MAX_TITLE = 200
+MAX_MEMO = 4000
+MAX_KEYWORDS = 8
+EVIDENCE_MODES = {"strict", "template"}
 
 app = Flask(__name__, static_folder="static", static_url_path="/static")
-app.config["MAX_CONTENT_LENGTH"] = 30 * 1024 * 1024
-_client = None
+app.config["MAX_CONTENT_LENGTH"] = 2 * 1024 * 1024
 
 
-def get_client() -> anthropic.Anthropic:
-    global _client
-    if _client is None:
-        if not os.getenv("ANTHROPIC_API_KEY"):
-            raise RuntimeError("ANTHROPIC_API_KEY가 설정되지 않았습니다. .env 파일을 확인하세요.")
-        _client = anthropic.Anthropic()
-    return _client
-
-
-def ask_claude(user_prompt: str, max_tokens: int, effort: str, photos: list | None = None) -> str:
-    """Claude를 1회 호출해 텍스트만 돌려줍니다. photos가 있으면 사진을 함께 보여줍니다."""
-    content: list | str = user_prompt
-    if photos:
-        content = []
-        for i, p in enumerate(photos, 1):
-            content.append({"type": "text", "text": f"사진 {i}"})
-            content.append({"type": "image", "source": {"type": "base64", "media_type": p["media_type"], "data": p["data"]}})
-        content.append({"type": "text", "text": user_prompt})
-    kwargs = dict(
-        model=MODEL,
-        max_tokens=max_tokens,
-        system=SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": content}],
-        output_config={"effort": effort},
-    )
-    if MODEL in FALLBACK_MODELS:
-        kwargs["betas"] = ["server-side-fallback-2026-07-01"]
-        kwargs["fallbacks"] = "default"
-    response = get_client().beta.messages.create(**kwargs)
-
-    if response.stop_reason == "refusal":
-        raise ValueError("이 주제는 AI가 작성을 거절했어요. 주제나 표현을 바꿔서 다시 시도해 주세요.")
-    text = "".join(b.text for b in response.content if b.type == "text").strip()
-    if not text:
-        raise ValueError("AI 응답이 비어 있어요. 다시 시도해 주세요.")
-    return text
-
-
-def read_json():
-    data = request.get_json(silent=True) or {}
-    kind = data.get("kind", "info")
-    if kind not in POST_TYPES:
-        raise ValueError("알 수 없는 글 종류입니다.")
-    extra = str(data.get("extra", "")).strip()
-    if len(extra) > MAX_EXTRA:
-        raise ValueError(f"추가 정보는 {MAX_EXTRA}자 이내로 입력해 주세요.")
-    if kind == "custom" and not extra:
-        raise ValueError("커스텀은 '커스텀 지침'을 입력해야 해요.")
-    # 맛집글: 지도 검색으로 고른 매장 정보를 '확인된 사실'로 앞에 붙임 (AI가 주소를 지어내지 않도록)
-    place = data.get("place")
-    if kind == "food" and isinstance(place, dict):
-        clean = {k: str(place.get(k, ""))[:200] for k in ("name", "category", "address", "phone")}
-        if clean["name"]:
-            extra = (format_place(clean) + "\n\n" + extra).strip()
-    return data, kind, extra
-
-
-def read_photos(data: dict) -> list:
-    """요청의 photos([{media_type, data(base64)}])를 검증해서 돌려줍니다."""
-    raw = data.get("photos") or []
-    if not isinstance(raw, list):
-        raise ValueError("사진 형식이 올바르지 않아요.")
-    if len(raw) > MAX_PHOTOS:
-        raise ValueError(f"사진은 최대 {MAX_PHOTOS}장까지 올릴 수 있어요.")
-    photos = []
-    for p in raw:
-        if not isinstance(p, dict) or p.get("media_type") not in PHOTO_TYPES:
-            raise ValueError("지원하지 않는 사진 형식이에요. (JPG, PNG, WEBP, GIF만 가능)")
-        b64 = str(p.get("data", ""))
-        try:
-            size = len(base64.b64decode(b64, validate=True))
-        except (binascii.Error, ValueError):
-            raise ValueError("사진 데이터가 손상됐어요. 다시 올려주세요.") from None
-        if size > MAX_PHOTO_BYTES:
-            raise ValueError("사진 한 장의 용량이 너무 커요. (3MB 이하)")
-        photos.append({"media_type": p["media_type"], "data": b64})
-    return photos
-
-
-def clean_title(line: str) -> str:
-    line = re.sub(r"^\s*(?:\d+[.)]|[-•*])\s*", "", line)  # 번호/불릿 제거
-    return line.strip().strip("\"'“”‘’")
+# ---------- 공통 ----------
+def friendly_error(e: Exception) -> tuple[str, int]:
+    if isinstance(e, (llm.RefusedError, llm.TruncatedError)):
+        return str(e), 422
+    if isinstance(e, ValueError):
+        return str(e), 400
+    if isinstance(e, anthropic.AuthenticationError):
+        return "API 키가 올바르지 않아요. .env 의 ANTHROPIC_API_KEY를 확인하세요.", 500
+    if isinstance(e, anthropic.RateLimitError):
+        return "요청이 너무 많아요. 잠시 후 다시 시도해 주세요.", 429
+    if isinstance(e, anthropic.APIConnectionError):
+        return "Claude 서버에 연결하지 못했어요. 네트워크를 확인하세요.", 502
+    if isinstance(e, anthropic.APIStatusError):
+        return f"Claude API 오류({e.status_code}): {e.message}", 502
+    if isinstance(e, RuntimeError):
+        return str(e), 500
+    return "서버 오류가 발생했어요.", 500
 
 
 @app.errorhandler(Exception)
 def handle_error(e):
-    if isinstance(e, HTTPException):  # 404, 413(업로드 용량 초과) 등은 원래 상태코드 유지
-        msg = "업로드 용량이 너무 커요. 사진 수를 줄여주세요." if e.code == 413 else e.description
+    if isinstance(e, HTTPException):
+        msg = "요청이 너무 커요." if e.code == 413 else e.description
         return jsonify(error=msg), e.code
-    if isinstance(e, ValueError):
-        return jsonify(error=str(e)), 400
-    if isinstance(e, anthropic.AuthenticationError):
-        return jsonify(error="API 키가 올바르지 않아요. .env 의 ANTHROPIC_API_KEY를 확인하세요."), 500
-    if isinstance(e, anthropic.RateLimitError):
-        return jsonify(error="요청이 너무 많아요. 잠시 후 다시 시도해 주세요."), 429
-    if isinstance(e, anthropic.APIConnectionError):
-        return jsonify(error="Claude 서버에 연결하지 못했어요. 네트워크를 확인하세요."), 502
-    if isinstance(e, anthropic.APIStatusError):
-        return jsonify(error=f"Claude API 오류({e.status_code}): {e.message}"), 502
-    if isinstance(e, RuntimeError):  # 설정 누락 등 사용자에게 그대로 보여줄 안내 메시지
-        return jsonify(error=str(e)), 500
-    app.logger.exception("unexpected error")
-    return jsonify(error="서버 오류가 발생했어요."), 500
+    msg, code = friendly_error(e)
+    if code == 500 and not isinstance(e, RuntimeError):
+        app.logger.exception("unexpected error")
+    return jsonify(error=msg), code
 
 
+def sse(event: str, data: dict) -> str:
+    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
+def sse_response(gen) -> Response:
+    return Response(stream_with_context(gen), mimetype="text/event-stream",
+                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+def read_place(raw) -> dict:
+    if not isinstance(raw, dict):
+        return {}
+    return {k: str(raw.get(k, "")).strip()[:200] for k in ("name", "category", "address", "phone")}
+
+
+def read_common(data: dict) -> dict:
+    kind = data.get("kind", "info")
+    if kind not in prompts.KINDS:
+        raise ValueError("알 수 없는 글 종류입니다.")
+    memo = str(data.get("memo", "")).strip()
+    if len(memo) > MAX_MEMO:
+        raise ValueError(f"메모는 {MAX_MEMO:,}자 이내로 입력해 주세요.")
+    evidence = data.get("evidence_mode", "strict")
+    if evidence not in EVIDENCE_MODES:
+        raise ValueError("경험 서술 모드가 올바르지 않아요.")
+    return {
+        "kind": kind,
+        "memo": memo,
+        "place": read_place(data.get("place")) if kind == "food" else {},
+        "guardrail": bool(data.get("guardrail", False)),
+        "evidence_mode": evidence,
+    }
+
+
+# ---------- 화면 / 매장 검색 ----------
 @app.get("/")
 def index():
     return send_from_directory(app.static_folder, "index.html")
 
 
-@app.get("/api/types")
-def types():
-    return jsonify([{"key": k, "label": v["label"]} for k, v in POST_TYPES.items()])
+@app.get("/favicon.ico")
+def favicon():
+    return "", 204
 
 
 def strip_tags(s: str) -> str:
@@ -162,26 +112,17 @@ def strip_tags(s: str) -> str:
 @app.get("/api/places")
 def places():
     """매장 이름으로 주소를 검색합니다. (네이버 검색 API - 지역)
-
-    발급: https://developers.naver.com → 애플리케이션 등록 → '검색' API 선택
-    .env 에 NAVER_CLIENT_ID / NAVER_CLIENT_SECRET 을 넣으면 동작합니다.
-    """
+    .env 에 NAVER_CLIENT_ID / NAVER_CLIENT_SECRET 이 있어야 동작합니다."""
     query = request.args.get("query", "").strip()
     if not query:
         raise ValueError("매장 이름을 입력해 주세요.")
     if len(query) > 100:
         raise ValueError("매장 이름은 100자 이내로 입력해 주세요.")
-
-    if MOCK:
-        return jsonify(places=[{
-            "name": f"{query} 본점", "category": "한식",
-            "address": "서울특별시 마포구 백범로 170 (샘플)", "phone": "02-000-0000",
-        }])
-
+    if llm.is_mock():
+        return jsonify(places=[{"name": f"{query} 본점", "category": "한식", "address": "서울 마포구 샘플로 1", "phone": ""}])
     cid, secret = os.getenv("NAVER_CLIENT_ID"), os.getenv("NAVER_CLIENT_SECRET")
     if not cid or not secret:
-        raise RuntimeError("NAVER_CLIENT_ID / NAVER_CLIENT_SECRET이 .env에 없어서 매장 검색을 쓸 수 없어요.")
-
+        raise RuntimeError("NAVER_CLIENT_ID / NAVER_CLIENT_SECRET이 .env에 없어서 매장 검색을 쓸 수 없어요. 아래 '직접 입력'을 이용하세요.")
     url = "https://openapi.naver.com/v1/search/local.json?" + urllib.parse.urlencode({"query": query, "display": 5})
     req = urllib.request.Request(url, headers={"X-Naver-Client-Id": cid, "X-Naver-Client-Secret": secret})
     try:
@@ -191,53 +132,116 @@ def places():
         raise RuntimeError(f"네이버 검색 API 오류({e.code}). 키와 '검색' API 사용 설정을 확인하세요.") from e
     except (urllib.error.URLError, TimeoutError) as e:
         raise RuntimeError("네이버 검색 서버에 연결하지 못했어요.") from e
-
-    result = [{
+    return jsonify(places=[{
         "name": strip_tags(it.get("title")),
-        "category": strip_tags(it.get("category")).split(">")[-1].strip(),  # '음식점>한식' → '한식'
+        "category": strip_tags(it.get("category")).split(">")[-1].strip(),
         "address": strip_tags(it.get("roadAddress") or it.get("address")),
         "phone": strip_tags(it.get("telephone")),
-    } for it in items]
-    return jsonify(places=result)
+    } for it in items])
+
+
+# ---------- 제목 ----------
+def clean_title(line: str) -> str:
+    line = re.sub(r"^\s*(?:\d+[.)]|[-•*])\s*", "", line)
+    return line.strip().strip("\"'“”‘’")
 
 
 @app.post("/api/titles")
 def titles():
-    data, kind, extra = read_json()
+    data = request.get_json(silent=True) or {}
+    c = read_common(data)
     keyword = str(data.get("keyword", "")).strip()
     if not keyword:
         raise ValueError("주제나 키워드를 먼저 입력해 주세요.")
-    if len(keyword) > MAX_KEYWORD:
-        raise ValueError(f"주제는 {MAX_KEYWORD}자 이내로 입력해 주세요.")
-    exclude = [str(x)[:MAX_KEYWORD] for x in (data.get("exclude") or [])][:15]
-
-    if MOCK:
-        return jsonify(titles=[f"[샘플] {keyword} 제목 후보 {i}" for i in range(1, 6)])
-
-    text = ask_claude(build_title_prompt(kind, keyword, extra, exclude), max_tokens=1024, effort="low")
+    if len(keyword) > MAX_TITLE:
+        raise ValueError(f"주제는 {MAX_TITLE}자 이내로 입력해 주세요.")
+    exclude = [str(x)[:MAX_TITLE] for x in (data.get("exclude") or [])][:15]
+    system = prompts.BASE_ROLE
+    user = prompts.build_title_prompt(c["kind"], keyword, c["memo"], c["place"], exclude, c["guardrail"])
+    text = llm.ask_text(system, user, max_tokens=1024, effort="low")
     result = [t for t in (clean_title(l) for l in text.splitlines()) if t][:5]
-    return jsonify(titles=result)
+    return jsonify(titles=result, keywords=prompts.derive_keywords(c["kind"], keyword, c["place"]))
 
 
-@app.post("/api/article")
-def article():
-    data, kind, extra = read_json()
+# ---------- 원고 ----------
+def _generate_events(*, kind, title, keywords, memo, place, guardrail, evidence_mode, user_prompt, parent_id=None, title_input=None):
+    """원고를 스트리밍으로 만들고, 후처리·점검·저장 후 SSE 이벤트를 흘려보냅니다."""
+    system = prompts.build_system(kind, guardrail, evidence_mode)
+    parts = []
+    try:
+        yield sse("status", {"text": "원고를 쓰고 있어요."})
+        for chunk in llm.stream_text(system, user_prompt, max_tokens=16000):
+            parts.append(chunk)
+            yield sse("chunk", {"text": chunk})
+        yield sse("status", {"text": "태그와 해시태그를 정리하고 품질을 점검하고 있어요."})
+        fin = postprocess.finalize(kind, "".join(parts), place, keywords)
+        quality = eval_style.evaluate(kind, fin["body"], keywords, memo)
+        yield sse("replace", {"text": fin["body"]})
+        article_id = storage.save_article(
+            kind=kind, title_input=title_input or title, title_final=title, memo=memo, place=place, keywords=keywords,
+            options={"guardrail": guardrail, "evidence_mode": evidence_mode}, body=fin["body"], chars=fin["chars"],
+            quality=quality, model="mock" if llm.is_mock() else llm.MODEL, parent_id=parent_id)
+        yield sse("done", {"article_id": article_id, "title": title, "body": fin["body"], "chars": fin["chars"],
+                           "quality": quality, "notes": fin["notes"]})
+    except Exception as e:  # 스트림 중 오류는 SSE 로 알려 줍니다.
+        msg, _ = friendly_error(e)
+        if not isinstance(e, (ValueError, RuntimeError, llm.RefusedError, llm.TruncatedError)):
+            app.logger.exception("stream error")
+        yield sse("error", {"message": msg})
+
+
+@app.post("/api/articles/stream")
+def article_stream():
+    data = request.get_json(silent=True) or {}
+    c = read_common(data)
     title = str(data.get("title", "")).strip()
     if not title:
         raise ValueError("원고 제목을 입력해 주세요.")
-    if len(title) > MAX_KEYWORD:
-        raise ValueError(f"제목은 {MAX_KEYWORD}자 이내로 입력해 주세요.")
+    if len(title) > MAX_TITLE:
+        raise ValueError(f"제목은 {MAX_TITLE}자 이내로 입력해 주세요.")
+    keywords = [str(k).strip()[:40] for k in (data.get("keywords") or []) if str(k).strip()][:MAX_KEYWORDS]
+    if not keywords:
+        keywords = prompts.derive_keywords(c["kind"], title, c["place"])
+    user_prompt = prompts.build_article_prompt(c["kind"], title, keywords, c["memo"], c["place"])
+    return sse_response(_generate_events(kind=c["kind"], title=title, keywords=keywords, memo=c["memo"], place=c["place"],
+                                         guardrail=c["guardrail"], evidence_mode=c["evidence_mode"], user_prompt=user_prompt))
 
-    photos = read_photos(data)
 
-    if MOCK:
-        marks = "".join(f"\n\n[사진 {i}]\n사진 {i}번 설명 문단입니다." for i in range(1, len(photos) + 1))
-        return jsonify(text=f"{title}\n\n■ 샘플 소제목\n화면 테스트용 샘플 원고입니다.{marks}\n\n#샘플 #테스트")
+@app.post("/api/articles/<int:article_id>/rewrite")
+def article_rewrite(article_id: int):
+    art = storage.get_article(article_id)
+    if not art:
+        raise ValueError("원고를 찾을 수 없어요.")
+    issues = (art["quality"] or {}).get("issues", [])
+    if not issues:
+        raise ValueError("품질 점검에서 고칠 점이 없어요.")
+    opts = art["options"] or {}
+    user_prompt = prompts.build_rewrite_prompt(art["kind"], art["body"], issues, art["keywords"])
+    return sse_response(_generate_events(
+        kind=art["kind"], title=art["title"], keywords=art["keywords"], memo=art["memo"], place=art["place"],
+        guardrail=bool(opts.get("guardrail")), evidence_mode=opts.get("evidence_mode", "strict"),
+        user_prompt=user_prompt, parent_id=article_id, title_input=art["title_input"]))
 
-    text = ask_claude(build_article_prompt(kind, title, extra, len(photos)), max_tokens=8000, effort="medium", photos=photos)
-    return jsonify(text=text)
+
+@app.get("/api/articles")
+def articles_list():
+    return jsonify(articles=storage.list_articles())
+
+
+@app.get("/api/articles/<int:article_id>")
+def articles_get(article_id: int):
+    art = storage.get_article(article_id)
+    if not art:
+        return jsonify(error="원고를 찾을 수 없어요."), 404
+    return jsonify(article=art)
+
+
+@app.delete("/api/articles")
+def articles_delete():
+    ids = [int(i) for i in (request.get_json(silent=True) or {}).get("ids", []) if str(i).isdigit()]
+    return jsonify(deleted=storage.delete_articles(ids))
 
 
 if __name__ == "__main__":
-    # 본인 PC에서만 접속되도록 127.0.0.1 로 고정 (외부 공개 시 로그인/요금 제한 먼저 필요)
-    app.run(host="127.0.0.1", port=int(os.getenv("PORT", "5000")), debug=False)
+    # 본인 PC에서만 접속되도록 127.0.0.1 로 고정 (외부 공개 시 로그인/사용량 제한을 먼저 붙여야 합니다)
+    app.run(host="127.0.0.1", port=int(os.getenv("PORT", "5000")), debug=False, threaded=True)
