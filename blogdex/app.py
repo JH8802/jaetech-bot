@@ -167,22 +167,22 @@ def titles():
 def _generate_events(*, kind, title, keywords, memo, place, guardrail, evidence_mode, user_prompt, parent_id=None, title_input=None):
     """원고를 스트리밍으로 만들고, 후처리·점검·저장 후 SSE 이벤트를 흘려보냅니다."""
     system = prompts.build_system(kind, guardrail, evidence_mode)
-    parts = []
+    parts, usage = [], {}
     try:
         yield sse("status", {"text": "원고를 쓰고 있어요."})
-        for chunk in llm.stream_text(system, user_prompt, max_tokens=16000):
+        for chunk in llm.stream_text(system, user_prompt, max_tokens=16000, usage=usage):
             parts.append(chunk)
             yield sse("chunk", {"text": chunk})
         yield sse("status", {"text": "태그와 해시태그를 정리하고 품질을 점검하고 있어요."})
-        fin = postprocess.finalize(kind, "".join(parts), place, keywords)
+        fin = postprocess.finalize(kind, "".join(parts), place, keywords, title)
         quality = eval_style.evaluate(kind, fin["body"], keywords, memo)
         yield sse("replace", {"text": fin["body"]})
         article_id = storage.save_article(
             kind=kind, title_input=title_input or title, title_final=title, memo=memo, place=place, keywords=keywords,
-            options={"guardrail": guardrail, "evidence_mode": evidence_mode}, body=fin["body"], chars=fin["chars"],
-            quality=quality, model="mock" if llm.is_mock() else llm.MODEL, parent_id=parent_id)
+            options={"guardrail": guardrail, "evidence_mode": evidence_mode, "usage": usage}, body=fin["body"], chars=fin["chars"],
+            quality=quality, model=usage.get("model") or llm.MODEL, parent_id=parent_id)
         yield sse("done", {"article_id": article_id, "title": title, "body": fin["body"], "chars": fin["chars"],
-                           "quality": quality, "notes": fin["notes"]})
+                           "quality": quality, "notes": fin["notes"], "usage": usage})
     except Exception as e:  # 스트림 중 오류는 SSE 로 알려 줍니다.
         msg, _ = friendly_error(e)
         if not isinstance(e, (ValueError, RuntimeError, llm.RefusedError, llm.TruncatedError)):

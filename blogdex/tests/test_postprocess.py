@@ -79,5 +79,32 @@ class StructureTests(unittest.TestCase):
         self.assertNotIn("지도 삽입", fin["body"])
 
 
+class SafetyTests(unittest.TestCase):
+    def test_markdown_is_converted(self):
+        raw = "```\n## 1. 위치\n\n**핵심**은 이것입니다.\n\n- 목록 항목입니다.\n```"
+        out, notes = pp.clean_markdown(raw)
+        self.assertNotIn("**", out)
+        self.assertNotIn("```", out)
+        self.assertIn("1. 위치", out)
+        self.assertIn("{{bold}}핵심{{/bold}}", out)
+        self.assertIn("목록 항목입니다.", out)
+        self.assertTrue(notes)
+
+    def test_hashtags_untouched_by_heading_cleanup(self):
+        out, _ = pp.clean_markdown("본문입니다.\n\n#마포맛집 #공덕맛집 #회식")
+        self.assertTrue(out.endswith("#마포맛집 #공덕맛집 #회식"))
+
+    def test_leading_title_line_removed(self):
+        out, notes = pp.clean_markdown("제목: NMN 건강기능식품 고르는 법\n\n본문입니다.", "NMN 건강기능식품 고르는 법")
+        self.assertEqual(out, "본문입니다.")
+        self.assertTrue(notes)
+
+    def test_region_tag_added_for_food(self):
+        raw = "본문.\n\n1. 위치\n\n설명.\n\n2. 메뉴\n\n설명.\n\n#회식 #고깃집 #데이트"
+        fin = pp.finalize("food", raw, {"name": "락희옥 마포본점", "address": "서울 마포구 백범로 170"}, [])
+        tags = fin["body"].strip().splitlines()[-1].split()
+        self.assertEqual(tags[:3], ["#락희옥마포본점", "#락희옥", "#마포맛집"])
+
+
 if __name__ == "__main__":
     unittest.main()

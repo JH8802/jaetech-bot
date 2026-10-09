@@ -13,6 +13,26 @@ MAP_LINE_MARK = "플레이스 지도 삽입"
 MAX_HASHTAGS = 30
 
 
+def _norm(s: str) -> str:
+    return re.sub(r"[\s\W_]", "", strip_tags(s)).replace("제목", "")
+
+
+def clean_markdown(text: str, title: str = "") -> tuple[str, list[str]]:
+    """AI가 형식을 어겼을 때의 안전장치: 코드블록·마크다운 굵게·소제목 기호·목록 기호·맨 앞 제목 줄을 정리합니다."""
+    notes = []
+    fixed = re.sub(r"(?m)^\s*```.*$", "", text)
+    fixed, n_bold = re.subn(r"\*\*(.+?)\*\*", r"{{bold}}\1{{/bold}}", fixed)
+    fixed, n_head = re.subn(r"(?m)^\s*#{1,6}\s+", "", fixed)  # '## 1. 소제목' → '1. 소제목' (해시태그는 # 뒤에 공백이 없어 영향 없음)
+    fixed, n_list = re.subn(r"(?m)^\s*[-*•]\s+", "", fixed)
+    if n_bold or n_head or n_list:
+        notes.append("마크다운 기호를 블로그 형식으로 바꿨어요.")
+    paras = split_paragraphs(fixed)
+    if paras and title and _norm(paras[0]) == _norm(title):
+        paras.pop(0)
+        notes.append("본문 맨 앞의 제목 줄을 뺐어요.")
+    return "\n\n".join(paras), notes
+
+
 def split_paragraphs(text: str) -> list[str]:
     return [p.strip() for p in re.split(r"\n\s*\n", text.strip()) if p.strip()]
 
@@ -115,10 +135,16 @@ def count_chars(text: str) -> int:
     return len(re.sub(r"\s", "", "\n".join(paras)))
 
 
-def finalize(kind: str, raw: str, place: dict | None, keywords: list[str]) -> dict:
+def region_of(place: dict | None) -> str:
+    """주소에서 구 이름을 뽑습니다. (예: '서울 마포구 백범로' → '마포')"""
+    m = re.search(r"([가-힣]{2,})구", (place or {}).get("address", ""))
+    return m.group(1) if m else ""
+
+
+def finalize(kind: str, raw: str, place: dict | None, keywords: list[str], title: str = "") -> dict:
     """원고를 정리해 {body, chars, notes} 를 돌려줍니다."""
-    notes = []
-    body = normalize_tags(raw.replace("\r\n", "\n"))
+    body, notes = clean_markdown(raw.replace("\r\n", "\n"), title)
+    body = normalize_tags(body)
     body, hl = limit_highlights(body, 2)
     if hl > 2:
         notes.append(f"형광펜 {hl}곳 중 2곳만 남겼어요.")
@@ -130,6 +156,9 @@ def finalize(kind: str, raw: str, place: dict | None, keywords: list[str]) -> di
     if kind == "food" and place and place.get("name"):
         name = place["name"].strip()
         must = [name.replace(" ", ""), name.split()[0]]
+        region = region_of(place)
+        if region:
+            must.append(f"{region}맛집")  # 상호 + 지역 태그는 빠지면 코드가 넣음(설계서 §4.6)
     elif keywords:
         must = [keywords[0].replace(" ", "")]
     idx = find_hashtag_index(paras)

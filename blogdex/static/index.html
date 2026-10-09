@@ -151,6 +151,7 @@
     <div id="notes" class="notes"></div>
     <div class="actions hidden" id="actions">
       <button class="btn" id="btnCopy">복사<kbd>C</kbd></button>
+      <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--sub)" title="네이버 에디터 제목 칸에 붙여넣으면 첫 줄은 제목, 나머지는 본문으로 들어가요"><input type="checkbox" id="copyTitle" checked> 복사에 제목 포함</label>
       <button class="btn ghost hidden" id="btnRewrite">품질 점검 반영해서 다시 쓰기</button>
       <button class="btn dark" id="btnNew">새 원고<kbd>N</kbd></button>
     </div>
@@ -313,7 +314,11 @@ function showArticle(art) {
   renderQuality(art.quality);
   $('actions').classList.remove('hidden');
   $('btnRewrite').classList.toggle('hidden', !(art.quality && art.quality.issues && art.quality.issues.length));
-  $('notes').textContent = (art.notes || []).join(' · ');
+  const u = art.usage || (art.options && art.options.usage);
+  const usageText = u && u.model && u.model !== 'mock'
+    ? `토큰 입력 ${u.input_tokens.toLocaleString()} · 출력 ${u.output_tokens.toLocaleString()}` + (u.cost_usd != null ? ` · 추정 비용 약 $${u.cost_usd.toFixed(3)} (${u.model})` : ` (${u.model})`)
+    : '';
+  $('notes').textContent = [...(art.notes || []), usageText].filter(Boolean).join(' · ');
 }
 
 /* ---------- 매장 검색 ---------- */
@@ -362,7 +367,7 @@ async function makeTitles(regen) {
     $('candList').innerHTML = '';
     data.titles.forEach((t) => {
       const b = document.createElement('button'); b.className = 'list-item'; b.textContent = t;
-      b.onclick = () => { $('title').value = t; $('btnWrite').disabled = false; $('candidates').classList.add('hidden'); fillKeywords(t); };
+      b.onclick = () => { $('title').value = t; $('btnWrite').disabled = false; $('candidates').classList.add('hidden'); };
       $('candList').append(b);
     });
     $('candidates').classList.remove('hidden');
@@ -370,7 +375,6 @@ async function makeTitles(regen) {
   } catch (e) { showError(e.message); }
   finally { $('btnTitles').textContent = label; setBusy(false); }
 }
-function fillKeywords() { /* 제목을 고른 뒤에도 사용자가 직접 입력한 키워드를 덮어쓰지 않음 */ }
 $('btnTitles').onclick = () => makeTitles(false);
 $('btnRegen').onclick = () => makeTitles(true);
 
@@ -385,7 +389,7 @@ async function runStream(url, body) {
       if (ev === 'status') setStatus(d.text, true);
       else if (ev === 'chunk') { raw += d.text; scheduleRender(raw); }
       else if (ev === 'replace') { raw = d.text; renderResult(raw, false); }
-      else if (ev === 'done') showArticle({ id: d.article_id, kind: body.kind || state.article?.kind || state.kind, title: d.title, body: d.body, quality: d.quality, notes: d.notes });
+      else if (ev === 'done') showArticle({ id: d.article_id, kind: body.kind || state.article?.kind || state.kind, title: d.title, body: d.body, quality: d.quality, notes: d.notes, usage: d.usage });
       else if (ev === 'error') throw new Error(d.message);
     });
     $('resultCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -404,8 +408,9 @@ $('btnRewrite').onclick = () => { if (!state.busy && state.article) runStream(`/
 async function copyArticle() {
   if (!state.article) return;
   const text = state.article.body;
-  const plain = paragraphs(stripTags(text)).join('\n\n');
-  const html = toCopyHTML(text);
+  const withTitle = $('copyTitle').checked && state.article.title;
+  const plain = (withTitle ? state.article.title + '\n\n' : '') + paragraphs(stripTags(text)).join('\n\n');
+  const html = (withTitle ? `<p>${esc(state.article.title)}</p><p><br></p>` : '') + toCopyHTML(text);
   const btn = $('btnCopy'); const old = btn.innerHTML;
   try {
     if (window.ClipboardItem) {
