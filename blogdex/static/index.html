@@ -3,450 +3,465 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>블덱스라이터 — 블로그 원고를 자동으로</title>
+<title>블로그 라이터 (개인용)</title>
 <style>
   :root {
-    --bg: #f7f8fa;
-    --card: #ffffff;
-    --line: #e6e8ec;
-    --text: #1b1d21;
-    --sub: #6b7280;
-    --primary: #2a5db0;
-    --primary-dark: #1f4a92;
-    --brand: #3b4fc7;
-    --chip-bg: #f1f3f5;
-    --custom-bg: #ede9fe;
-    --custom-text: #6d28d9;
-    --danger: #c0392b;
+    --bg: #f7f8fa; --card: #fff; --line: #e6e8ec; --text: #1b1d21; --sub: #6b7280;
+    --primary: #2a5db0; --primary-dark: #1f4a92; --chip: #f1f3f5; --danger: #c0392b; --ok: #0f9d7a; --warn: #d9822b;
+    --c0: #e03131; --c1: #1c7ed6; --c2: #d6336c;
   }
   * { box-sizing: border-box; }
-  body {
-    margin: 0; background: var(--bg); color: var(--text);
-    font-family: Pretendard, "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", system-ui, sans-serif;
-  }
-  button { font-family: inherit; cursor: pointer; }
-
-  /* 상단 바 */
-  header {
-    background: #fff; border-bottom: 1px solid var(--line);
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 0 28px; height: 56px;
-  }
-  .nav { display: flex; align-items: center; gap: 22px; height: 100%; }
-  .logo { font-weight: 800; font-size: 18px; letter-spacing: -0.5px; }
-  .logo small { font-size: 9px; color: var(--sub); font-weight: 600; margin-left: 4px; }
-  .tab {
-    background: none; border: 0; height: 100%; padding: 0 2px; font-size: 13px; color: var(--sub);
-    border-bottom: 2px solid transparent;
-  }
+  body { margin: 0; background: var(--bg); color: var(--text);
+    font-family: Pretendard, "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", system-ui, sans-serif; }
+  button, select, input, textarea { font-family: inherit; }
+  button { cursor: pointer; }
+  header { background: #fff; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 24px; padding: 0 28px; height: 56px; }
+  .logo { font-weight: 800; font-size: 17px; letter-spacing: -0.5px; }
+  .tab { background: none; border: 0; height: 100%; padding: 0 2px; font-size: 13px; color: var(--sub); border-bottom: 2px solid transparent; }
   .tab.active { color: var(--primary); font-weight: 700; border-bottom-color: var(--primary); }
-  .tab:disabled { cursor: not-allowed; opacity: .75; }
-  .pill { background: var(--primary); color: #fff; border: 0; border-radius: 999px; height: 30px; padding: 0 14px; font-size: 12px; font-weight: 700; }
-  .pill:disabled { cursor: not-allowed; opacity: .85; }
-  .right { display: flex; align-items: center; gap: 14px; font-size: 12px; color: var(--sub); }
-  .free { border: 1px solid var(--line); border-radius: 4px; padding: 3px 8px; font-weight: 700; color: var(--text); font-size: 11px; }
-
-  /* 히어로 */
-  .hero { text-align: center; padding: 84px 16px 44px; }
-  .hero h1 { margin: 0; font-size: 44px; font-weight: 800; letter-spacing: -1.5px; }
-  .hero h1 em { font-style: normal; color: var(--brand); }
-  .hero p { margin: 14px 0 0; color: var(--sub); font-size: 14px; }
-
-  /* 카드 */
-  main { max-width: 880px; margin: 0 auto; padding: 0 16px 80px; }
-  .card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 26px 28px; margin-bottom: 20px; }
-  .card h2 { margin: 0 0 18px; font-size: 16px; font-weight: 700; }
-  label.cap { display: block; font-size: 11px; font-weight: 600; color: #4b5563; margin: 14px 0 8px; }
-
-  /* 글 종류 칩 */
+  main { max-width: 880px; margin: 0 auto; padding: 28px 16px 80px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 24px 26px; margin-bottom: 20px; }
+  .card h2 { margin: 0 0 16px; font-size: 16px; }
+  label.cap { display: block; font-size: 12px; font-weight: 600; color: #4b5563; margin: 16px 0 7px; }
+  label.cap small { font-weight: 400; color: var(--sub); }
   .chips { display: flex; flex-wrap: wrap; gap: 8px; }
-  .chip {
-    border: 0; background: var(--chip-bg); color: #4b5563; border-radius: 999px;
-    padding: 8px 16px; font-size: 12px; font-weight: 600; display: inline-flex; align-items: center; gap: 6px;
-  }
-  .chip.custom { background: var(--custom-bg); color: var(--custom-text); }
+  .chip { border: 0; background: var(--chip); color: #4b5563; border-radius: 999px; padding: 8px 18px; font-size: 13px; font-weight: 600; }
   .chip.active { background: var(--primary); color: #fff; }
-  .chip .q {
-    width: 16px; height: 16px; border-radius: 50%; background: #dbe4f5; color: var(--primary);
-    font-size: 10px; font-weight: 800; display: inline-flex; align-items: center; justify-content: center; position: relative;
-  }
-  .chip.active .q { background: rgba(255,255,255,.25); color: #fff; }
-  .q:hover::after {
-    content: attr(data-tip); position: absolute; top: 24px; left: 50%; transform: translateX(-50%);
-    width: 220px; padding: 8px 10px; background: #1f2937; color: #fff; border-radius: 8px;
-    font-size: 11px; font-weight: 500; line-height: 1.5; text-align: left; z-index: 5; white-space: normal;
-  }
-
-  /* 입력 */
-  input[type=text], textarea {
-    width: 100%; border: 1px solid var(--line); border-radius: 10px; padding: 13px 14px;
-    font-size: 13px; font-family: inherit; background: #fff; color: var(--text); outline: none;
-  }
-  input[type=text]:focus, textarea:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(42,93,176,.12); }
-  textarea { resize: vertical; min-height: 96px; line-height: 1.6; }
-  /* 매장 검색 (맛집글) */
-  #placeWrap { display: none; }
-  #placeWrap.show { display: block; }
-  .place-row { display: flex; gap: 8px; }
-  .btn-place { background: var(--primary); color: #fff; border: 0; border-radius: 10px; padding: 0 18px; font-size: 12px; font-weight: 700; white-space: nowrap; }
-  .btn-place:disabled { opacity: .6; cursor: wait; }
-  #placeStatus { font-size: 12px; margin: 10px 0 8px; color: #0f9d7a; }
-  #placeStatus.warn { color: var(--danger); }
-  .place {
-    display: block; width: 100%; text-align: left; background: #fff; border: 1px solid var(--line);
-    border-radius: 10px; padding: 12px 16px; margin-bottom: 8px; box-shadow: 0 1px 3px rgba(0,0,0,.04);
-  }
-  .place:hover { border-color: var(--primary); }
-  .place.selected { border-color: var(--primary); background: #f5f9ff; box-shadow: 0 0 0 2px rgba(42,93,176,.15); }
-  .place b { display: block; font-size: 12px; font-weight: 600; color: var(--text); }
-  .place span { display: block; margin-top: 4px; font-size: 11px; color: var(--sub); }
-  #extraWrap { display: none; }
-  #extraWrap.show { display: block; }
-
-  .actions { background: #eef4fd; border: 1px solid #cfe0f7; border-radius: 12px; padding: 12px; display: flex; gap: 10px; margin-top: 12px; }
-  .btn-main {
-    flex: 1; background: var(--primary); color: #fff; border: 0; border-radius: 8px; height: 38px;
-    font-size: 12px; font-weight: 700;
-  }
-  .btn-main:hover:not(:disabled) { background: var(--primary-dark); }
-  .btn-main:disabled { opacity: .6; cursor: wait; }
-  .btn-regen {
-    background: #fff; border: 1px solid var(--line); border-radius: 8px; height: 38px; padding: 0 12px;
-    display: inline-flex; align-items: center; gap: 8px; font-size: 14px; color: #374151;
-  }
-  .btn-regen:disabled { opacity: .6; cursor: wait; }
-  kbd { font: 700 10px/1 inherit; background: #f3f4f6; border: 1px solid var(--line); border-radius: 4px; padding: 3px 5px; }
-
-  /* 제목 후보 */
-  #candidates { display: none; margin-top: 14px; }
-  #candidates.show { display: block; }
-  #candidates .cap { margin: 0 0 8px; }
-  .cand {
-    display: block; width: 100%; text-align: left; background: #fff; border: 1px solid var(--line);
-    border-radius: 10px; padding: 11px 14px; margin-bottom: 8px; font-size: 13px; color: var(--text);
-  }
-  .cand:hover { border-color: var(--primary); background: #f5f9ff; }
-  .btn-write {
-    width: 100%; margin-top: 16px; background: #111827; color: #fff; border: 0; border-radius: 10px;
-    height: 46px; font-size: 14px; font-weight: 700;
-  }
-  .btn-write:disabled { opacity: .6; cursor: wait; }
-
-  .error { display: none; margin-top: 12px; color: var(--danger); font-size: 12px; }
+  input[type=text], textarea, select { width: 100%; border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; font-size: 13px; background: #fff; color: var(--text); outline: none; }
+  input:focus, textarea:focus, select:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(42,93,176,.12); }
+  textarea { resize: vertical; min-height: 120px; line-height: 1.65; }
+  .row { display: flex; gap: 8px; }
+  .row > input { flex: 1; }
+  .btn { border: 0; border-radius: 10px; padding: 0 18px; height: 42px; font-size: 13px; font-weight: 700; background: var(--primary); color: #fff; white-space: nowrap; }
+  .btn:hover:not(:disabled) { background: var(--primary-dark); }
+  .btn:disabled { opacity: .5; cursor: not-allowed; }
+  .btn.ghost { background: #fff; color: #374151; border: 1px solid var(--line); }
+  .btn.dark { background: #111827; }
+  .btn.wide { width: 100%; height: 48px; font-size: 14px; margin-top: 20px; }
+  kbd { font: 700 10px/1 inherit; background: #f3f4f6; border: 1px solid var(--line); border-radius: 4px; padding: 3px 5px; margin-left: 6px; color: #374151; }
+  .hint { font-size: 12px; color: var(--sub); margin: 6px 0 0; line-height: 1.5; }
+  .status { font-size: 12px; margin: 8px 0 4px; color: var(--ok); }
+  .status.warn { color: var(--danger); }
+  .list-item { display: block; width: 100%; text-align: left; background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 11px 14px; margin-bottom: 8px; font-size: 13px; color: var(--text); }
+  .list-item:hover, .list-item.selected { border-color: var(--primary); background: #f5f9ff; }
+  .list-item b { font-weight: 600; } .list-item span { display: block; margin-top: 3px; font-size: 11px; color: var(--sub); }
+  .opts { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; margin-top: 18px; padding: 14px 16px; background: #f9fafb; border: 1px solid var(--line); border-radius: 10px; font-size: 12px; }
+  .opts label { display: flex; align-items: center; gap: 6px; }
+  .opts select { width: auto; padding: 6px 10px; font-size: 12px; }
+  .error { display: none; margin-top: 12px; color: var(--danger); font-size: 12px; white-space: pre-wrap; }
   .error.show { display: block; }
+  details.manual { margin-top: 10px; font-size: 12px; color: var(--sub); }
+  details.manual summary { cursor: pointer; }
+  details.manual .row { margin-top: 8px; }
+  .hidden { display: none !important; }
 
   /* 결과 */
-  .result-box { border: 1px solid var(--line); border-radius: 10px; min-height: 210px; }
-  .empty { text-align: center; padding: 48px 16px; color: var(--sub); }
-  .empty .icon {
-    width: 48px; height: 48px; margin: 0 auto 14px; border: 1px solid var(--line); border-radius: 12px;
-    display: flex; align-items: center; justify-content: center; font-size: 22px; color: #9ca3af; background: #fafafa;
-  }
-  .empty b { display: block; color: var(--text); font-size: 14px; margin-bottom: 6px; }
-  .empty span { font-size: 12px; }
-  .spinner {
-    width: 26px; height: 26px; margin: 0 auto 14px; border-radius: 50%;
-    border: 3px solid #dbe4f5; border-top-color: var(--primary); animation: spin 0.8s linear infinite;
-  }
+  .result-box { border: 1px solid var(--line); border-radius: 10px; min-height: 180px; }
+  .empty { text-align: center; padding: 56px 16px; color: var(--sub); font-size: 13px; }
+  .barline { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 12px 18px; border-bottom: 1px solid var(--line); font-size: 12px; color: var(--sub); flex-wrap: wrap; }
+  .barline b { color: var(--text); }
+  .article { padding: 22px 26px; font-size: 15px; line-height: 1.9; word-break: keep-all; }
+  .article p { margin: 0 0 18px; }
+  .article h3 { margin: 30px 0 14px; padding-bottom: 8px; border-bottom: 1px solid var(--line); font-size: 18px; }
+  .article mark { background: #ffec99; padding: 0 2px; font-weight: 700; }
+  .article b { font-weight: 700; }
+  .article .tags { color: #1c7ed6; font-size: 13px; line-height: 1.9; }
+  .article .mapline { color: var(--sub); font-size: 13px; border: 1px dashed var(--line); border-radius: 8px; padding: 8px 12px; }
+  .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+  .quality { margin-top: 18px; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .quality h4 { margin: 0; padding: 12px 16px; font-size: 13px; background: #f9fafb; border-bottom: 1px solid var(--line); }
+  .qrow { display: grid; grid-template-columns: 22px 1.3fr 1.5fr 1.3fr; gap: 8px; padding: 9px 16px; font-size: 12px; border-bottom: 1px solid #f1f3f5; align-items: start; }
+  .qrow:last-child { border-bottom: 0; }
+  .qrow .ok { color: var(--ok); } .qrow .no { color: var(--warn); } .qrow .tg { color: var(--sub); }
+  .notes { margin-top: 10px; font-size: 12px; color: var(--sub); }
+  .spinner { display: inline-block; width: 12px; height: 12px; border: 2px solid #dbe4f5; border-top-color: var(--primary); border-radius: 50%; animation: spin .8s linear infinite; vertical-align: -2px; margin-right: 6px; }
   @keyframes spin { to { transform: rotate(360deg); } }
-  .out { padding: 22px 24px; }
-  .out-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; font-size: 12px; color: var(--sub); }
-  .out-bar button { border: 1px solid var(--line); background: #fff; border-radius: 8px; padding: 7px 12px; font-size: 12px; font-weight: 600; margin-left: 6px; }
-  #article { white-space: pre-wrap; line-height: 1.85; font-size: 14px; word-break: keep-all; margin: 0; }
-
-  @media (max-width: 640px) {
-    header { padding: 0 14px; }
-    .nav { gap: 12px; overflow-x: auto; }
-    .right .hide-sm { display: none; }
-    .hero h1 { font-size: 32px; }
-    .card { padding: 20px 16px; }
-  }
+  .badge { display: inline-block; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 6px; background: #e6fcf5; color: #0b7a5c; margin-right: 6px; }
+  .badge.info { background: #e7f1ff; color: #1f4a92; }
+  .li-row { display: flex; align-items: center; gap: 8px; }
+  .li-row .list-item { flex: 1; margin-bottom: 0; }
+  .li-row + .li-row { margin-top: 8px; }
+  .x { border: 1px solid var(--line); background: #fff; border-radius: 50%; width: 30px; height: 30px; color: var(--sub); }
+  @media (max-width: 640px) { header { padding: 0 14px; gap: 14px; } .card { padding: 18px 14px; } .article { padding: 16px; } .qrow { grid-template-columns: 22px 1fr; } .qrow .tg, .qrow .val { grid-column: 2; } }
 </style>
 </head>
 <body>
-
 <header>
-  <div class="nav">
-    <div class="logo">블덱스라이터<small>BETA</small></div>
-    <button class="tab active">원고 작성</button>
-    <button class="tab" disabled title="준비 중">자동발행</button>
-    <button class="tab" disabled title="준비 중">내 원고</button>
-    <button class="tab" disabled title="준비 중">플랜</button>
-    <button class="pill" disabled title="준비 중">비즈니스</button>
-  </div>
-  <div class="right">
-    <span class="free">FREE</span>
-    <span class="hide-sm">회원가입</span>
-    <span class="hide-sm">로그인</span>
-  </div>
+  <div class="logo">블로그 라이터</div>
+  <button class="tab active" id="tabWrite">원고 작성</button>
+  <button class="tab" id="tabList">내 원고</button>
 </header>
 
-<div class="hero">
-  <h1>블덱스<em>라이터</em> BETA</h1>
-  <p>고퀄리티 원고를 무료로 만들어보세요</p>
-</div>
-
 <main>
-  <section class="card">
+<section id="viewWrite">
+  <div class="card">
     <h2>새 원고 만들기</h2>
 
     <label class="cap">글 종류</label>
-    <div class="chips" id="chips"></div>
+    <div class="chips" id="chips">
+      <button class="chip active" data-kind="info">정보글</button>
+      <button class="chip" data-kind="food">맛집글</button>
+    </div>
 
-    <div id="placeWrap">
+    <div id="foodBox" class="hidden">
       <label class="cap" for="placeQuery">매장 이름</label>
-      <div class="place-row">
-        <input type="text" id="placeQuery" maxlength="100" placeholder="예) 마포 릭희옥" autocomplete="off">
-        <button class="btn-place" id="btnPlace">자동 입력</button>
+      <div class="row">
+        <input type="text" id="placeQuery" maxlength="100" placeholder="예) 마포 락희옥" autocomplete="off">
+        <button class="btn" id="btnPlace">자동 입력</button>
       </div>
-      <div id="placeStatus"></div>
+      <div class="status" id="placeStatus"></div>
       <div id="placeList"></div>
+      <details class="manual"><summary>직접 입력 (자동 입력을 쓰지 않을 때)</summary>
+        <div class="row"><input type="text" id="mCategory" placeholder="업종 (예: 돼지고기구이)"><input type="text" id="mAddress" placeholder="주소 (예: 서울 마포구 백범로 170)"></div>
+      </details>
     </div>
 
-    <div id="extraWrap">
-      <label class="cap" id="extraCap">추가 정보 (선택)</label>
-      <textarea id="extra" maxlength="2000"></textarea>
+    <label class="cap" for="title" id="titleCap">제목 또는 주제</label>
+    <input type="text" id="title" maxlength="200" placeholder="블로그 글 제목이나 주제를 입력해주세요" autocomplete="off">
+    <div class="row" style="margin-top:10px">
+      <button class="btn" id="btnTitles" style="flex:1">제목 자동 생성</button>
+      <button class="btn ghost" id="btnRegen" title="제목 다시 생성 (R)">⟳<kbd>R</kbd></button>
+    </div>
+    <div id="candidates" class="hidden" style="margin-top:12px"><div id="candList"></div></div>
+
+    <label class="cap" for="kw">핵심 키워드 <small>— 검색 노출용. 제목에서 자동으로 채워지고 수정할 수 있어요 (쉼표로 구분)</small></label>
+    <input type="text" id="kw" placeholder="예) 락희옥 마포본점, 마포, 공덕역">
+
+    <label class="cap" for="memo" id="memoCap">메모</label>
+    <textarea id="memo" maxlength="4000"></textarea>
+    <p class="hint" id="memoHint"></p>
+
+    <div class="opts">
+      <label><input type="checkbox" id="guardrail"> 표시·광고 가드레일 <small style="color:var(--sub)">(효능 단정·암시 표현 제한)</small></label>
+      <label>경험 서술
+        <select id="evidence">
+          <option value="strict">메모에 있는 것만</option>
+          <option value="template">메모 + 일반 표현 허용</option>
+        </select>
+      </label>
     </div>
 
-    <label class="cap" for="title">제목</label>
-    <input type="text" id="title" maxlength="200" placeholder="블로그 글 제목을 입력해주세요" autocomplete="off">
-
-    <div class="actions">
-      <button class="btn-main" id="btnTitles">제목 자동 생성</button>
-      <button class="btn-regen" id="btnRegen" title="제목 다시 생성 (R)">⟳ <kbd>R</kbd></button>
-    </div>
-
-    <div id="candidates">
-      <label class="cap">제목 후보 — 클릭하면 제목 칸에 들어가요</label>
-      <div id="candList"></div>
-    </div>
-
-    <button class="btn-write" id="btnWrite">원고 생성</button>
+    <button class="btn wide" id="btnWrite" disabled>원고 생성하기</button>
     <div class="error" id="error"></div>
-  </section>
+  </div>
 
-  <section class="card">
+  <div class="card" id="resultCard">
     <h2>생성 결과</h2>
-    <div class="result-box" id="resultBox">
-      <div class="empty">
-        <div class="icon">▤</div>
-        <b>원고 제목을 입력하세요</b>
-        <span>원고를 생성하면 결과가 여기에 표시됩니다.</span>
-      </div>
+    <div class="result-box" id="resultBox"><div class="empty">원고 제목을 입력하세요.<br>원고를 생성하면 결과가 여기에 표시됩니다.</div></div>
+    <div id="notes" class="notes"></div>
+    <div class="actions hidden" id="actions">
+      <button class="btn" id="btnCopy">복사<kbd>C</kbd></button>
+      <button class="btn ghost hidden" id="btnRewrite">품질 점검 반영해서 다시 쓰기</button>
+      <button class="btn dark" id="btnNew">새 원고<kbd>N</kbd></button>
     </div>
-  </section>
+    <div id="quality"></div>
+  </div>
+</section>
+
+<section id="viewList" class="hidden">
+  <div class="card"><h2>내 원고</h2><div id="listBox"><div class="empty">불러오는 중...</div></div></div>
+</section>
 </main>
 
 <script>
-// 글 종류별 칩 설정 (tip이 있으면 ? 툴팁 표시). 툴팁 문구는 임의로 작성한 것이라 원본과 다를 수 있어요.
-const TYPES = [
-  { key: 'info',   label: '정보글' },
-  { key: 'food',   label: '맛집글', tip: '다녀온 맛집 후기 형식이에요. 상호·메뉴·가격을 추가 정보에 적어주세요.',
-    extraCap: '추가 정보 (상호명, 메뉴, 가격, 위치 등 · 선택)', extraPh: '예) 성수동 OO식당 / 대표메뉴 8,000원 / 주차 불가' },
-  { key: 'pro',    label: '전문직', tip: '세무·법률·의료 등 전문가 칼럼 형식이에요.',
-    extraCap: '추가 정보 (분야, 사례, 상담 안내 문구 등 · 선택)', extraPh: '예) 세무사 / 양도세 비과세 요건 / 상담 문의는 프로필 링크' },
-  { key: 'promo',  label: '홍보글', tip: '제품·서비스·매장을 알리는 홍보 형식이에요. 스펙·가격을 추가 정보에 적어주세요.',
-    extraCap: '추가 정보 (제품명, 특징, 가격, 구매처 등 · 선택)', extraPh: '예) OO 단백질 쉐이크 / 1회 30g / 3종 맛 / 스마트스토어 판매' },
-  { key: 'custom', label: '커스텀', custom: true,
-    extraCap: '커스텀 지침 (필수)', extraPh: '예) 친근한 말투, 소제목 4개, 표 대신 목록, 마지막에 구독 유도 문구' },
-  { key: 'etc',    label: '기타',
-    extraCap: '추가 정보 (선택)', extraPh: '원하는 방향이나 참고할 내용을 적어주세요' },
-];
-
 const $ = (id) => document.getElementById(id);
-const state = { kind: 'info', titles: [], busy: false, place: null };
+const COLORS = ['#e03131', '#1c7ed6', '#d6336c'];
+const KIND_LABEL = { info: '정보글', food: '맛집글' };
+const state = { kind: 'info', place: null, titles: [], busy: false, article: null };
 
-function renderChips() {
-  const box = $('chips');
-  box.innerHTML = '';
-  TYPES.forEach((t) => {
-    const b = document.createElement('button');
-    b.className = 'chip' + (t.custom ? ' custom' : '') + (state.kind === t.key ? ' active' : '');
-    b.append(t.label);
-    if (t.tip) {
-      const q = document.createElement('span');
-      q.className = 'q'; q.textContent = '?'; q.dataset.tip = t.tip;
-      b.append(q);
-    }
-    b.onclick = () => { state.kind = t.key; renderChips(); renderExtra(); };
-    box.append(b);
-  });
+/* ---------- 글 종류별 화면 ---------- */
+const KIND_UI = {
+  info: {
+    titleCap: '제목 또는 주제', memoCap: '내 경험·의견·참고 자료 (선택)',
+    memoPh: '예) 직접 겪은 일, 꼭 넣고 싶은 의견이나 주의점, 참고한 자료와 출처를 적어 주세요.\n비워도 되지만, 적을수록 내 글처럼 구체적으로 써져요.',
+    memoHint: '적어 준 내용이 글의 뼈대가 되고, 적지 않은 사실은 지어내지 않아요.', guardrail: true,
+  },
+  food: {
+    titleCap: '제목 또는 키워드', memoCap: '방문 소감·느낀 점 (권장)',
+    memoPh: '예) 금요일 저녁 동료 4명과 방문. 항정살 1인분 18,000원, 직원이 불판을 계속 갈아줘서 편했음.\n웨이팅 20분, 주차 불가. 아쉬운 점: 된장찌개가 짰음. 다시 간다면 평일 이른 시간.',
+    memoHint: '메뉴·가격·분위기·기분·아쉬운 점을 편하게 적어 주세요. 여기 적은 내용만 후기 경험으로 쓰여요.', guardrail: false,
+  },
+};
+
+function setKind(kind) {
+  state.kind = kind;
+  const ui = KIND_UI[kind];
+  document.querySelectorAll('#chips .chip').forEach((b) => b.classList.toggle('active', b.dataset.kind === kind));
+  $('foodBox').classList.toggle('hidden', kind !== 'food');
+  $('titleCap').textContent = ui.titleCap; $('memoCap').textContent = ui.memoCap;
+  $('memo').placeholder = ui.memoPh; $('memoHint').textContent = ui.memoHint;
+  $('guardrail').checked = ui.guardrail;
 }
+document.querySelectorAll('#chips .chip').forEach((b) => (b.onclick = () => setKind(b.dataset.kind)));
 
-function renderExtra() {
-  const t = TYPES.find((x) => x.key === state.kind);
-  const wrap = $('extraWrap');
-  wrap.classList.toggle('show', !!t.extraCap);
-  if (t.extraCap) { $('extraCap').textContent = t.extraCap; $('extra').placeholder = t.extraPh; }
-  $('placeWrap').classList.toggle('show', state.kind === 'food');
-}
+/* ---------- 공통 유틸 ---------- */
+function showError(msg) { const el = $('error'); el.textContent = msg || ''; el.classList.toggle('show', !!msg); }
+function setBusy(busy) { state.busy = busy; ['btnTitles', 'btnRegen', 'btnWrite', 'btnRewrite', 'btnPlace'].forEach((id) => ($(id).disabled = busy || (id === 'btnWrite' && !$('title').value.trim()))); }
+const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+$('title').addEventListener('input', () => { $('btnWrite').disabled = state.busy || !$('title').value.trim(); });
 
-// ---- 맛집글: 매장 이름 → 주소 검색 ----
-function placeStatus(msg, warn) {
-  const el = $('placeStatus');
-  el.textContent = msg || '';
-  el.classList.toggle('warn', !!warn);
-}
-
-function renderPlaces(places) {
-  const list = $('placeList');
-  list.innerHTML = '';
-  places.forEach((p) => {
-    const b = document.createElement('button');
-    b.className = 'place';
-    const name = document.createElement('b');
-    name.textContent = p.name;
-    const addr = document.createElement('span');
-    addr.textContent = [p.category, p.address].filter(Boolean).join(' · ');
-    b.append(name, addr);
-    b.onclick = () => {
-      state.place = p;
-      list.querySelectorAll('.place').forEach((x) => x.classList.remove('selected'));
-      b.classList.add('selected');
-      placeStatus(`선택됨: ${p.name} — 이 정보가 원고에 사실로 반영돼요.`);
-    };
-    list.append(b);
-  });
-}
-
-async function searchPlace() {
-  const q = $('placeQuery').value.trim();
-  if (!q) { placeStatus('매장 이름을 입력해 주세요.', true); return; }
-  state.place = null;
-  $('placeList').innerHTML = '';
-  placeStatus('검색 중...');
-  $('btnPlace').disabled = true;
-  try {
-    const res = await fetch('/api/places?query=' + encodeURIComponent(q));
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || '검색에 실패했어요.');
-    if (!data.places.length) { placeStatus('검색 결과가 없어요. 상호를 다시 확인하거나 추가 정보에 직접 적어주세요.', true); return; }
-    placeStatus(`${data.places.length}곳 찾았어요 — 주소를 보고 골라주세요`);
-    renderPlaces(data.places);
-    if (data.places.length === 1) $('placeList').querySelector('.place').click();
-  } catch (e) {
-    placeStatus(e.message, true);
-  } finally {
-    $('btnPlace').disabled = false;
-  }
-}
-
-$('btnPlace').onclick = searchPlace;
-$('placeQuery').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) searchPlace(); });
-$('placeQuery').addEventListener('input', () => { state.place = null; });
-
-// 맛집글이고 매장을 골랐을 때만 서버로 보냄
-const placeValue = () => (state.kind === 'food' ? state.place : null);
-
-function showError(msg) {
-  const el = $('error');
-  el.textContent = msg || '';
-  el.classList.toggle('show', !!msg);
-}
-
-function setBusy(busy) {
-  state.busy = busy;
-  ['btnTitles', 'btnRegen', 'btnWrite'].forEach((id) => { $(id).disabled = busy; });
-}
-
-async function post(url, body) {
-  const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+async function api(url, opts) {
+  const res = await fetch(url, opts);
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || '요청에 실패했어요.');
   return data;
 }
+const postJSON = (url, body) => api(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 
-const extraValue = () => ($('extraWrap').classList.contains('show') ? $('extra').value.trim() : '');
+async function streamSSE(url, body, onEvent) {
+  const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
+  if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || '요청에 실패했어요.'); }
+  const reader = res.body.getReader(); const dec = new TextDecoder(); let buf = '';
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    let i;
+    while ((i = buf.indexOf('\n\n')) >= 0) {
+      const block = buf.slice(0, i); buf = buf.slice(i + 2);
+      const ev = (block.match(/^event: (.+)$/m) || [])[1]; const data = (block.match(/^data: (.+)$/m) || [])[1];
+      if (ev && data) onEvent(ev, JSON.parse(data));
+    }
+  }
+}
 
+/* ---------- 본문 렌더링 / 복사 ---------- */
+const TAG_RE = /\{\{(\/?)(bold|color|highlight)\}\}/g;
+const isHead = (p) => /^\d+\.\s/.test(p.replace(TAG_RE, ''));
+const isTags = (p) => p.startsWith('#') && (p.match(/#/g) || []).length >= 3;
+const stripTags = (t) => t.replace(TAG_RE, '');
+const paragraphs = (t) => t.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);
+
+function countChars(text) {
+  const ps = paragraphs(stripTags(text));
+  for (let i = ps.length - 1; i >= 0; i--) if (isTags(ps[i])) { ps.splice(i, 1); break; }
+  return ps.join('\n').replace(/\s/g, '').length;
+}
+
+function inline(par, counter, mode) {
+  // mode: 'view' 은 화면용, 'copy' 는 네이버 붙여넣기용(형광펜은 굵게로 대체)
+  const stack = []; let out = ''; let pos = 0; const s = esc(par);
+  s.replace(TAG_RE, (m, close, name, idx) => {
+    out += s.slice(pos, idx); pos = idx + m.length;
+    if (!close) {
+      let open = '', end = '';
+      if (name === 'bold') { open = '<b>'; end = '</b>'; }
+      else if (name === 'highlight') { open = mode === 'view' ? '<mark>' : '<b>'; end = mode === 'view' ? '</mark>' : '</b>'; }
+      else { const c = COLORS[counter.n++ % COLORS.length]; open = mode === 'view' ? `<b style="color:${c}">` : `<span style="color:${c};font-weight:700">`; end = mode === 'view' ? '</b>' : '</span>'; }
+      stack.push([name, end]); out += open;
+    } else {
+      const i = stack.map((x) => x[0]).lastIndexOf(name);
+      if (i >= 0) { while (stack.length > i) out += stack.pop()[1]; }
+    }
+    return m;
+  });
+  out += s.slice(pos);
+  while (stack.length) out += stack.pop()[1];
+  return out;
+}
+
+function renderBody(text) {
+  const counter = { n: 0 };
+  return paragraphs(text).map((p) => {
+    if (p.includes('플레이스 지도 삽입')) return `<p class="mapline">${esc(p)}</p>`;
+    if (isTags(p)) return `<p class="tags">${esc(p)}</p>`;
+    if (isHead(p)) return `<h3>${inline(p, counter, 'view')}</h3>`;
+    return `<p>${inline(p, counter, 'view')}</p>`;
+  }).join('');
+}
+
+function toCopyHTML(text) {
+  const counter = { n: 0 };
+  return paragraphs(text).map((p) => {
+    if (isTags(p)) return `<p>${esc(p)}</p>`;
+    if (isHead(p)) return `<p><b>${inline(p, counter, 'copy')}</b></p>`;
+    return `<p>${inline(p, counter, 'copy')}</p>`;
+  }).join('<p><br></p>');
+}
+
+let rafPending = false, lastText = '';
+function scheduleRender(text) {
+  lastText = text;
+  if (rafPending) return;
+  rafPending = true;
+  requestAnimationFrame(() => { rafPending = false; renderResult(lastText, true); });
+}
+
+function renderResult(text, streaming) {
+  const box = $('resultBox');
+  let wrap = box.querySelector('.article');
+  if (!wrap) {
+    box.innerHTML = '<div class="barline"><span id="statusText"></span><span id="counter"></span></div><div class="article"></div>';
+    wrap = box.querySelector('.article');
+  }
+  wrap.innerHTML = renderBody(text);
+  $('counter').innerHTML = `글자수(공백 제외) <b>${countChars(text).toLocaleString()}</b>자`;
+  if (streaming) box.querySelector('.article').lastElementChild?.scrollIntoView?.({ block: 'nearest' });
+}
+function setStatus(msg, spin) { const el = $('statusText'); if (el) el.innerHTML = (spin ? '<span class="spinner"></span>' : '') + esc(msg || ''); }
+
+function renderQuality(q) {
+  if (!q || !q.checks) { $('quality').innerHTML = ''; return; }
+  const rows = q.checks.map((c) => `<div class="qrow"><span class="${c.ok ? 'ok' : 'no'}">${c.ok ? '✓' : '⚠'}</span><span>${esc(c.label)}</span><span class="val">${esc(c.value)}</span><span class="tg">기준: ${esc(c.target)}</span></div>`).join('');
+  $('quality').innerHTML = `<div class="quality"><h4>품질 점검 — ${q.ok_count} / ${q.total} 통과 <span style="font-weight:400;color:var(--sub)">(권장 기준이며 글을 막지 않아요)</span></h4>${rows}</div>`;
+}
+
+function showArticle(art) {
+  state.article = art;
+  renderResult(art.body, false);
+  setStatus(`저장됨 · ${KIND_LABEL[art.kind] || ''} · ${art.title}`);
+  renderQuality(art.quality);
+  $('actions').classList.remove('hidden');
+  $('btnRewrite').classList.toggle('hidden', !(art.quality && art.quality.issues && art.quality.issues.length));
+  $('notes').textContent = (art.notes || []).join(' · ');
+}
+
+/* ---------- 매장 검색 ---------- */
+function placeStatus(msg, warn) { const el = $('placeStatus'); el.textContent = msg || ''; el.classList.toggle('warn', !!warn); }
+async function searchPlace() {
+  const q = $('placeQuery').value.trim();
+  if (!q) { placeStatus('매장 이름을 입력해 주세요.', true); return; }
+  state.place = null; $('placeList').innerHTML = ''; placeStatus('검색 중...');
+  try {
+    const data = await api('/api/places?query=' + encodeURIComponent(q));
+    if (!data.places.length) { placeStatus('검색 결과가 없어요. 아래 직접 입력을 이용하세요.', true); return; }
+    placeStatus(`${data.places.length}곳 찾았어요 — 주소를 보고 골라주세요`);
+    data.places.forEach((p) => {
+      const b = document.createElement('button'); b.className = 'list-item';
+      b.innerHTML = `<b>${esc(p.name)}</b><span>${esc([p.category, p.address].filter(Boolean).join(' · '))}</span>`;
+      b.onclick = () => {
+        state.place = p; document.querySelectorAll('#placeList .list-item').forEach((x) => x.classList.remove('selected')); b.classList.add('selected');
+        placeStatus(`선택됨: ${p.name} — 이 정보가 원고에 사실로 반영돼요.`);
+      };
+      $('placeList').append(b);
+    });
+    if (data.places.length === 1) $('placeList').firstElementChild.click();
+  } catch (e) { placeStatus(e.message, true); }
+}
+$('btnPlace').onclick = searchPlace;
+$('placeQuery').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) searchPlace(); });
+$('placeQuery').addEventListener('input', () => { state.place = null; });
+
+function currentPlace() {
+  if (state.kind !== 'food') return null;
+  if (state.place) return state.place;
+  const name = $('placeQuery').value.trim();
+  return name ? { name, category: $('mCategory').value.trim(), address: $('mAddress').value.trim(), phone: '' } : null;
+}
+const keywordList = () => $('kw').value.split(/[,，]/).map((s) => s.trim()).filter(Boolean);
+const commonBody = () => ({ kind: state.kind, memo: $('memo').value.trim(), place: currentPlace(), guardrail: $('guardrail').checked, evidence_mode: $('evidence').value });
+
+/* ---------- 제목 후보 ---------- */
 async function makeTitles(regen) {
   if (state.busy) return;
-  showError('');
-  setBusy(true);
-  const label = $('btnTitles').textContent;
-  $('btnTitles').textContent = '생성 중...';
+  showError(''); setBusy(true);
+  const label = $('btnTitles').textContent; $('btnTitles').textContent = '생성 중...';
   try {
-    const data = await post('/api/titles', {
-      kind: state.kind, keyword: $('title').value.trim() || (placeValue() ? placeValue().name : ''),
-      extra: extraValue(), place: placeValue(), exclude: regen ? state.titles : [],
-    });
+    const data = await postJSON('/api/titles', { ...commonBody(), keyword: $('title').value.trim() || (currentPlace() || {}).name || '', exclude: regen ? state.titles : [] });
     state.titles = data.titles;
-    const list = $('candList');
-    list.innerHTML = '';
+    $('candList').innerHTML = '';
     data.titles.forEach((t) => {
-      const b = document.createElement('button');
-      b.className = 'cand'; b.textContent = t;
-      b.onclick = () => { $('title').value = t; };
-      list.append(b);
+      const b = document.createElement('button'); b.className = 'list-item'; b.textContent = t;
+      b.onclick = () => { $('title').value = t; $('btnWrite').disabled = false; $('candidates').classList.add('hidden'); fillKeywords(t); };
+      $('candList').append(b);
     });
-    $('candidates').classList.add('show');
-  } catch (e) {
-    showError(e.message);
-  } finally {
-    $('btnTitles').textContent = label;
-    setBusy(false);
-  }
+    $('candidates').classList.remove('hidden');
+    if (!$('kw').value.trim() && data.keywords) $('kw').value = data.keywords.join(', ');
+  } catch (e) { showError(e.message); }
+  finally { $('btnTitles').textContent = label; setBusy(false); }
 }
-
-async function makeArticle() {
-  if (state.busy) return;
-  showError('');
-  setBusy(true);
-  const box = $('resultBox');
-  box.innerHTML = '<div class="empty"><div class="spinner"></div><b>원고를 작성하고 있어요</b><span>보통 30초~1분 정도 걸려요.</span></div>';
-  try {
-    const data = await post('/api/article', { kind: state.kind, title: $('title').value.trim(), extra: extraValue(), place: placeValue() });
-    renderArticle(data.text);
-  } catch (e) {
-    showError(e.message);
-    box.innerHTML = '<div class="empty"><div class="icon">▤</div><b>원고를 만들지 못했어요</b><span>위 오류 메시지를 확인하고 다시 시도해 주세요.</span></div>';
-  } finally {
-    setBusy(false);
-  }
-}
-
-function renderArticle(text) {
-  const box = $('resultBox');
-  box.innerHTML = '';
-  const out = document.createElement('div');
-  out.className = 'out';
-  const bar = document.createElement('div');
-  bar.className = 'out-bar';
-  const count = document.createElement('span');
-  count.textContent = `공백 포함 ${text.length.toLocaleString()}자 · 공백 제외 ${text.replace(/\s/g, '').length.toLocaleString()}자`;
-  const btns = document.createElement('div');
-  const copy = document.createElement('button');
-  copy.textContent = '복사';
-  copy.onclick = async () => {
-    try { await navigator.clipboard.writeText(text); copy.textContent = '복사됨 ✓'; }
-    catch { copy.textContent = '복사 실패'; }
-    setTimeout(() => { copy.textContent = '복사'; }, 1500);
-  };
-  const again = document.createElement('button');
-  again.textContent = '다시 생성';
-  again.onclick = makeArticle;
-  btns.append(copy, again);
-  bar.append(count, btns);
-  const pre = document.createElement('pre');   // textContent로 넣어 XSS 방지
-  pre.id = 'article';
-  pre.textContent = text;
-  out.append(bar, pre);
-  box.append(out);
-}
-
+function fillKeywords() { /* 제목을 고른 뒤에도 사용자가 직접 입력한 키워드를 덮어쓰지 않음 */ }
 $('btnTitles').onclick = () => makeTitles(false);
 $('btnRegen').onclick = () => makeTitles(true);
-$('btnWrite').onclick = makeArticle;
-$('title').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) makeArticle(); });
 
-// R 키: 입력 중이 아닐 때 제목 다시 생성
+/* ---------- 원고 생성 ---------- */
+async function runStream(url, body) {
+  showError(''); setBusy(true); $('actions').classList.add('hidden'); $('quality').innerHTML = ''; $('notes').textContent = '';
+  $('resultBox').innerHTML = '<div class="barline"><span id="statusText"></span><span id="counter"></span></div><div class="article"></div>';
+  setStatus('요청 중...', true);
+  let raw = '';
+  try {
+    await streamSSE(url, body, (ev, d) => {
+      if (ev === 'status') setStatus(d.text, true);
+      else if (ev === 'chunk') { raw += d.text; scheduleRender(raw); }
+      else if (ev === 'replace') { raw = d.text; renderResult(raw, false); }
+      else if (ev === 'done') showArticle({ id: d.article_id, kind: body.kind || state.article?.kind || state.kind, title: d.title, body: d.body, quality: d.quality, notes: d.notes });
+      else if (ev === 'error') throw new Error(d.message);
+    });
+    $('resultCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  } catch (e) {
+    showError(e.message); setStatus('원고를 만들지 못했어요.');
+  } finally { setBusy(false); }
+}
+
+$('btnWrite').onclick = () => {
+  if (state.busy) return;
+  runStream('/api/articles/stream', { ...commonBody(), title: $('title').value.trim(), keywords: keywordList() });
+};
+$('btnRewrite').onclick = () => { if (!state.busy && state.article) runStream(`/api/articles/${state.article.id}/rewrite`, { kind: state.article.kind }); };
+
+/* ---------- 복사 / 새 원고 ---------- */
+async function copyArticle() {
+  if (!state.article) return;
+  const text = state.article.body;
+  const plain = paragraphs(stripTags(text)).join('\n\n');
+  const html = toCopyHTML(text);
+  const btn = $('btnCopy'); const old = btn.innerHTML;
+  try {
+    if (window.ClipboardItem) {
+      await navigator.clipboard.write([new ClipboardItem({ 'text/html': new Blob([html], { type: 'text/html' }), 'text/plain': new Blob([plain], { type: 'text/plain' }) })]);
+    } else { await navigator.clipboard.writeText(plain); }
+    btn.textContent = '복사됨 ✓ — 네이버 에디터에 붙여넣기';
+  } catch { btn.textContent = '복사 실패'; }
+  setTimeout(() => { btn.innerHTML = old; }, 2200);
+}
+$('btnCopy').onclick = copyArticle;
+function newArticle() {
+  state.article = null; $('title').value = ''; $('memo').value = ''; $('kw').value = ''; $('candidates').classList.add('hidden');
+  $('placeQuery').value = ''; state.place = null; $('placeList').innerHTML = ''; placeStatus('');
+  $('resultBox').innerHTML = '<div class="empty">원고 제목을 입력하세요.<br>원고를 생성하면 결과가 여기에 표시됩니다.</div>';
+  $('actions').classList.add('hidden'); $('quality').innerHTML = ''; $('notes').textContent = ''; $('btnWrite').disabled = true; showError('');
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+$('btnNew').onclick = newArticle;
+
+/* ---------- 내 원고 ---------- */
+function showView(name) {
+  $('viewWrite').classList.toggle('hidden', name !== 'write'); $('viewList').classList.toggle('hidden', name !== 'list');
+  $('tabWrite').classList.toggle('active', name === 'write'); $('tabList').classList.toggle('active', name === 'list');
+  if (name === 'list') loadList();
+}
+$('tabWrite').onclick = () => showView('write'); $('tabList').onclick = () => showView('list');
+
+async function loadList() {
+  const box = $('listBox');
+  try {
+    const { articles } = await api('/api/articles');
+    if (!articles.length) { box.innerHTML = '<div class="empty">아직 만든 원고가 없어요.</div>'; return; }
+    box.innerHTML = '';
+    articles.forEach((a) => {
+      const row = document.createElement('div'); row.className = 'li-row';
+      const b = document.createElement('button'); b.className = 'list-item';
+      b.innerHTML = `<b>${esc(a.title)}</b><span><i class="badge ${a.kind}" style="font-style:normal">${KIND_LABEL[a.kind] || a.kind}</i>${esc(a.created_at)} · ${a.chars.toLocaleString()}자</span>`;
+      b.onclick = async () => { const { article } = await api('/api/articles/' + a.id); showView('write'); showArticle(article); $('resultCard').scrollIntoView({ behavior: 'smooth' }); };
+      const x = document.createElement('button'); x.className = 'x'; x.textContent = '×'; x.title = '삭제';
+      x.onclick = async () => { if (!confirm('이 원고를 삭제할까요?')) return; await api('/api/articles', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: [a.id] }) }); loadList(); };
+      row.append(b, x); box.append(row);
+    });
+  } catch (e) { box.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+
+/* ---------- 단축키: R 제목 다시, C 복사, N 새 원고 ---------- */
 document.addEventListener('keydown', (e) => {
   const tag = (e.target.tagName || '').toLowerCase();
-  if (tag === 'input' || tag === 'textarea' || e.ctrlKey || e.metaKey || e.altKey) return;
-  if (e.key.toLowerCase() === 'r') { e.preventDefault(); makeTitles(true); }
+  if (['input', 'textarea', 'select'].includes(tag) || e.ctrlKey || e.metaKey || e.altKey) return;
+  const k = e.key.toLowerCase();
+  if (k === 'r') { e.preventDefault(); makeTitles(true); }
+  else if (k === 'c' && state.article) { e.preventDefault(); copyArticle(); }
+  else if (k === 'n') { e.preventDefault(); newArticle(); }
 });
 
-renderChips();
-renderExtra();
+setKind('info');
 </script>
 </body>
 </html>
