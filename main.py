@@ -1,6 +1,7 @@
 import asyncio
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from telethon import TelegramClient
+from telethon.sessions import StringSession
 from telegram import Bot
 from summarizer import select_important, summarize, summarize_for_threads, reset_api_counter
 from config import CHANNELS
@@ -30,6 +31,21 @@ try:
     API_ID = int(API_ID_STR)
 except ValueError:
     raise ValueError(f"❌ TELEGRAM_API_ID는 숫자여야 합니다. 현재 값: {API_ID_STR}")
+
+# ✅ Railway는 재배포할 때마다 파일이 초기화되므로, 로그인 정보를
+#    파일(session.session) 대신 환경변수 문자열(StringSession)로 보관한다.
+STRING_SESSION = os.getenv("TELETHON_STRING_SESSION")
+
+if not STRING_SESSION and not os.path.exists("session.session"):
+    print("⚠️ TELETHON_STRING_SESSION 환경변수가 없습니다. Railway Variables에 등록해야 수집이 동작합니다.")
+
+
+def make_client():
+    """텔레그램 수집용 클라이언트. 환경변수 문자열 세션을 우선 사용."""
+    if STRING_SESSION:
+        return TelegramClient(StringSession(STRING_SESSION), API_ID, API_HASH)
+    return TelegramClient("session", API_ID, API_HASH)  # PC 로컬 테스트용 (파일 세션)
+
 
 LAST_CHECK_FILE = "last_check.json"
 
@@ -76,7 +92,7 @@ async def job():
 
     try:
         # ✅ 수정 1: async with 사용 → 에러가 나도 자동으로 disconnect됨
-        async with TelegramClient("session", API_ID, API_HASH) as client:
+        async with make_client() as client:
             messages = []
             for channel in CHANNELS:
                 try:
@@ -131,7 +147,7 @@ async def threads_job():
     last_check = get_last_threads_check()
 
     try:
-        async with TelegramClient("session", API_ID, API_HASH) as client:
+        async with make_client() as client:
             messages = []
             for channel in CHANNELS:
                 try:
@@ -197,7 +213,12 @@ async def main():
     print(f"📅 텔레그램 채널: 하루 {len(times)}회 자동 발행 예약 완료")
     print(f"🧵 쓰레드 초안 DM: 하루 {len(threads_times)}회 예약 완료 (08:00 / 12:00 / 18:03)")
 
-    await job() 
+    # 재배포할 때마다 즉시 실행하면 last_check.json이 초기화된 상태라 같은 소식이 중복 발행되고
+    # API 비용이 늘어난다. 테스트할 때만 Railway Variables에 RUN_ON_START=1 을 넣어 사용한다.
+    if os.getenv("RUN_ON_START") == "1":
+        print("▶️ RUN_ON_START=1 → 시작 직후 1회 즉시 실행")
+        await job()
+
     await asyncio.Event().wait()
 
 asyncio.run(main())
