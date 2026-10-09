@@ -80,18 +80,19 @@ def evaluate(kind: str, body: str, keywords: list[str], memo: str = "") -> dict:
         dens = [text.count(t) * 1000 / plain_len for t in tokens]
         avg = sum(dens) / len(dens)
         total_mentions = sum(text.count(k) for k in keywords if k) * 1000 / plain_len
-        ok = 2.0 <= avg <= 8.0 and total_mentions <= 25
-        checks.append(_check("kw_density", "핵심 키워드 밀도(1,000자당)", f"{avg:.1f}회", "2~8회", ok,
-                             "핵심 키워드 사용이 %s. 1,000자당 3~6회 수준으로 자연스럽게 조절할 것" % ("부족" if avg < 2.0 else "과다")))
+        ok = 1.5 <= avg <= 9.0 and total_mentions <= 25
+        checks.append(_check("kw_density", "핵심 키워드 밀도(1,000자당)", f"{avg:.1f}회", "1.5~9회", ok,
+                             "핵심 키워드 사용이 %s. 1,000자당 3~6회 수준으로 자연스럽게 조절할 것" % ("부족" if avg < 1.5 else "과다")))
 
     # 3) 문장 길이 변화
     if sents:
         lens = [len(s) for s in sents]
         mean, sd = st.mean(lens), st.pstdev(lens)
         short = sum(l < 25 for l in lens) / len(lens)
-        ok = 30 <= mean <= 58 and sd >= 15 and short >= 0.10
-        checks.append(_check("sent_len", "문장 길이 변화", f"평균 {mean:.0f}자 · 편차 {sd:.0f} · 짧은 문장 {short:.0%}",
-                             "평균 30~58 · 편차 15 이상 · 짧은 문장 10% 이상", ok,
+        # 원본 3건: 평균 46~53자, 편차 12~15, 짧은 문장 0~4%. 원본 수준은 통과하고 그보다 단조로우면 주의.
+        ok = 28 <= mean <= 60 and sd >= 12
+        checks.append(_check("sent_len", "문장 길이 변화", f"평균 {mean:.0f}자 · 편차 {sd:.1f} · 짧은 문장 {short:.0%}",
+                             "평균 28~60 · 편차 12 이상", ok,
                              "문장 길이가 균일함. 20자 안팎의 짧은 문장을 20%쯤 섞고 긴 문장은 줄일 것"))
 
     # 4) 종결어미 / 1인칭
@@ -101,9 +102,9 @@ def evaluate(kind: str, body: str, keywords: list[str], memo: str = "") -> dict:
         casual = (ends.count("polite") + ends.count("colloquial")) / len(ends)
         first_p = sum(bool(FIRST_PERSON_RE.match(s)) for s in sents) / len(sents)
         if kind == "food":
-            checks.append(_check("endings", "말투 섞임(합니다체 / 해요·구어)", f"{formal:.0%} / {casual:.0%}", "합니다체 35~65%", 0.35 <= formal <= 0.65 and casual >= 0.25,
+            checks.append(_check("endings", "말투 섞임(합니다체 / 해요·구어)", f"{formal:.0%} / {casual:.0%}", "합니다체 30~70%", 0.30 <= formal <= 0.70 and casual >= 0.20,
                                  "합니다체를 약 50%, 해요체와 구어 어미(~더라고요, ~거든요, ~잖아요)를 약 50% 섞을 것"))
-            checks.append(_check("first_person", "'저는'으로 시작하는 문장", f"{first_p:.0%}", "30% 이하", first_p <= 0.30,
+            checks.append(_check("first_person", "'저는'으로 시작하는 문장", f"{first_p:.0%}", "35% 이하", first_p <= 0.35,
                                  "'저는/저도'로 시작하는 문장을 25% 이하로 줄일 것"))
         else:
             checks.append(_check("endings", "말투(합니다체 비율)", f"{formal:.0%}", "85% 이상", formal >= 0.85,
@@ -112,7 +113,7 @@ def evaluate(kind: str, body: str, keywords: list[str], memo: str = "") -> dict:
     # 5) 범용 표현
     if plain_len:
         gen = sum(text.count(w) for w in GENERIC_WORDS) * 1000 / plain_len
-        checks.append(_check("generic", "범용 표현(편안·무난·부담 등)", f"{gen:.1f}회", "1,000자당 5회 이하", gen <= 5,
+        checks.append(_check("generic", "범용 표현(편안·무난·부담 등)", f"{gen:.1f}회", "1,000자당 7회 이하", gen <= 7,
                              "편안·무난·자연스럽·부담·좋았 같은 범용 표현을 구체적 사실로 바꿀 것"))
 
     # 6) 중복 문장
@@ -128,7 +129,7 @@ def evaluate(kind: str, body: str, keywords: list[str], memo: str = "") -> dict:
                          "해시태그를 28~30개, 중복 없이 맞출 것"))
 
     # 8) 분량
-    lo, hi = (1800, 2400) if kind == "food" else (2400, 3000)
+    lo, hi = (1700, 2500) if kind == "food" else (2200, 3100)
     n = count_chars(body)
     checks.append(_check("length", "분량(공백 제외)", f"{n:,}자", f"{lo:,}~{hi:,}자", lo <= n <= hi,
                          "분량을 %s~%s자로 맞출 것(현재 %s자)" % (f"{lo:,}", f"{hi:,}", f"{n:,}")))
@@ -136,7 +137,7 @@ def evaluate(kind: str, body: str, keywords: list[str], memo: str = "") -> dict:
     # 9) 메모 반영(휴리스틱)
     if memo and memo.strip():
         cov, n_tok = _memo_coverage(memo, strip_tags(body))
-        checks.append(_check("memo", "메모 내용 반영(추정)", f"{cov:.0%} ({n_tok}개 단어 기준)", "50% 이상", cov >= 0.5,
+        checks.append(_check("memo", "메모 내용 반영(추정)", f"{cov:.0%} ({n_tok}개 단어 기준)", "40% 이상", cov >= 0.4,
                              "작성자 메모의 구체 내용(메뉴, 가격, 감정)이 본문에 더 반영되게 할 것"))
 
     issues = [c["advice"] for c in checks if not c["ok"]]

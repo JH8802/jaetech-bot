@@ -16,6 +16,28 @@ MODEL = os.getenv("BLOGDEX_MODEL", "claude-opus-5-5")
 EFFORT = os.getenv("BLOGDEX_EFFORT", "medium")  # low | medium | high
 FALLBACK_MODELS = {"claude-fable-5-1", "claude-opus-5-5", "claude-opus-5", "claude-sonnet-5-5"}
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
+# 1백만 토큰당 달러 (입력, 출력). 2026-10 기준 공시 가격이며 바뀔 수 있습니다.
+PRICES = {
+    "claude-opus-5-5": (4.0, 20.0),
+    "claude-sonnet-5-5": (2.0, 10.0),
+    "claude-haiku-5-5": (0.10, 0.50),
+    "claude-opus-5": (5.0, 25.0),
+    "claude-opus-4-8": (5.0, 25.0),
+}
+
+
+def estimate_cost(model: str, input_tokens: int, output_tokens: int) -> float | None:
+    p = PRICES.get(model)
+    return None if not p else round((input_tokens * p[0] + output_tokens * p[1]) / 1_000_000, 4)
+
+
+def _fill_usage(usage: dict | None, final) -> None:
+    if usage is None:
+        return
+    u = getattr(final, "usage", None)
+    model = getattr(final, "model", MODEL) or MODEL
+    inp, out = getattr(u, "input_tokens", 0) or 0, getattr(u, "output_tokens", 0) or 0
+    usage.update(model=model, input_tokens=inp, output_tokens=out, cost_usd=estimate_cost(model, inp, out))
 
 
 def is_mock() -> bool:
@@ -56,10 +78,12 @@ def _kwargs(system: str, user: str, max_tokens: int, effort: str) -> dict:
     )
 
 
-def stream_text(system: str, user: str, max_tokens: int = 16000, effort: str | None = None):
-    """Claude가 쓰는 글을 조각(text)으로 흘려보냅니다. 끝나면 거절·잘림 여부를 확인합니다."""
+def stream_text(system: str, user: str, max_tokens: int = 16000, effort: str | None = None, usage: dict | None = None):
+    """Claude가 쓰는 글을 조각(text)으로 흘려보냅니다. 끝나면 거절·잘림 여부를 확인하고 usage 에 토큰 수를 채웁니다."""
     if is_mock():
         yield from _mock_stream(system, user)
+        if usage is not None:
+            usage.update(model="mock", input_tokens=0, output_tokens=0, cost_usd=0.0)
         return
     kwargs = _kwargs(system, user, max_tokens, effort or EFFORT)
     client = get_client()
@@ -71,6 +95,7 @@ def stream_text(system: str, user: str, max_tokens: int = 16000, effort: str | N
         for text in stream.text_stream:
             yield text
         final = stream.get_final_message()
+    _fill_usage(usage, final)
     if final.stop_reason == "refusal":
         raise RefusedError("이 주제는 AI가 작성을 거절했어요. 주제나 표현을 바꿔서 다시 시도해 주세요.")
     if final.stop_reason == "max_tokens":
