@@ -129,7 +129,7 @@ def evaluate(kind: str, body: str, keywords: list[str], memo: str = "") -> dict:
                          "해시태그를 28~30개, 중복 없이 맞출 것"))
 
     # 8) 분량
-    lo, hi = (1700, 2500) if kind == "food" else (2200, 3100)
+    lo, hi = (1700, 2500) if kind == "food" else (2000, 3200)
     n = count_chars(body)
     checks.append(_check("length", "분량(공백 제외)", f"{n:,}자", f"{lo:,}~{hi:,}자", lo <= n <= hi,
                          "분량을 %s~%s자로 맞출 것(현재 %s자)" % (f"{lo:,}", f"{hi:,}", f"{n:,}")))
@@ -140,5 +140,9 @@ def evaluate(kind: str, body: str, keywords: list[str], memo: str = "") -> dict:
         checks.append(_check("memo", "메모 내용 반영(추정)", f"{cov:.0%} ({n_tok}개 단어 기준)", "40% 이상", cov >= 0.4,
                              "작성자 메모의 구체 내용(메뉴, 가격, 감정)이 본문에 더 반영되게 할 것"))
 
-    issues = [c["advice"] for c in checks if not c["ok"]]
+    # 10) 발행 전 확인 필요 표시: AI가 지어내지 않고 남긴 자리. 다시 쓰기로 해결할 수 없어 직접 확인해야 하므로 advice 는 비움
+    todo = len(re.findall(r"\[확인 필요[^\]]*\]", strip_tags(body)))
+    checks.append(_check("todo", "발행 전 확인 필요 표시", f"{todo}곳", "0곳 (본문에서 직접 확인하고 지우기)", todo == 0, ""))
+
+    issues = [c["advice"] for c in checks if not c["ok"] and c["advice"]]
     return {"checks": checks, "issues": issues, "ok_count": sum(c["ok"] for c in checks), "total": len(checks), "headings": len(heads)}

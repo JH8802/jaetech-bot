@@ -54,6 +54,16 @@ class EvalTests(unittest.TestCase):
         res = ev.evaluate("info", body(["문단입니다."]), ["문단"], "")
         self.assertFalse(any(c["key"] == "memo" for c in res["checks"]))
 
+    def test_todo_marker_counted_but_not_a_rewrite_issue(self):
+        text = body(["NMN 이야기입니다. [확인 필요: 식약처 인정 현황] 직접 확인합니다."])
+        res = ev.evaluate("info", text, ["NMN"])
+        todo = next(c for c in res["checks"] if c["key"] == "todo")
+        self.assertFalse(todo["ok"])
+        self.assertEqual(todo["value"], "1곳")
+        self.assertNotIn("", res["issues"])  # 빈 안내는 다시 쓰기 지시에 들어가지 않음
+        none = ev.evaluate("info", body(["NMN 이야기입니다."]), ["NMN"])
+        self.assertTrue(next(c for c in none["checks"] if c["key"] == "todo")["ok"])
+
 
 if __name__ == "__main__":
     unittest.main()

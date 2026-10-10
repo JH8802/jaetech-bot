@@ -65,6 +65,7 @@
   .article h3 { margin: 30px 0 14px; padding-bottom: 8px; border-bottom: 1px solid var(--line); font-size: 18px; }
   .article mark { background: #ffec99; padding: 0 2px; font-weight: 700; }
   .article b { font-weight: 700; }
+  .article .todo { background: #fff3bf; color: #b35c00; border-radius: 4px; padding: 1px 4px; font-weight: 700; font-size: 13px; }
   .article .tags { color: #1c7ed6; font-size: 13px; line-height: 1.9; }
   .article .mapline { color: var(--sub); font-size: 13px; border: 1px dashed var(--line); border-radius: 8px; padding: 8px 12px; }
   .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
@@ -266,8 +267,9 @@ function renderBody(text) {
   return paragraphs(text).map((p) => {
     if (p.includes('플레이스 지도 삽입')) return `<p class="mapline">${esc(p)}</p>`;
     if (isTags(p)) return `<p class="tags">${esc(p)}</p>`;
-    if (isHead(p)) return `<h3>${inline(p, counter, 'view')}</h3>`;
-    return `<p>${inline(p, counter, 'view')}</p>`;
+    const mark = (h) => h.replace(/\[확인 필요[^\]]*\]/g, '<span class="todo">$&</span>');  // 발행 전 직접 확인할 자리
+    if (isHead(p)) return `<h3>${mark(inline(p, counter, 'view'))}</h3>`;
+    return `<p>${mark(inline(p, counter, 'view'))}</p>`;
   }).join('');
 }
 
