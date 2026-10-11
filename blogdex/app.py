@@ -209,7 +209,7 @@ def _generate_events(*, kind, title, keywords, memo, place, guardrail, evidence_
         usage = llm.merge_usage(photo_usage, usage)
         yield sse("status", {"text": "태그와 해시태그를 정리하고 품질을 점검하고 있어요."})
         fin = postprocess.finalize(kind, "".join(parts), place, keywords, title, len(photo_notes or []))
-        quality = eval_style.evaluate(kind, fin["body"], keywords, memo)
+        quality = eval_style.evaluate(kind, fin["body"], keywords, memo, title=title, ad_check=guardrail)
         yield sse("replace", {"text": fin["body"]})
         article_id = storage.save_article(
             kind=kind, title_input=title_input or title, title_final=title, memo=memo, place=place, keywords=keywords,
@@ -285,7 +285,8 @@ def articles_update_body(article_id: int):
         raise ValueError("본문이 비어 있어요.")
     if len(body) > MAX_BODY:
         raise ValueError("본문이 너무 길어요.")
-    quality = eval_style.evaluate(art["kind"], body, art["keywords"], art["memo"])
+    quality = eval_style.evaluate(art["kind"], body, art["keywords"], art["memo"], title=art["title"],
+                                  ad_check=bool((art["options"] or {}).get("guardrail")))
     chars = postprocess.count_chars(body)
     storage.update_body(article_id, body, chars, quality)
     return jsonify(chars=chars, quality=quality)

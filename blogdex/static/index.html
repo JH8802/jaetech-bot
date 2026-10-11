@@ -77,6 +77,13 @@
   .todopanel .trow input { height: 34px; font-size: 13px; }
   .todopanel .tfoot { padding: 10px 16px; display: flex; gap: 10px; align-items: center; border-top: 1px solid #ffe8cc; font-size: 12px; color: var(--sub); }
   .todopanel .tfoot .btn { height: 34px; }
+  .article .adhit { background: #ffe3e3; color: #c92a2a; border-bottom: 2px solid #fa5252; border-radius: 2px; }
+  .qdetail { padding: 6px 16px 12px 46px; font-size: 12px; border-bottom: 1px solid #f1f3f5; background: #fffafa; }
+  .qdetail summary { cursor: pointer; color: #c92a2a; font-weight: 600; }
+  .qdetail .hit { margin-top: 6px; line-height: 1.6; color: #374151; }
+  .qdetail .tag { display: inline-block; font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 6px; margin-right: 6px; background: #ffe8cc; color: #b35c00; }
+  .qdetail .tag.high { background: #ffe3e3; color: #c92a2a; } .qdetail .tag.soft { background: #f1f3f5; color: #6b7280; }
+  .qdetail .note { margin: 8px 0 0; color: var(--sub); }
   .hidden { display: none !important; }
 
   /* 결과 */
@@ -208,7 +215,7 @@
 const $ = (id) => document.getElementById(id);
 const COLORS = ['#e03131', '#1c7ed6', '#d6336c'];
 const KIND_LABEL = { info: '정보글', food: '맛집글' };
-const state = { kind: 'info', place: null, titles: [], busy: false, article: null, photos: [], resultPhotos: [] };  // photos: 입력칸의 사진 / resultPhotos: 결과에 보여 줄 사진(현재 세션에서 생성한 글만)
+const state = { kind: 'info', place: null, titles: [], busy: false, article: null, photos: [], resultPhotos: [], adTerms: [] };  // photos: 입력칸의 사진 / resultPhotos: 결과에 보여 줄 사진(현재 세션에서 생성한 글만)
 
 /* ---------- 글 종류별 화면 ---------- */
 const KIND_UI = {
@@ -316,6 +323,13 @@ function inline(par, counter, mode) {
   return out;
 }
 
+// 표시·광고 점검에서 걸린 표현(참고 제외)을 본문에서 빨간 밑줄로 보여 준다. 복사에는 영향 없음
+function markAd(html) {
+  if (!state.adTerms.length) return html;
+  const re = new RegExp('(' + state.adTerms.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') + ')', 'g');
+  return html.split(/(<[^>]+>)/).map((seg) => (seg.startsWith('<') ? seg : seg.replace(re, '<span class="adhit">$1</span>'))).join('');
+}
+
 function renderBody(text) {
   const counter = { n: 0 };
   return paragraphs(text).map((p) => {
@@ -325,10 +339,10 @@ function renderBody(text) {
       return `<div class="photoslot">${ph ? `<img src="${ph.url}" alt="사진 ${pn}">` : ''}사진 ${pn}</div>`;
     }
     if (p.includes('플레이스 지도 삽입')) return `<p class="mapline">${esc(p)}</p>`;
-    if (isTags(p)) return `<p class="tags">${esc(p)}</p>`;
+    if (isTags(p)) return `<p class="tags">${markAd(esc(p))}</p>`;
     const mark = (h) => h.replace(/\[확인 필요[^\]]*\]/g, '<span class="todo">$&</span>');  // 발행 전 직접 확인할 자리
-    if (isHead(p)) return `<h3>${mark(inline(p, counter, 'view'))}</h3>`;
-    return `<p>${mark(inline(p, counter, 'view'))}</p>`;
+    if (isHead(p)) return `<h3>${mark(markAd(inline(p, counter, 'view')))}</h3>`;
+    return `<p>${mark(markAd(inline(p, counter, 'view')))}</p>`;
   }).join('');
 }
 
@@ -368,10 +382,25 @@ function renderResult(text, streaming, chars) {
 }
 function setStatus(msg, spin) { const el = $('statusText'); if (el) el.innerHTML = (spin ? '<span class="spinner"></span>' : '') + esc(msg || ''); }
 
+function adDetail(c) {
+  const hits = c.hits || [];
+  if (!hits.length) return '';
+  const lv = (h) => (h.soft ? ['soft', '참고'] : h.level === 'high' ? ['high', '높음'] : ['', '주의']);
+  const rows = hits.map((h) => {
+    const [cls, name] = lv(h);
+    const sent = esc(h.sentence).split(esc(h.match)).join(`<b>${esc(h.match)}</b>`);
+    return `<div class="hit"><span class="tag ${cls}">${name}</span>${esc(h.where)} · ${esc(h.category)} — ${sent}</div>`;
+  }).join('');
+  return `<details class="qdetail" ${c.ok ? '' : 'open'}><summary>걸린 표현 ${hits.length}건 보기</summary>${rows}<p class="note">목록 기반 보조 점검이에요(법률 판단 아님). 참고는 부정·설명 문장이라 점검 결과에 세지 않았어요. 목록은 blogdex/adcheck.py 에서 고칠 수 있어요.</p></details>`;
+}
+
 function renderQuality(q) {
+  const ad = q && q.checks && q.checks.find((c) => c.key === 'ad');
+  state.adTerms = ad ? [...new Set((ad.hits || []).filter((h) => !h.soft).map((h) => h.match))] : [];
   if (!q || !q.checks) { $('quality').innerHTML = ''; return; }
-  const rows = q.checks.map((c) => `<div class="qrow"><span class="${c.ok ? 'ok' : 'no'}">${c.ok ? '✓' : '⚠'}</span><span>${esc(c.label)}</span><span class="val">${esc(c.value)}</span><span class="tg">기준: ${esc(c.target)}</span></div>`).join('');
+  const rows = q.checks.map((c) => `<div class="qrow"><span class="${c.ok ? 'ok' : 'no'}">${c.ok ? '✓' : '⚠'}</span><span>${esc(c.label)}</span><span class="val">${esc(c.value)}</span><span class="tg">기준: ${esc(c.target)}</span></div>` + (c.key === 'ad' ? adDetail(c) : '')).join('');
   $('quality').innerHTML = `<div class="quality"><h4>품질 점검 — ${q.ok_count} / ${q.total} 통과 <span style="font-weight:400;color:var(--sub)">(권장 기준이며 글을 막지 않아요)</span></h4>${rows}</div>`;
+  if (state.article) renderResult(state.article.body, false, state.article.chars);  // 걸린 표현 밑줄 반영
 }
 
 /* ---------- [확인 필요] 채우기 ---------- */
@@ -542,7 +571,7 @@ function renderPhotoNotes(notes) {
 
 /* ---------- 원고 생성 ---------- */
 async function runStream(url, body) {
-  showError(''); setBusy(true); $('actions').classList.add('hidden'); $('quality').innerHTML = ''; $('notes').textContent = ''; $('photoNotes').innerHTML = ''; $('todoPanel').innerHTML = '';
+  showError(''); setBusy(true); $('actions').classList.add('hidden'); $('quality').innerHTML = ''; $('notes').textContent = ''; $('photoNotes').innerHTML = ''; $('todoPanel').innerHTML = ''; state.adTerms = [];
   $('resultBox').innerHTML = '<div class="barline"><span id="statusText"></span><span id="counter"></span></div><div class="article"></div>';
   setStatus('요청 중...', true);
   let raw = '';
@@ -589,7 +618,7 @@ async function copyArticle() {
 $('btnCopy').onclick = copyArticle;
 function newArticle() {
   state.article = null; $('title').value = ''; $('memo').value = ''; $('kw').value = ''; $('candidates').classList.add('hidden');
-  $('placeQuery').value = ''; state.place = null; $('placeList').innerHTML = ''; placeStatus(''); updateHints(); state.photos = []; state.resultPhotos = []; renderPhotos(); $('photoNotes').innerHTML = ''; $('todoPanel').innerHTML = '';
+  $('placeQuery').value = ''; state.place = null; $('placeList').innerHTML = ''; placeStatus(''); updateHints(); state.photos = []; state.resultPhotos = []; renderPhotos(); $('photoNotes').innerHTML = ''; $('todoPanel').innerHTML = ''; state.adTerms = [];
   $('resultBox').innerHTML = '<div class="empty">원고 제목을 입력하세요.<br>원고를 생성하면 결과가 여기에 표시됩니다.</div>';
   $('actions').classList.add('hidden'); $('quality').innerHTML = ''; $('notes').textContent = ''; $('btnWrite').disabled = true; showError('');
   window.scrollTo({ top: 0, behavior: 'smooth' });

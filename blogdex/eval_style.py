@@ -7,6 +7,7 @@ import itertools
 import re
 import statistics as st
 
+import adcheck
 from postprocess import HEADING_RE, MAP_LINE_MARK, count_chars, find_hashtag_index, split_paragraphs, strip_tags
 
 GENERIC_WORDS = ["편안", "무난", "자연스럽", "부담", "좋았", "좋겠", "차분", "다양한", "효과적", "전반적으로"]
@@ -65,7 +66,7 @@ def _memo_coverage(memo: str, body_plain: str) -> tuple[float, int]:
     return sum(1 for t in tokens if hit(t)) / len(tokens), len(tokens)
 
 
-def evaluate(kind: str, body: str, keywords: list[str], memo: str = "") -> dict:
+def evaluate(kind: str, body: str, keywords: list[str], memo: str = "", title: str = "", ad_check: bool = False) -> dict:
     paras, heads, tags = _body_parts(body)
     text = "\n".join(paras)
     plain_len = len(re.sub(r"\s", "", text))
@@ -148,7 +149,18 @@ def evaluate(kind: str, body: str, keywords: list[str], memo: str = "") -> dict:
         checks.append(_check("memo", "메모 내용 반영(추정)", f"{cov:.0%} ({n_tok}개 단어 기준)", "40% 이상", cov >= 0.4,
                              "작성자 메모의 구체 내용(메뉴, 가격, 감정)이 본문에 더 반영되게 할 것"))
 
-    # 10) 발행 전 확인 필요 표시: AI가 지어내지 않고 남긴 자리. 다시 쓰기로 해결할 수 없어 직접 확인해야 하므로 advice 는 비움
+    # 10) 표시·광고 표현(가드레일을 켠 글만): 목록 기반 점검이라 법률 판단이 아니라 사람이 다시 보라는 표시
+    if ad_check:
+        hits = adcheck.scan(title, body)
+        sm = adcheck.summarize(hits)
+        value = "해당 없음" if not hits else f"높음 {sm['high']} · 주의 {sm['warn']} · 참고 {sm['soft']}"
+        terms = ", ".join(f"'{t}'" for t in sm["hard_terms"][:4])
+        ad = _check("ad", "표시·광고 표현 점검", value, "높음·주의 0건 (참고는 제외)", not (sm["high"] or sm["warn"]),
+                    f"표시·광고 주의 표현({terms})을 단정·암시 없이 근거 수준을 밝히는 중립적 설명으로 바꿀 것")
+        ad["hits"] = hits[:40]
+        checks.append(ad)
+
+    # 11) 발행 전 확인 필요 표시: AI가 지어내지 않고 남긴 자리. 다시 쓰기로 해결할 수 없어 직접 확인해야 하므로 advice 는 비움
     todo = len(re.findall(r"\[확인 필요[^\]]*\]", strip_tags(body)))
     checks.append(_check("todo", "발행 전 확인 필요 표시", f"{todo}곳", "0곳 (본문에서 직접 확인하고 지우기)", todo == 0, ""))
 
