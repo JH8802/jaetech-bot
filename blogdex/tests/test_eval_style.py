@@ -73,5 +73,40 @@ class PromptTests(unittest.TestCase):
                 self.assertIn("자기 사정", prompts.build_system(kind, False, mode))
 
 
+class AdCheckTests(unittest.TestCase):
+    RISKY = "NMN은 노화 방지에 효과가 있습니다.\n\n효과를 약속하는 글은 아닙니다. 치료 목적이 아닙니다.\n\n#NMN효능 #항산화"
+
+    def test_scan_levels_and_soft_context(self):
+        import adcheck
+        hits = adcheck.scan("", self.RISKY)
+        by = {(h["match"], h["soft"]) for h in hits}
+        self.assertIn(("노화 방지", False), by)
+        self.assertIn(("효과", False), by)      # 단정 문장
+        self.assertIn(("효과", True), by)       # '아닙니다' 설명 문장은 참고
+        self.assertIn(("치료", True), by)
+        self.assertIn(("효능", False), by)      # 해시태그도 검사
+        sm = adcheck.summarize(hits)
+        self.assertEqual(sm["high"], 0)
+        self.assertGreaterEqual(sm["warn"], 3)
+
+    def test_high_level_and_title(self):
+        import adcheck
+        hits = adcheck.scan("당뇨 치료에 좋은 영양제", "본문입니다.")
+        self.assertTrue(any(h["level"] == "high" and h["where"] == "제목" for h in hits))
+
+    def test_evaluate_adds_ad_check_only_when_enabled(self):
+        off = ev.evaluate("info", body([self.RISKY.split("\n\n")[0]]), ["NMN"])
+        self.assertFalse(any(c["key"] == "ad" for c in off["checks"]))
+        on = ev.evaluate("info", body([self.RISKY.split("\n\n")[0]]), ["NMN"], ad_check=True)
+        ad = next(c for c in on["checks"] if c["key"] == "ad")
+        self.assertFalse(ad["ok"])
+        self.assertTrue(ad["hits"])
+        self.assertTrue(any("노화 방지" in i for i in on["issues"]))  # 다시 쓰기 지시에 포함
+
+    def test_clean_text_passes(self):
+        on = ev.evaluate("info", body(["라벨에서 인정된 기능성 표시가 있는지 확인합니다."]), ["라벨"], ad_check=True)
+        self.assertTrue(next(c for c in on["checks"] if c["key"] == "ad")["ok"])
+
+
 if __name__ == "__main__":
     unittest.main()
