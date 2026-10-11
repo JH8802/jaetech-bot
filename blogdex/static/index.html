@@ -39,6 +39,7 @@
   .btn.dark { background: #111827; }
   .btn.wide { width: 100%; height: 48px; font-size: 14px; margin-top: 20px; }
   kbd { font: 700 10px/1 inherit; background: #f3f4f6; border: 1px solid var(--line); border-radius: 4px; padding: 3px 5px; margin-left: 6px; color: #374151; }
+  .warnhint { color: #b35c00; }
   .hint { font-size: 12px; color: var(--sub); margin: 6px 0 0; line-height: 1.5; }
   .status { font-size: 12px; margin: 8px 0 4px; color: var(--ok); }
   .status.warn { color: var(--danger); }
@@ -131,7 +132,9 @@
     <label class="cap" for="memo" id="memoCap">메모</label>
     <textarea id="memo" maxlength="4000"></textarea>
     <p class="hint" id="memoHint"></p>
+    <p class="hint warnhint hidden" id="memoShort"></p>
 
+    <p class="hint warnhint hidden" id="evidenceHint">'메모 + 일반 표현'은 메모에 없는 체험(맛·분위기 묘사 등)이 후기에 섞일 수 있어요. 실제 방문 후기에는 '메모에 있는 것만'을 권해요.</p>
     <div class="opts">
       <label><input type="checkbox" id="guardrail"> 표시·광고 가드레일 <small style="color:var(--sub)">(효능 단정·암시 표현 제한)</small></label>
       <label>경험 서술
@@ -193,7 +196,19 @@ function setKind(kind) {
   $('titleCap').textContent = ui.titleCap; $('memoCap').textContent = ui.memoCap;
   $('memo').placeholder = ui.memoPh; $('memoHint').textContent = ui.memoHint;
   $('guardrail').checked = ui.guardrail;
+  if (kind === 'food') $('evidence').value = 'strict';
+  updateHints();
 }
+function updateHints() {
+  const n = $('memo').value.replace(/\s/g, '').length;
+  const short = state.kind === 'food' && n < 150;
+  const el = $('memoShort');
+  el.textContent = short ? `메모가 짧아요(${n}자). 메뉴·가격·맛·분위기·아쉬운 점을 적을수록 글이 풍부해지고, 짧으면 글이 짧아지고 [확인 필요]가 많아져요.` : '';
+  el.classList.toggle('hidden', !short);
+  $('evidenceHint').classList.toggle('hidden', !(state.kind === 'food' && $('evidence').value === 'template'));
+}
+$('memo').addEventListener('input', updateHints);
+$('evidence').addEventListener('change', updateHints);
 document.querySelectorAll('#chips .chip').forEach((b) => (b.onclick = () => setKind(b.dataset.kind)));
 
 /* ---------- 공통 유틸 ---------- */
@@ -290,7 +305,7 @@ function scheduleRender(text) {
   requestAnimationFrame(() => { rafPending = false; renderResult(lastText, true); });
 }
 
-function renderResult(text, streaming) {
+function renderResult(text, streaming, chars) {
   const box = $('resultBox');
   let wrap = box.querySelector('.article');
   if (!wrap) {
@@ -298,7 +313,7 @@ function renderResult(text, streaming) {
     wrap = box.querySelector('.article');
   }
   wrap.innerHTML = renderBody(text);
-  $('counter').innerHTML = `글자수(공백 제외) <b>${countChars(text).toLocaleString()}</b>자`;
+  $('counter').innerHTML = `글자수(공백 제외) <b>${(chars != null ? chars : countChars(text)).toLocaleString()}</b>자`;
   if (streaming) box.querySelector('.article').lastElementChild?.scrollIntoView?.({ block: 'nearest' });
 }
 function setStatus(msg, spin) { const el = $('statusText'); if (el) el.innerHTML = (spin ? '<span class="spinner"></span>' : '') + esc(msg || ''); }
@@ -311,7 +326,7 @@ function renderQuality(q) {
 
 function showArticle(art) {
   state.article = art;
-  renderResult(art.body, false);
+  renderResult(art.body, false, art.chars);
   setStatus(`저장됨 · ${KIND_LABEL[art.kind] || ''} · ${art.title}`);
   renderQuality(art.quality);
   $('actions').classList.remove('hidden');
@@ -391,7 +406,7 @@ async function runStream(url, body) {
       if (ev === 'status') setStatus(d.text, true);
       else if (ev === 'chunk') { raw += d.text; scheduleRender(raw); }
       else if (ev === 'replace') { raw = d.text; renderResult(raw, false); }
-      else if (ev === 'done') showArticle({ id: d.article_id, kind: body.kind || state.article?.kind || state.kind, title: d.title, body: d.body, quality: d.quality, notes: d.notes, usage: d.usage });
+      else if (ev === 'done') showArticle({ id: d.article_id, kind: body.kind || state.article?.kind || state.kind, title: d.title, body: d.body, chars: d.chars, quality: d.quality, notes: d.notes, usage: d.usage });
       else if (ev === 'error') throw new Error(d.message);
     });
     $('resultCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -425,7 +440,7 @@ async function copyArticle() {
 $('btnCopy').onclick = copyArticle;
 function newArticle() {
   state.article = null; $('title').value = ''; $('memo').value = ''; $('kw').value = ''; $('candidates').classList.add('hidden');
-  $('placeQuery').value = ''; state.place = null; $('placeList').innerHTML = ''; placeStatus('');
+  $('placeQuery').value = ''; state.place = null; $('placeList').innerHTML = ''; placeStatus(''); updateHints();
   $('resultBox').innerHTML = '<div class="empty">원고 제목을 입력하세요.<br>원고를 생성하면 결과가 여기에 표시됩니다.</div>';
   $('actions').classList.add('hidden'); $('quality').innerHTML = ''; $('notes').textContent = ''; $('btnWrite').disabled = true; showError('');
   window.scrollTo({ top: 0, behavior: 'smooth' });

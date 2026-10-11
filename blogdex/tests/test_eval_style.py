@@ -65,5 +65,13 @@ class EvalTests(unittest.TestCase):
         self.assertTrue(next(c for c in none["checks"] if c["key"] == "todo")["ok"])
 
 
+class PromptTests(unittest.TestCase):
+    def test_no_meta_rule_in_both_modes_and_kinds(self):
+        import prompts
+        for kind in ("info", "food"):
+            for mode in ("strict", "template"):
+                self.assertIn("자기 사정", prompts.build_system(kind, False, mode))
+
+
 if __name__ == "__main__":
     unittest.main()
