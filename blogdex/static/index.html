@@ -324,14 +324,18 @@ function renderBody(text) {
   }).join('');
 }
 
+const TODO_RE = /\[확인 필요[^\]]*\]/g;
+// 네이버 에디터는 배경색이 빠지므로, 발행 전에 찾기 쉽게 굵은 주황색으로 붙여넣는다
+const todoCopy = (h) => h.replace(TODO_RE, '<b><span style="color:#e8590c">$&</span></b>');
+
 function toCopyHTML(text) {
   const counter = { n: 0 };
   return paragraphs(text).map((p) => {
     const pn = photoNo(p);
     if (pn) return `<p>사진 ${pn}</p>`;
     if (isTags(p)) return `<p>${esc(p)}</p>`;
-    if (isHead(p)) return `<p><b>${inline(p, counter, 'copy')}</b></p>`;
-    return `<p>${inline(p, counter, 'copy')}</p>`;
+    if (isHead(p)) return `<p><b>${todoCopy(inline(p, counter, 'copy'))}</b></p>`;
+    return `<p>${todoCopy(inline(p, counter, 'copy'))}</p>`;
   }).join('<p><br></p>');
 }
 
@@ -524,14 +528,16 @@ async function copyArticle() {
   const withTitle = $('copyTitle').checked && state.article.title;
   const plain = (withTitle ? state.article.title + '\n\n' : '') + paragraphs(stripTags(text)).map((p) => (photoNo(p) ? `사진 ${photoNo(p)}` : p)).join('\n\n');
   const html = (withTitle ? `<p>${esc(state.article.title)}</p><p><br></p>` : '') + toCopyHTML(text);
-  const btn = $('btnCopy'); const old = btn.innerHTML;
+  const btn = $('btnCopy'); const old = btn.innerHTML; let wait = 2200;
   try {
     if (window.ClipboardItem) {
       await navigator.clipboard.write([new ClipboardItem({ 'text/html': new Blob([html], { type: 'text/html' }), 'text/plain': new Blob([plain], { type: 'text/plain' }) })]);
     } else { await navigator.clipboard.writeText(plain); }
-    btn.textContent = '복사됨 ✓ — 네이버 에디터에 붙여넣기';
+    const todo = (stripTags(text).match(TODO_RE) || []).length;
+    btn.textContent = todo ? `복사됨 ✓ — [확인 필요] ${todo}곳이 남아 있어요 (주황색 굵은 글씨)` : '복사됨 ✓ — 네이버 에디터에 붙여넣기';
+    wait = todo ? 6000 : 2200;
   } catch { btn.textContent = '복사 실패'; }
-  setTimeout(() => { btn.innerHTML = old; }, 2200);
+  setTimeout(() => { btn.innerHTML = old; }, wait);
 }
 $('btnCopy').onclick = copyArticle;
 function newArticle() {
