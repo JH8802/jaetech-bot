@@ -279,6 +279,15 @@ def articles_delete():
     return jsonify(deleted=storage.delete_articles(ids))
 
 
+def _open_browser_later(port: int) -> None:
+    """run_blogdex.bat 로 실행하면(BLOGDEX_OPEN_BROWSER=1) 서버가 켜진 뒤 브라우저를 엽니다."""
+    import threading
+    import webbrowser
+    threading.Timer(1.5, lambda: webbrowser.open(f"http://127.0.0.1:{port}")).start()
+
+
 if __name__ == "__main__":
+    if os.getenv("BLOGDEX_OPEN_BROWSER") == "1":
+        _open_browser_later(int(os.getenv("PORT", "5000")))
     # 본인 PC에서만 접속되도록 127.0.0.1 로 고정 (외부 공개 시 로그인/사용량 제한을 먼저 붙여야 합니다)
     app.run(host="127.0.0.1", port=int(os.getenv("PORT", "5000")), debug=False, threaded=True)

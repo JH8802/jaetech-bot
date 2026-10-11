@@ -123,5 +123,16 @@ class PhotoTests(unittest.TestCase):
         self.assertEqual(pp.count_chars("가나\n\n<사진1>\n\n#a #b #c"), len("가나사진1"))
 
 
+class BatFileTests(unittest.TestCase):
+    def test_bat_files_use_crlf_and_have_no_nested_quote_trap(self):
+        base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        for name in ("run_blogdex.bat", "update_blogdex.bat"):
+            raw = open(os.path.join(base, name), "rb").read()
+            self.assertIn(b"\r\n", raw)
+            self.assertNotIn(b"\n", raw.replace(b"\r\n", b""))  # 모든 줄바꿈이 CRLF
+            self.assertIn(b"chcp 65001", raw)
+        self.assertIn(b"BLOGDEX_OPEN_BROWSER=1", open(os.path.join(base, "run_blogdex.bat"), "rb").read())
+
+
 if __name__ == "__main__":
     unittest.main()
