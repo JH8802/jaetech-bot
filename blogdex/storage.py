@@ -79,6 +79,12 @@ def get_article(article_id: int) -> dict | None:
         return _row(r, True) if r else None
 
 
+def update_body(article_id: int, body: str, chars: int, quality: dict) -> bool:
+    with closing(_connect()) as con, con:
+        return con.execute("UPDATE articles SET body=?, chars=?, quality_json=? WHERE id=?",
+                           (body, chars, json.dumps(quality, ensure_ascii=False), article_id)).rowcount > 0
+
+
 def delete_articles(ids: list[int]) -> int:
     if not ids:
         return 0

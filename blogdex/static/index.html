@@ -70,6 +70,13 @@
   .photonotes .pn-row { display: flex; gap: 10px; padding: 8px 16px; border-bottom: 1px solid #f1f3f5; align-items: center; }
   .photonotes .pn-row:last-child { border-bottom: 0; }
   .photonotes img { width: 44px; height: 44px; object-fit: cover; border-radius: 6px; }
+  .todopanel { margin-top: 14px; border: 1px solid #ffd8a8; border-radius: 10px; overflow: hidden; background: #fffaf2; }
+  .todopanel h4 { margin: 0; padding: 10px 16px; font-size: 13px; background: #fff3bf; border-bottom: 1px solid #ffd8a8; color: #8a4b00; }
+  .todopanel .trow { display: grid; grid-template-columns: minmax(120px, 1fr) 2fr; gap: 10px; align-items: center; padding: 8px 16px; border-bottom: 1px solid #ffe8cc; font-size: 12px; }
+  .todopanel .trow:last-of-type { border-bottom: 0; }
+  .todopanel .trow input { height: 34px; font-size: 13px; }
+  .todopanel .tfoot { padding: 10px 16px; display: flex; gap: 10px; align-items: center; border-top: 1px solid #ffe8cc; font-size: 12px; color: var(--sub); }
+  .todopanel .tfoot .btn { height: 34px; }
   .hidden { display: none !important; }
 
   /* 결과 */
@@ -181,6 +188,7 @@
     <div class="result-box" id="resultBox"><div class="empty">원고 제목을 입력하세요.<br>원고를 생성하면 결과가 여기에 표시됩니다.</div></div>
     <div id="notes" class="notes"></div>
     <div id="photoNotes"></div>
+    <div id="todoPanel"></div>
     <div class="actions hidden" id="actions">
       <button class="btn" id="btnCopy">복사<kbd>C</kbd></button>
       <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--sub)" title="네이버 에디터 제목 칸에 붙여넣으면 첫 줄은 제목, 나머지는 본문으로 들어가요"><input type="checkbox" id="copyTitle" checked> 복사에 제목 포함</label>
@@ -366,12 +374,51 @@ function renderQuality(q) {
   $('quality').innerHTML = `<div class="quality"><h4>품질 점검 — ${q.ok_count} / ${q.total} 통과 <span style="font-weight:400;color:var(--sub)">(권장 기준이며 글을 막지 않아요)</span></h4>${rows}</div>`;
 }
 
+/* ---------- [확인 필요] 채우기 ---------- */
+function todoItems(body) {
+  const map = new Map();
+  (stripTags(body).match(TODO_RE) || []).forEach((m) => map.set(m, (map.get(m) || 0) + 1));
+  return [...map].map(([marker, n]) => ({ marker, n, label: marker.replace(/^\[확인 필요:?\s*/, '').replace(/\]$/, '').trim() || '(항목 이름 없음)' }));
+}
+function renderTodoPanel() {
+  const box = $('todoPanel'); const art = state.article;
+  const items = art ? todoItems(art.body) : [];
+  if (!items.length) { box.innerHTML = ''; return; }
+  box.innerHTML = `<div class="todopanel"><h4>발행 전 확인 필요 ${items.reduce((a, b) => a + b.n, 0)}곳 — 아는 것만 채우면 본문에 바로 들어가요</h4>` +
+    items.map((it, i) => `<div class="trow"><label for="todo${i}"><b>${esc(it.label)}</b>${it.n > 1 ? ` <span style="color:var(--sub)">(${it.n}곳)</span>` : ''}</label><input type="text" id="todo${i}" data-marker="${esc(it.marker)}" maxlength="200" placeholder="예) 직접 확인한 내용" autocomplete="off"></div>`).join('') +
+    '<div class="tfoot"><button class="btn" id="btnTodoApply" type="button">채운 내용 본문에 넣기</button><span id="todoMsg">비워 둔 항목은 그대로 남아요. 문장 모양은 그대로이니 넣은 뒤 어색하면 에디터에서 다듬으세요.</span></div></div>';
+  $('btnTodoApply').onclick = applyTodo;
+}
+async function applyTodo() {
+  const art = state.article; if (!art || !art.id) return;
+  let body = art.body; let n = 0;
+  document.querySelectorAll('#todoPanel input[data-marker]').forEach((inp) => {
+    const v = inp.value.replace(/\s+/g, ' ').trim();
+    if (!v) return;
+    const marker = inp.dataset.marker;
+    n += body.split(marker).length - 1;
+    body = body.split(marker).join(v);
+  });
+  if (!n) { $('todoMsg').textContent = '채운 항목이 없어요.'; return; }
+  $('btnTodoApply').disabled = true;
+  try {
+    const res = await fetch(`/api/articles/${art.id}/body`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ body }) });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(d.error || '저장하지 못했어요.');
+    art.body = body; art.chars = d.chars; art.quality = d.quality;
+    renderResult(body, false, d.chars); renderQuality(d.quality); renderTodoPanel();
+    $('btnRewrite').classList.toggle('hidden', !(d.quality.issues && d.quality.issues.length));
+    $('notes').textContent = `${n}곳을 채워 저장했어요.`;
+  } catch (e) { showError(e.message); $('btnTodoApply').disabled = false; }
+}
+
 function showArticle(art) {
   state.article = art;
   renderResult(art.body, false, art.chars);
   setStatus(`저장됨 · ${KIND_LABEL[art.kind] || ''} · ${art.title}`);
   renderQuality(art.quality);
   renderPhotoNotes(art.photos || (art.options && art.options.photos));
+  renderTodoPanel();
   $('actions').classList.remove('hidden');
   $('btnRewrite').classList.toggle('hidden', !(art.quality && art.quality.issues && art.quality.issues.length));
   const u = art.usage || (art.options && art.options.usage);
@@ -495,7 +542,7 @@ function renderPhotoNotes(notes) {
 
 /* ---------- 원고 생성 ---------- */
 async function runStream(url, body) {
-  showError(''); setBusy(true); $('actions').classList.add('hidden'); $('quality').innerHTML = ''; $('notes').textContent = ''; $('photoNotes').innerHTML = '';
+  showError(''); setBusy(true); $('actions').classList.add('hidden'); $('quality').innerHTML = ''; $('notes').textContent = ''; $('photoNotes').innerHTML = ''; $('todoPanel').innerHTML = '';
   $('resultBox').innerHTML = '<div class="barline"><span id="statusText"></span><span id="counter"></span></div><div class="article"></div>';
   setStatus('요청 중...', true);
   let raw = '';
@@ -542,7 +589,7 @@ async function copyArticle() {
 $('btnCopy').onclick = copyArticle;
 function newArticle() {
   state.article = null; $('title').value = ''; $('memo').value = ''; $('kw').value = ''; $('candidates').classList.add('hidden');
-  $('placeQuery').value = ''; state.place = null; $('placeList').innerHTML = ''; placeStatus(''); updateHints(); state.photos = []; state.resultPhotos = []; renderPhotos(); $('photoNotes').innerHTML = '';
+  $('placeQuery').value = ''; state.place = null; $('placeList').innerHTML = ''; placeStatus(''); updateHints(); state.photos = []; state.resultPhotos = []; renderPhotos(); $('photoNotes').innerHTML = ''; $('todoPanel').innerHTML = '';
   $('resultBox').innerHTML = '<div class="empty">원고 제목을 입력하세요.<br>원고를 생성하면 결과가 여기에 표시됩니다.</div>';
   $('actions').classList.add('hidden'); $('quality').innerHTML = ''; $('notes').textContent = ''; $('btnWrite').disabled = true; showError('');
   window.scrollTo({ top: 0, behavior: 'smooth' });

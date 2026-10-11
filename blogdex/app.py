@@ -24,6 +24,7 @@ import storage
 MAX_TITLE = 200
 MAX_MEMO = 4000
 MAX_KEYWORDS = 8
+MAX_BODY = 60000
 EVIDENCE_MODES = {"strict", "template"}
 
 app = Flask(__name__, static_folder="static", static_url_path="/static")
@@ -271,6 +272,23 @@ def articles_get(article_id: int):
     if not art:
         return jsonify(error="원고를 찾을 수 없어요."), 404
     return jsonify(article=art)
+
+
+@app.put("/api/articles/<int:article_id>/body")
+def articles_update_body(article_id: int):
+    """[확인 필요] 채우기처럼 사용자가 고친 본문을 저장하고 글자수·품질 점검을 다시 계산합니다."""
+    art = storage.get_article(article_id)
+    if not art:
+        raise ValueError("원고를 찾을 수 없어요.")
+    body = str((request.get_json(silent=True) or {}).get("body", "")).replace("\r\n", "\n").strip()
+    if not body:
+        raise ValueError("본문이 비어 있어요.")
+    if len(body) > MAX_BODY:
+        raise ValueError("본문이 너무 길어요.")
+    quality = eval_style.evaluate(art["kind"], body, art["keywords"], art["memo"])
+    chars = postprocess.count_chars(body)
+    storage.update_body(article_id, body, chars, quality)
+    return jsonify(chars=chars, quality=quality)
 
 
 @app.delete("/api/articles")
