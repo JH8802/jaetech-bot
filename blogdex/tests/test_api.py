@@ -131,6 +131,8 @@ class ApiTests(unittest.TestCase):
         import prompts
         self.assertIn("<사진N>", prompts.build_system("food", False, "strict", 2))
         self.assertIn("사진이 없습니다", prompts.build_system("food", False, "strict", 0))
+        self.assertIn("다른 가게 이름", prompts.build_system("food", False, "strict", 2))
+        self.assertIn("옆 가게 간판", prompts.VISION_SYSTEM)
 
 
 if __name__ == "__main__":
