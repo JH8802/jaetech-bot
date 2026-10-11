@@ -7,7 +7,7 @@
 
 - **글 종류 선택**: 정보글 / 맛집글 (각각 다른 구성·문체·해시태그 규칙)
 - **내 경험·방문 소감 입력칸**: 적은 내용이 글의 뼈대가 되고, 적지 않은 사실(가격·메뉴·시간)은 지어내지 않습니다.
-- 맛집글: 매장 이름 → 자동 입력(네이버 검색 API, 선택) 또는 직접 입력, 1번 섹션 끝에 `(플레이스 지도 삽입: …)` 줄 자동 삽입
+- 맛집글: 매장 이름·업종·주소를 직접 입력(네이버 지도에서 복사), 1번 섹션 끝에 `(플레이스 지도 삽입: …)` 줄 자동 삽입
 - 제목 자동 생성(후보 5개, `R` 키로 다시), 핵심 키워드 자동 추출(수정 가능)
 - 원고 **스트리밍** 생성 → 태그·해시태그 정리 → **품질 점검**(키워드 밀도, 문장 길이 변화, 말투 섞임, 범용 표현, 중복 문장 등)
 - 점검에서 주의가 나오면 **[품질 점검 반영해서 다시 쓰기]**
@@ -40,14 +40,12 @@ API 키 없이 화면만 확인하려면: `BLOGDEX_MOCK=1 python blogdex/app.py`
 
 ## 설정 (.env)
 
+모델은 **Claude Sonnet 5.5로 고정**돼 있어요(원고·사진 분석 모두). 바꾸려면 `blogdex/llm.py` 맨 위의 `MODEL` 한 줄을 고치세요.
+
 | 변수 | 설명 | 기본값 |
 | --- | --- | --- |
 | `ANTHROPIC_API_KEY` | Claude API 키 | 필수 |
-| `BLOGDEX_MODEL` | 사용 모델. 비용을 줄이려면 `claude-sonnet-5-5` | `claude-opus-5-5` |
 | `BLOGDEX_EFFORT` | 생각 깊이 `low` / `medium` / `high` (글쓰기는 `high`도 시도해 볼 만함) | `medium` |
-| `BLOGDEX_VISION_MODEL` | 사진을 살펴볼 모델 (비용을 줄이려면 `claude-sonnet-5-5`) | `BLOGDEX_MODEL`과 같음 |
-| `BLOGDEX_FALLBACKS` | 안전 분류기가 거절하면 서버가 대체 모델로 자동 재시도 (`1`/`0`) | `1` |
-| `NAVER_CLIENT_ID`, `NAVER_CLIENT_SECRET` | 맛집글 매장 검색용 (https://developers.naver.com → '검색') | 없음 |
 | `BLOGDEX_DB` | 원고 DB 파일 위치 | `blogdex/data/blogdex.db` |
 | `PORT` | 서버 포트 | `5000` |
 
