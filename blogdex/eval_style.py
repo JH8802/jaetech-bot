@@ -12,7 +12,7 @@ from postprocess import HEADING_RE, MAP_LINE_MARK, count_chars, find_hashtag_ind
 GENERIC_WORDS = ["편안", "무난", "자연스럽", "부담", "좋았", "좋겠", "차분", "다양한", "효과적", "전반적으로"]
 FIRST_PERSON_RE = re.compile(r"^(저는|저도|제가|저의)")
 JOSA_RE = re.compile(r"(으로|에서|까지|부터|이랑|에게|은|는|이|가|을|를|에|도|로|과|와|의|만)$")
-STOP_TOKENS = {"그리고", "하지만", "그런데", "너무", "정말", "진짜", "그냥", "조금", "많이", "있었", "했다", "했어"}
+STOP_TOKENS = {"과연", "어떤", "특히", "대해", "최근", "그리고", "하지만", "그런데", "너무", "정말", "진짜", "그냥", "조금", "많이", "있었", "했다", "했어"}
 
 
 def _body_parts(body: str):
@@ -44,17 +44,25 @@ def _check(key, label, value, target, ok, advice):
     return {"key": key, "label": label, "value": value, "target": target, "ok": bool(ok), "advice": advice}
 
 
+PRED_END_RE = re.compile(r"(하고|하는|하게|하다|한다|할지|을지|될지|되고|되는|된다|이다|입니다|었다|했다|있다|많이|[고는지다게한할된될])$")
+
+
 def _memo_coverage(memo: str, body_plain: str) -> tuple[float, int]:
+    """메모의 핵심 명사(숫자 포함)가 본문에 있는지. 서술어·부사는 의역되기 쉬워 제외하고, 3글자 이상은 앞 2글자만 맞아도 인정."""
     tokens = []
     for t in re.findall(r"[가-힣A-Za-z0-9]{2,}", memo):
         stem = JOSA_RE.sub("", t) if re.search(r"[가-힣]", t) else t
+        if re.search(r"[가-힣]", stem) and (PRED_END_RE.search(stem) and len(stem) >= 3):
+            continue
         if len(stem) >= 2 and stem not in STOP_TOKENS and stem not in tokens:
             tokens.append(stem)
     tokens = sorted(tokens, key=len, reverse=True)[:20]
     if not tokens:
         return 1.0, 0
-    hit = sum(1 for t in tokens if t in body_plain)
-    return hit / len(tokens), len(tokens)
+    def hit(t):
+        key = t if (len(t) <= 2 or not re.search(r"[가-힣]", t)) else t[:2]
+        return key in body_plain
+    return sum(1 for t in tokens if hit(t)) / len(tokens), len(tokens)
 
 
 def evaluate(kind: str, body: str, keywords: list[str], memo: str = "") -> dict:
