@@ -135,5 +135,26 @@ class ApiTests(unittest.TestCase):
         self.assertIn("옆 가게 간판", prompts.VISION_SYSTEM)
 
 
+    def test_update_body_recomputes_quality_and_persists(self):
+        _, events = self._stream()
+        done = dict(events)["done"]
+        self.assertIn("[확인 필요: 가격]", done["body"])
+        new_body = done["body"].replace("[확인 필요: 가격]", "18,000원")
+        r = self.c.put(f"/api/articles/{done['article_id']}/body", json={"body": new_body})
+        self.assertEqual(r.status_code, 200)
+        d = r.get_json()
+        todo = next(c for c in d["quality"]["checks"] if c["key"] == "todo")
+        self.assertTrue(todo["ok"])  # 남은 확인 필요 0곳
+        saved = self.c.get(f"/api/articles/{done['article_id']}").get_json()["article"]
+        self.assertIn("18,000원", saved["body"])
+        self.assertEqual(saved["chars"], d["chars"])
+
+    def test_update_body_validation(self):
+        self.assertEqual(self.c.put("/api/articles/999999/body", json={"body": "x"}).status_code, 400)
+        _, events = self._stream()
+        aid = dict(events)["done"]["article_id"]
+        self.assertEqual(self.c.put(f"/api/articles/{aid}/body", json={"body": "  "}).status_code, 400)
+
+
 if __name__ == "__main__":
     unittest.main()
