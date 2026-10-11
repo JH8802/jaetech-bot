@@ -24,6 +24,10 @@
 
 ## 실행 방법
 
+**Windows 더블클릭 (추천)**: `blogdex\run_blogdex.bat` 를 더블클릭하면 서버가 켜지고 브라우저가 자동으로 열려요. 우클릭 → 보내기 → 바탕화면에 바로 가기 만들기를 해 두면 아이콘 한 번으로 실행됩니다. 업데이트는 `blogdex\update_blogdex.bat` 를 더블클릭하세요. (검은 창을 닫으면 서버가 꺼져요)
+
+**명령으로 실행**
+
 ```bash
 pip install -r blogdex/requirements.txt
 # 저장소 루트의 .env 에 ANTHROPIC_API_KEY 를 넣습니다 (.env.example 참고)
