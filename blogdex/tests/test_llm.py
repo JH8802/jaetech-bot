@@ -76,5 +76,22 @@ class LlmTests(unittest.TestCase):
                 llm.get_client()
 
 
+class PhotoNotesTests(unittest.TestCase):
+    def test_parse_fills_missing_and_ignores_bad_numbers(self):
+        raw = '설명 [{"n": 2, "category": "음식", "desc": "삼겹살", "text": ""}, {"n": 9, "desc": "범위 밖"}, {"x": 1}] 끝'
+        notes = llm.parse_photo_notes(raw, 3)
+        self.assertEqual([n["n"] for n in notes], [1, 2, 3])
+        self.assertEqual(notes[1]["desc"], "삼겹살")
+        self.assertEqual(notes[0]["desc"], "")  # 읽지 못한 사진은 빈 항목
+
+    def test_parse_garbage_gives_empty_notes(self):
+        self.assertEqual(len(llm.parse_photo_notes("JSON 아님", 2)), 2)
+
+    def test_merge_usage_sums_cost(self):
+        m = llm.merge_usage({"model": "a", "input_tokens": 1, "output_tokens": 2, "cost_usd": 0.1},
+                            {"model": "b", "input_tokens": 3, "output_tokens": 4, "cost_usd": 0.2})
+        self.assertEqual((m["input_tokens"], m["output_tokens"], m["cost_usd"]), (4, 6, 0.3))
+
+
 if __name__ == "__main__":
     unittest.main()

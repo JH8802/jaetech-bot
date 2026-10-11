@@ -27,7 +27,10 @@ MAX_KEYWORDS = 8
 EVIDENCE_MODES = {"strict", "template"}
 
 app = Flask(__name__, static_folder="static", static_url_path="/static")
-app.config["MAX_CONTENT_LENGTH"] = 2 * 1024 * 1024
+app.config["MAX_CONTENT_LENGTH"] = 40 * 1024 * 1024  # 사진 최대 10장(브라우저에서 줄인 JPEG) + 본문
+MAX_PHOTOS = 10
+MAX_PHOTO_BYTES = 3 * 1024 * 1024
+PHOTO_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
 
 
 # ---------- 공통 ----------
@@ -92,6 +95,25 @@ def read_common(data: dict) -> dict:
         "guardrail": bool(data.get("guardrail", False)),
         "evidence_mode": evidence,
     }
+
+
+def read_photos(data: dict) -> list[dict]:
+    """브라우저가 줄여서 보낸 사진(data URL)을 읽어 [{'media_type','data'}] 로 돌려줍니다."""
+    raw = data.get("photos") or []
+    if not isinstance(raw, list):
+        raise ValueError("사진 형식이 올바르지 않아요.")
+    if len(raw) > MAX_PHOTOS:
+        raise ValueError(f"사진은 최대 {MAX_PHOTOS}장까지 올릴 수 있어요.")
+    out = []
+    for i, item in enumerate(raw, 1):
+        m = re.match(r"^data:([\w/+.-]+);base64,([A-Za-z0-9+/=\s]+)$", item if isinstance(item, str) else "")
+        if not m or m.group(1) not in PHOTO_TYPES:
+            raise ValueError(f"사진 {i}번 형식을 읽을 수 없어요. JPG, PNG, WEBP 사진을 올려 주세요.")
+        b64 = re.sub(r"\s", "", m.group(2))
+        if len(b64) * 3 // 4 > MAX_PHOTO_BYTES:
+            raise ValueError(f"사진 {i}번이 너무 커요. 다시 올려 주세요.")
+        out.append({"media_type": m.group(1), "data": b64})
+    return out
 
 
 # ---------- 화면 / 매장 검색 ----------
@@ -164,25 +186,37 @@ def titles():
 
 
 # ---------- 원고 ----------
-def _generate_events(*, kind, title, keywords, memo, place, guardrail, evidence_mode, user_prompt, parent_id=None, title_input=None):
-    """원고를 스트리밍으로 만들고, 후처리·점검·저장 후 SSE 이벤트를 흘려보냅니다."""
-    system = prompts.build_system(kind, guardrail, evidence_mode)
-    parts, usage = [], {}
+def _generate_events(*, kind, title, keywords, memo, place, guardrail, evidence_mode, build_prompt,
+                     photos=None, photo_notes=None, parent_id=None, title_input=None):
+    """원고를 스트리밍으로 만들고, 후처리·점검·저장 후 SSE 이벤트를 흘려보냅니다.
+    photos(사진 원본)가 있으면 먼저 사진을 살펴보고, photo_notes(이미 분석된 결과)가 있으면 그대로 씁니다."""
+    parts, usage, photo_usage = [], {}, {}
     try:
+        if photos and not photo_notes:
+            yield sse("status", {"text": f"사진 {len(photos)}장을 살펴보고 있어요."})
+            raw = llm.ask_vision(prompts.VISION_SYSTEM, prompts.build_photo_analysis_prompt(kind, title, place, len(photos)),
+                                 photos, usage=photo_usage)
+            photo_notes = llm.parse_photo_notes(raw, len(photos))
+        if photo_notes:
+            yield sse("photos", {"notes": photo_notes})
+        system = prompts.build_system(kind, guardrail, evidence_mode, len(photo_notes or []))
+        user_prompt = build_prompt(photo_notes)
         yield sse("status", {"text": "원고를 쓰고 있어요."})
         for chunk in llm.stream_text(system, user_prompt, max_tokens=16000, usage=usage):
             parts.append(chunk)
             yield sse("chunk", {"text": chunk})
+        usage = llm.merge_usage(photo_usage, usage)
         yield sse("status", {"text": "태그와 해시태그를 정리하고 품질을 점검하고 있어요."})
-        fin = postprocess.finalize(kind, "".join(parts), place, keywords, title)
+        fin = postprocess.finalize(kind, "".join(parts), place, keywords, title, len(photo_notes or []))
         quality = eval_style.evaluate(kind, fin["body"], keywords, memo)
         yield sse("replace", {"text": fin["body"]})
         article_id = storage.save_article(
             kind=kind, title_input=title_input or title, title_final=title, memo=memo, place=place, keywords=keywords,
-            options={"guardrail": guardrail, "evidence_mode": evidence_mode, "usage": usage}, body=fin["body"], chars=fin["chars"],
+            options={"guardrail": guardrail, "evidence_mode": evidence_mode, "usage": usage, "photos": photo_notes or []},
+            body=fin["body"], chars=fin["chars"],
             quality=quality, model=usage.get("model") or llm.MODEL, parent_id=parent_id)
         yield sse("done", {"article_id": article_id, "title": title, "body": fin["body"], "chars": fin["chars"],
-                           "quality": quality, "notes": fin["notes"], "usage": usage})
+                           "quality": quality, "notes": fin["notes"], "usage": usage, "photos": photo_notes or []})
     except Exception as e:  # 스트림 중 오류는 SSE 로 알려 줍니다.
         msg, _ = friendly_error(e)
         if not isinstance(e, (ValueError, RuntimeError, llm.RefusedError, llm.TruncatedError)):
@@ -202,9 +236,11 @@ def article_stream():
     keywords = [str(k).strip()[:40] for k in (data.get("keywords") or []) if str(k).strip()][:MAX_KEYWORDS]
     if not keywords:
         keywords = prompts.derive_keywords(c["kind"], title, c["place"])
-    user_prompt = prompts.build_article_prompt(c["kind"], title, keywords, c["memo"], c["place"])
-    return sse_response(_generate_events(kind=c["kind"], title=title, keywords=keywords, memo=c["memo"], place=c["place"],
-                                         guardrail=c["guardrail"], evidence_mode=c["evidence_mode"], user_prompt=user_prompt))
+    photos = read_photos(data)
+    return sse_response(_generate_events(
+        kind=c["kind"], title=title, keywords=keywords, memo=c["memo"], place=c["place"],
+        guardrail=c["guardrail"], evidence_mode=c["evidence_mode"], photos=photos,
+        build_prompt=lambda notes: prompts.build_article_prompt(c["kind"], title, keywords, c["memo"], c["place"], notes)))
 
 
 @app.post("/api/articles/<int:article_id>/rewrite")
@@ -216,11 +252,12 @@ def article_rewrite(article_id: int):
     if not issues:
         raise ValueError("품질 점검에서 고칠 점이 없어요.")
     opts = art["options"] or {}
-    user_prompt = prompts.build_rewrite_prompt(art["kind"], art["body"], issues, art["keywords"])
+    notes = opts.get("photos") or []
     return sse_response(_generate_events(
         kind=art["kind"], title=art["title"], keywords=art["keywords"], memo=art["memo"], place=art["place"],
         guardrail=bool(opts.get("guardrail")), evidence_mode=opts.get("evidence_mode", "strict"),
-        user_prompt=user_prompt, parent_id=article_id, title_input=art["title_input"]))
+        photo_notes=notes, parent_id=article_id, title_input=art["title_input"],
+        build_prompt=lambda n: prompts.build_rewrite_prompt(art["kind"], art["body"], issues, art["keywords"], n)))
 
 
 @app.get("/api/articles")

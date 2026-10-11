@@ -123,7 +123,74 @@ def ask_text(system: str, user: str, max_tokens: int = 1024, effort: str = "low"
     return text
 
 
+VISION_MODEL = os.getenv("BLOGDEX_VISION_MODEL", "") or MODEL
+
+
+def merge_usage(a: dict, b: dict) -> dict:
+    """두 호출(사진 분석 + 원고)의 토큰·비용을 합칩니다."""
+    if not a:
+        return dict(b)
+    if not b:
+        return dict(a)
+    cost = None if a.get("cost_usd") is None or b.get("cost_usd") is None else round(a["cost_usd"] + b["cost_usd"], 4)
+    return {"model": b.get("model") or a.get("model"), "input_tokens": a.get("input_tokens", 0) + b.get("input_tokens", 0),
+            "output_tokens": a.get("output_tokens", 0) + b.get("output_tokens", 0), "cost_usd": cost}
+
+
+def ask_vision(system: str, text: str, images: list[dict], max_tokens: int = 3000, usage: dict | None = None) -> str:
+    """사진(images: [{'media_type','data'(base64)}])을 보고 한 번에 답을 받습니다. 사진마다 '[사진 N]' 표시를 붙입니다."""
+    if is_mock():
+        if usage is not None:
+            usage.update(model="mock", input_tokens=0, output_tokens=0, cost_usd=0.0)
+        return _mock_vision(len(images))
+    content = []
+    for i, im in enumerate(images, 1):
+        content.append({"type": "text", "text": f"[사진 {i}]"})
+        content.append({"type": "image", "source": {"type": "base64", "media_type": im["media_type"], "data": im["data"]}})
+    content.append({"type": "text", "text": text})
+    kwargs = dict(model=VISION_MODEL, max_tokens=max_tokens, system=system,
+                  messages=[{"role": "user", "content": content}], output_config={"effort": "low"})
+    client = get_client()
+    if VISION_MODEL in FALLBACK_MODELS and os.getenv("BLOGDEX_FALLBACKS", "1") == "1":
+        resp = client.beta.messages.create(**kwargs, betas=[FALLBACK_BETA], fallbacks="default")
+    else:
+        resp = client.messages.create(**kwargs)
+    _fill_usage(usage, resp)
+    if resp.stop_reason == "refusal":
+        raise RefusedError("사진을 살펴보는 중 AI가 거절했어요. 다른 사진으로 시도해 주세요.")
+    out = "".join(b.text for b in resp.content if b.type == "text").strip()
+    if not out:
+        raise RuntimeError("사진 분석 결과가 비어 있어요. 다시 시도해 주세요.")
+    return out
+
+
+def parse_photo_notes(raw: str, count: int) -> list[dict]:
+    """사진 분석 JSON 을 읽어 1..count 번호별 항목으로 맞춥니다. 읽지 못한 사진은 설명 없는 항목으로 채웁니다."""
+    import json
+    m = re.search(r"\[.*\]", raw, re.S)
+    try:
+        arr = json.loads(m.group(0)) if m else []
+    except ValueError:
+        arr = []
+    by_n = {}
+    for it in arr if isinstance(arr, list) else []:
+        try:
+            n = int(it.get("n"))
+        except (TypeError, ValueError, AttributeError):
+            continue
+        if 1 <= n <= count and n not in by_n:
+            by_n[n] = {"n": n, "category": str(it.get("category") or "기타")[:12], "desc": str(it.get("desc") or "")[:200],
+                       "text": str(it.get("text") or "")[:100]}
+    return [by_n.get(n, {"n": n, "category": "기타", "desc": "", "text": ""}) for n in range(1, count + 1)]
+
+
 # ---------- 샘플(MOCK) ----------
+def _mock_vision(count: int) -> str:
+    cats = ["외관", "내부", "음식", "음식", "메뉴판"]
+    return "[" + ",".join(
+        '{"n": %d, "category": "%s", "desc": "샘플 사진 %d의 모습", "text": ""}' % (i, cats[(i - 1) % len(cats)], i)
+        for i in range(1, count + 1)) + "]"
+
 def _mock_titles(user: str) -> list[str]:
     m = re.search(r"주제/키워드: (.+)", user)
     kw = (m.group(1).strip() if m else "키워드")[:20]
@@ -163,6 +230,13 @@ def _mock_stream(system: str, user: str):
             "{{highlight}}정리하면 표시를 먼저 보는 것이 기준입니다.{{/highlight}}\n\n읽어 주셔서 감사합니다.\n\n"
         )
         tags = [f"#{kw.replace(' ', '')}"] + [f"#정보태그{i}" for i in range(1, 28)]
+    n_photos = len(re.findall(r"(?m)^- 사진 \d+ ", user))
+    if n_photos:
+        paras = text.rstrip("\n").split("\n\n")
+        step = max(1, len(paras) // (n_photos + 1))
+        for k in range(1, n_photos + 1):
+            paras.insert(min(len(paras), k * step + k - 1), f"<사진{k}>")
+        text = "\n\n".join(paras) + "\n\n"
     full = text + " ".join(tags)
     for i in range(0, len(full), 7):
         time.sleep(0)

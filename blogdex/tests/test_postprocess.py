@@ -106,5 +106,22 @@ class SafetyTests(unittest.TestCase):
         self.assertEqual(tags[:3], ["#락희옥마포본점", "#락희옥", "#마포맛집"])
 
 
+class PhotoTests(unittest.TestCase):
+    def test_markers_become_own_lines_and_bad_ones_dropped(self):
+        t = "인트로입니다.\n\n<사진1>\n\n1. 소제목 <사진2>\n\n본문 <사진2> 이어서.\n\n<사진9>\n\n<사진2>"
+        out, notes = pp.normalize_photos(t, 3)
+        paras = out.split("\n\n")
+        self.assertEqual(paras, ["인트로입니다.", "<사진1>", "1. 소제목", "본문 이어서.", "<사진2>"])
+        self.assertTrue(any("3번" in n for n in notes))  # 빠진 번호 알림
+
+    def test_no_photos_removes_all_markers(self):
+        out, _ = pp.normalize_photos("글입니다.\n\n<사진1>", 0)
+        self.assertEqual(out, "글입니다.")
+
+    def test_marker_counts_like_original(self):
+        # 원본은 사진 자리를 '사진N' 으로 셉니다(공백 제외)
+        self.assertEqual(pp.count_chars("가나\n\n<사진1>\n\n#a #b #c"), len("가나사진1"))
+
+
 if __name__ == "__main__":
     unittest.main()

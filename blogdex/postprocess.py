@@ -10,6 +10,7 @@ TAG_RE = re.compile(r"\{\{(/?)(bold|color|highlight)\}\}")
 UNKNOWN_TAG_RE = re.compile(r"\{\{/?(?!bold\b|color\b|highlight\b)[A-Za-z_]+\}\}")
 HEADING_RE = re.compile(r"^\d+\.\s")
 MAP_LINE_MARK = "플레이스 지도 삽입"
+PHOTO_RE = re.compile(r"<\s*사진\s*(\d+)\s*>")
 MAX_HASHTAGS = 30
 
 
@@ -126,9 +127,37 @@ def insert_map_line(text: str, place_name: str) -> str:
     return "\n\n".join(paras)
 
 
+def normalize_photos(text: str, photo_count: int) -> tuple[str, list[str]]:
+    """<사진N> 자리를 정리합니다: 단독 줄로 분리, 없는 번호·중복 제거, 빠진 번호는 알림."""
+    notes = []
+    out, seen = [], set()
+    for par in split_paragraphs(text):
+        found = [int(n) for n in PHOTO_RE.findall(par)]
+        if not found:
+            out.append(par)
+            continue
+        rest = re.sub(r"[ \t]{2,}", " ", PHOTO_RE.sub("", par)).strip()
+        is_tags = rest.startswith("#") and rest.count("#") >= 3
+        if rest and (HEADING_RE.match(strip_tags(rest)) or is_tags):
+            found = []  # 소제목·해시태그 줄에 붙은 사진 자리는 버립니다
+        if rest:
+            out.append(rest)
+        for n in found:
+            if 1 <= n <= photo_count and n not in seen:
+                seen.add(n)
+                out.append(f"<사진{n}>")
+    missing = [n for n in range(1, photo_count + 1) if n not in seen]
+    if missing:
+        notes.append("사진 " + ", ".join(map(str, missing)) + "번 자리가 글에 없어요. 네이버 에디터에서 직접 놓을 위치를 정해 주세요.")
+    dropped = sum(len(PHOTO_RE.findall(p)) for p in split_paragraphs(text)) - len(seen)
+    if dropped > 0:
+        notes.append(f"잘못되었거나 겹치는 사진 자리 {dropped}개를 뺐어요.")
+    return "\n\n".join(out), notes
+
+
 def count_chars(text: str) -> int:
-    """화면 카운터와 같은 기준: 태그 제거, 해시태그 문단 제외, 공백 제외."""
-    paras = split_paragraphs(strip_tags(text))
+    """화면 카운터와 같은 기준: 태그 제거, 해시태그 문단 제외, 공백 제외. 사진 자리는 '사진N'(원본과 같은 방식)으로 셉니다."""
+    paras = split_paragraphs(PHOTO_RE.sub(lambda m: f"사진{m.group(1)}", strip_tags(text)))
     idx = find_hashtag_index(paras)
     if idx is not None:
         paras.pop(idx)
@@ -141,10 +170,12 @@ def region_of(place: dict | None) -> str:
     return m.group(1) if m else ""
 
 
-def finalize(kind: str, raw: str, place: dict | None, keywords: list[str], title: str = "") -> dict:
+def finalize(kind: str, raw: str, place: dict | None, keywords: list[str], title: str = "", photo_count: int = 0) -> dict:
     """원고를 정리해 {body, chars, notes} 를 돌려줍니다."""
     body, notes = clean_markdown(raw.replace("\r\n", "\n"), title)
     body = normalize_tags(body)
+    body, photo_notes = normalize_photos(body, photo_count)
+    notes += photo_notes
     body, hl = limit_highlights(body, 2)
     if hl > 2:
         notes.append(f"형광펜 {hl}곳 중 2곳만 남겼어요.")
