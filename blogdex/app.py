@@ -3,13 +3,9 @@
 실행:  python blogdex/app.py   →  http://127.0.0.1:5000
 API 키는 서버(.env)에만 두고, 브라우저에는 내려보내지 않습니다.
 """
-import html
 import json
 import os
 import re
-import urllib.error
-import urllib.parse
-import urllib.request
 
 import anthropic
 from flask import Flask, Response, jsonify, request, send_from_directory, stream_with_context
@@ -126,41 +122,6 @@ def index():
 @app.get("/favicon.ico")
 def favicon():
     return "", 204
-
-
-def strip_tags(s: str) -> str:
-    return html.unescape(re.sub(r"<[^>]+>", "", s or "")).strip()
-
-
-@app.get("/api/places")
-def places():
-    """매장 이름으로 주소를 검색합니다. (네이버 검색 API - 지역)
-    .env 에 NAVER_CLIENT_ID / NAVER_CLIENT_SECRET 이 있어야 동작합니다."""
-    query = request.args.get("query", "").strip()
-    if not query:
-        raise ValueError("매장 이름을 입력해 주세요.")
-    if len(query) > 100:
-        raise ValueError("매장 이름은 100자 이내로 입력해 주세요.")
-    if llm.is_mock():
-        return jsonify(places=[{"name": f"{query} 본점", "category": "한식", "address": "서울 마포구 샘플로 1", "phone": ""}])
-    cid, secret = (os.getenv("NAVER_CLIENT_ID") or "").strip(), (os.getenv("NAVER_CLIENT_SECRET") or "").strip()
-    if not cid or not secret or not (cid + secret).isascii():
-        raise RuntimeError("매장 검색용 네이버 키가 없거나 .env.example의 예시 문구 그대로예요. 키를 발급받아 .env에 넣거나, 아래 '직접 입력'을 이용하세요.")
-    url = "https://openapi.naver.com/v1/search/local.json?" + urllib.parse.urlencode({"query": query, "display": 5})
-    req = urllib.request.Request(url, headers={"X-Naver-Client-Id": cid, "X-Naver-Client-Secret": secret})
-    try:
-        with urllib.request.urlopen(req, timeout=8) as res:
-            items = json.load(res).get("items", [])
-    except urllib.error.HTTPError as e:
-        raise RuntimeError(f"네이버 검색 API 오류({e.code}). 키와 '검색' API 사용 설정을 확인하세요.") from e
-    except (urllib.error.URLError, TimeoutError) as e:
-        raise RuntimeError("네이버 검색 서버에 연결하지 못했어요.") from e
-    return jsonify(places=[{
-        "name": strip_tags(it.get("title")),
-        "category": strip_tags(it.get("category")).split(">")[-1].strip(),
-        "address": strip_tags(it.get("roadAddress") or it.get("address")),
-        "phone": strip_tags(it.get("telephone")),
-    } for it in items])
 
 
 # ---------- 제목 ----------

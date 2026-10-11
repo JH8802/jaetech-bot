@@ -137,15 +137,12 @@
 
     <div id="foodBox" class="hidden">
       <label class="cap" for="placeQuery">매장 이름</label>
-      <div class="row">
-        <input type="text" id="placeQuery" maxlength="100" placeholder="예) 마포 락희옥" autocomplete="off">
-        <button class="btn" id="btnPlace">자동 입력</button>
+      <input type="text" id="placeQuery" maxlength="100" placeholder="예) 마포 락희옥" autocomplete="off">
+      <div class="row" style="margin-top:8px">
+        <input type="text" id="mCategory" placeholder="업종 (예: 돼지고기구이)">
+        <input type="text" id="mAddress" placeholder="주소 (네이버 지도에서 복사해 붙여넣기)">
       </div>
-      <div class="status" id="placeStatus"></div>
-      <div id="placeList"></div>
-      <details class="manual"><summary>직접 입력 (자동 입력을 쓰지 않을 때)</summary>
-        <div class="row"><input type="text" id="mCategory" placeholder="업종 (예: 돼지고기구이)"><input type="text" id="mAddress" placeholder="주소 (예: 서울 마포구 백범로 170)"></div>
-      </details>
+      <p class="hint">주소를 넣으면 글 속 주소 [확인 필요]가 줄고, 지역 해시태그(#마포맛집)가 맞춰져요. 비워도 되고, 비운 부분은 [확인 필요]로 남아요.</p>
     </div>
 
     <label class="cap" for="title" id="titleCap">제목 또는 주제</label>
@@ -215,7 +212,7 @@
 const $ = (id) => document.getElementById(id);
 const COLORS = ['#e03131', '#1c7ed6', '#d6336c'];
 const KIND_LABEL = { info: '정보글', food: '맛집글' };
-const state = { kind: 'info', place: null, titles: [], busy: false, article: null, photos: [], resultPhotos: [], adTerms: [] };  // photos: 입력칸의 사진 / resultPhotos: 결과에 보여 줄 사진(현재 세션에서 생성한 글만)
+const state = { kind: 'info', titles: [], busy: false, article: null, photos: [], resultPhotos: [], adTerms: [] };  // photos: 입력칸의 사진 / resultPhotos: 결과에 보여 줄 사진(현재 세션에서 생성한 글만)
 
 /* ---------- 글 종류별 화면 ---------- */
 const KIND_UI = {
@@ -256,7 +253,7 @@ document.querySelectorAll('#chips .chip').forEach((b) => (b.onclick = () => setK
 
 /* ---------- 공통 유틸 ---------- */
 function showError(msg) { const el = $('error'); el.textContent = msg || ''; el.classList.toggle('show', !!msg); }
-function setBusy(busy) { state.busy = busy; ['btnTitles', 'btnRegen', 'btnWrite', 'btnRewrite', 'btnPlace'].forEach((id) => ($(id).disabled = busy || (id === 'btnWrite' && !$('title').value.trim()))); }
+function setBusy(busy) { state.busy = busy; ['btnTitles', 'btnRegen', 'btnWrite', 'btnRewrite'].forEach((id) => ($(id).disabled = busy || (id === 'btnWrite' && !$('title').value.trim()))); }
 const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 $('title').addEventListener('input', () => { $('btnWrite').disabled = state.busy || !$('title').value.trim(); });
 
@@ -458,34 +455,8 @@ function showArticle(art) {
 }
 
 /* ---------- 매장 검색 ---------- */
-function placeStatus(msg, warn) { const el = $('placeStatus'); el.textContent = msg || ''; el.classList.toggle('warn', !!warn); }
-async function searchPlace() {
-  const q = $('placeQuery').value.trim();
-  if (!q) { placeStatus('매장 이름을 입력해 주세요.', true); return; }
-  state.place = null; $('placeList').innerHTML = ''; placeStatus('검색 중...');
-  try {
-    const data = await api('/api/places?query=' + encodeURIComponent(q));
-    if (!data.places.length) { placeStatus('검색 결과가 없어요. 아래 직접 입력을 이용하세요.', true); return; }
-    placeStatus(`${data.places.length}곳 찾았어요 — 주소를 보고 골라주세요`);
-    data.places.forEach((p) => {
-      const b = document.createElement('button'); b.className = 'list-item';
-      b.innerHTML = `<b>${esc(p.name)}</b><span>${esc([p.category, p.address].filter(Boolean).join(' · '))}</span>`;
-      b.onclick = () => {
-        state.place = p; document.querySelectorAll('#placeList .list-item').forEach((x) => x.classList.remove('selected')); b.classList.add('selected');
-        placeStatus(`선택됨: ${p.name} — 이 정보가 원고에 사실로 반영돼요.`);
-      };
-      $('placeList').append(b);
-    });
-    if (data.places.length === 1) $('placeList').firstElementChild.click();
-  } catch (e) { placeStatus(e.message, true); }
-}
-$('btnPlace').onclick = searchPlace;
-$('placeQuery').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) searchPlace(); });
-$('placeQuery').addEventListener('input', () => { state.place = null; });
-
 function currentPlace() {
   if (state.kind !== 'food') return null;
-  if (state.place) return state.place;
   const name = $('placeQuery').value.trim();
   return name ? { name, category: $('mCategory').value.trim(), address: $('mAddress').value.trim(), phone: '' } : null;
 }
@@ -618,7 +589,7 @@ async function copyArticle() {
 $('btnCopy').onclick = copyArticle;
 function newArticle() {
   state.article = null; $('title').value = ''; $('memo').value = ''; $('kw').value = ''; $('candidates').classList.add('hidden');
-  $('placeQuery').value = ''; state.place = null; $('placeList').innerHTML = ''; placeStatus(''); updateHints(); state.photos = []; state.resultPhotos = []; renderPhotos(); $('photoNotes').innerHTML = ''; $('todoPanel').innerHTML = ''; state.adTerms = [];
+  $('placeQuery').value = ''; $('mCategory').value = ''; $('mAddress').value = ''; updateHints(); state.photos = []; state.resultPhotos = []; renderPhotos(); $('photoNotes').innerHTML = ''; $('todoPanel').innerHTML = ''; state.adTerms = [];
   $('resultBox').innerHTML = '<div class="empty">원고 제목을 입력하세요.<br>원고를 생성하면 결과가 여기에 표시됩니다.</div>';
   $('actions').classList.add('hidden'); $('quality').innerHTML = ''; $('notes').textContent = ''; $('btnWrite').disabled = true; showError('');
   window.scrollTo({ top: 0, behavior: 'smooth' });

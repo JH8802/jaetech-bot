@@ -11,8 +11,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# 모델은 .env 의 BLOGDEX_MODEL 로 바꿉니다. 비용을 줄이려면 claude-sonnet-5-5 등.
-MODEL = os.getenv("BLOGDEX_MODEL", "claude-opus-5-5")
+# 모델은 Sonnet 5.5 로 고정합니다(사용자 결정). 바꾸려면 아래 한 줄만 고치세요.
+MODEL = "claude-sonnet-5-5"
 EFFORT = os.getenv("BLOGDEX_EFFORT", "medium")  # low | medium | high
 FALLBACK_MODELS = {"claude-fable-5-1", "claude-opus-5-5", "claude-opus-5", "claude-sonnet-5-5"}
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
@@ -123,7 +123,7 @@ def ask_text(system: str, user: str, max_tokens: int = 1024, effort: str = "low"
     return text
 
 
-VISION_MODEL = os.getenv("BLOGDEX_VISION_MODEL", "") or MODEL
+VISION_MODEL = MODEL  # 사진 분석도 같은 모델
 
 
 def merge_usage(a: dict, b: dict) -> dict:
