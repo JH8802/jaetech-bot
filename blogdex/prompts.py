@@ -54,6 +54,16 @@ NO_META = """[글이 자기 사정을 말하지 않게 - 두 가지 재료 모�
 - 재료가 적어 분량을 못 채우면 분량을 줄입니다. 지어내거나 같은 말을 되풀이해서 채우지 않습니다.
 - 메모에 없는 방문 결정·재방문 의사·사전 계획(예: '후보로 적어 둔 곳이었다', '다시 가겠다')도 지어내지 않습니다."""
 
+NO_PHOTO = """[사진]
+- 사진이 없습니다. <사진N> 같은 사진 자리 줄은 쓰지 않습니다."""
+
+PHOTO_RULES = """[사진 사용 규칙]
+- '사진 정보'는 작성자가 올린 사진을 미리 살펴본 결과이며, 사진에 실제로 보이는 것이므로 사실로 쓸 수 있습니다(음식의 모양·색·양, 외관·내부 분위기, 사진 속 글자 등). 사진으로 알 수 없는 맛·가격·메뉴 이름·시간은 지어내지 않습니다.
+- 사진이 놓일 자리마다 단독 한 줄로 <사진N> 을 씁니다(N은 사진 정보의 번호만). 모든 사진을 정확히 한 번씩 쓰고, 번호가 작은 사진이 글의 앞쪽에 오게 합니다(사진 1 → 2 → 3 순서).
+- 사진은 그 사진 내용을 이야기하는 문단 바로 앞이나 뒤에 놓습니다. 외관은 인트로 끝~1번 섹션 앞부분, 내부는 분위기 설명 근처, 음식·메뉴판은 메뉴를 다루는 섹션 근처, 제품·표시사항 사진은 그것을 설명하는 섹션 근처가 기본입니다.
+- <사진N> 두 줄 사이에는 글 문단을 최소 1개 둡니다. 소제목 바로 앞에는 두지 않습니다.
+- 사진 내용을 글에 자연스럽게 반영하되 '사진을 보면'을 반복하지 않습니다. 소제목과 해시태그 줄에는 <사진N> 을 넣지 않습니다."""
+
 GUARDRAIL = """[표시·광고 가드레일 - 켜짐]
 - 질병의 치료·예방·개선, 노화 방지, 특정 기능을 단정하거나 암시하는 표현(예: '~에 효과적이다', '~를 개선한다', '~가 좋아진다')을 쓰지 않습니다. '~로 알려져 있다', '연구가 충분하지 않다'처럼 근거 수준을 함께 밝힙니다.
 - 건강기능식품은 '인정된 기능성 표시가 있는지 확인하는 방법'을 안내하고, 의약품이 아니라는 점과 복용 중인 약·질환이 있으면 전문가와 상담하라는 점을 포함합니다.
@@ -80,7 +90,7 @@ KIND_SPECS = {
 4) '3. ' 다른 메뉴와 추천 조합, 또는 누구와 가면 좋은지.
 5) '4. ' 다시 갈 만한가? 재방문 의사, 아쉬운 점, 이런 사람에게 추천.
 소제목 문구는 글마다 조금씩 바꿔도 됩니다. 섹션마다 3~5문단, 문단당 2~3문장입니다.
-'(플레이스 지도 삽입: …)' 줄과 사진 자리는 시스템이 넣으니 쓰지 않습니다.
+'(플레이스 지도 삽입: …)' 줄은 시스템이 넣으니 쓰지 않습니다.
 문체: 1인칭 후기. 합니다체 약 50%, 해요체 약 35%, 구어 어미(~더라고요, ~거든요, ~잖아요, ~죠) 약 15%를 섞습니다. '저는/저도/제가'로 시작하는 문장은 전체의 25% 이하입니다.
 해시태그 한 줄: 상호(지점 있는 것과 없는 것), 지역×업종 조합(예: 마포맛집, 마포고깃집), 메뉴, 상황(회식, 데이트, 모임, 혼밥), 후기·추천 키워드를 섞습니다.
 분량: 공백을 뺀 글자 수로 2,100자 안팎(최소 1,900자). 짧아지기 쉬우니 아래 배분을 지킵니다(모두 공백 제외).
@@ -91,10 +101,11 @@ KIND_SPECS = {
 BASE_ROLE = "당신은 네이버 블로그 검색 노출에 강하면서도 사람이 쓴 것처럼 읽히는 한국어 블로그 원고를 쓰는 작가입니다."
 
 
-def build_system(kind: str, guardrail: bool, evidence_mode: str) -> str:
+def build_system(kind: str, guardrail: bool, evidence_mode: str, photo_count: int = 0) -> str:
     parts = [BASE_ROLE, KIND_SPECS[kind], TAG_RULES, WRITING_RULES, SEO_RULES]
     parts.append(EVIDENCE_STRICT if evidence_mode == "strict" else EVIDENCE_TEMPLATE)
     parts.append(NO_META)
+    parts.append(PHOTO_RULES if photo_count else NO_PHOTO)
     if guardrail:
         parts.append(GUARDRAIL)
     return "\n\n".join(parts)
@@ -136,7 +147,41 @@ def _place_block(place: dict | None) -> str:
     return "\n".join(lines)
 
 
-def build_article_prompt(kind: str, title: str, keywords: list[str], memo: str, place: dict | None) -> str:
+PHOTO_CATEGORIES = {
+    "food": ["외관", "내부", "음식", "메뉴판", "기타"],
+    "info": ["제품", "라벨·표시사항", "화면·자료", "기타"],
+}
+
+VISION_SYSTEM = """당신은 블로그 원고를 쓰기 전에 작성자가 올린 사진을 살펴보고 정리하는 도우미입니다.
+- 사진에 실제로 보이는 것만 적습니다. 보이지 않는 맛, 가격, 메뉴 이름, 장소는 추측하지 않습니다.
+- 사진 속 글자(간판, 메뉴판, 라벨)는 또렷하게 읽히는 것만 그대로 옮기고, 흐리면 비웁니다.
+- 사람 얼굴이나 개인 정보가 보이면 묘사하지 않고 '사람이 찍혀 있음'으로만 씁니다.
+- 출력은 JSON 배열 하나뿐입니다. 설명, 코드블록, 머리말을 붙이지 않습니다."""
+
+
+def build_photo_analysis_prompt(kind: str, title: str, place: dict | None, count: int) -> str:
+    cats = " / ".join(PHOTO_CATEGORIES[kind])
+    pb = _place_block(place)
+    return "\n\n".join(x for x in [
+        f"글 제목: {title}",
+        pb,
+        f"사진 {count}장을 보냅니다. 각 사진 앞에 '[사진 N]' 표시가 있습니다. 사진마다 아래 형식의 JSON 객체를 만들어 배열로 출력하세요.",
+        '{"n": 번호, "category": "' + cats + ' 중 하나", "desc": "보이는 것을 한두 문장(60자 안팎)으로", "text": "사진 속에서 또렷이 읽히는 글자(없으면 빈 문자열)"}',
+    ] if x)
+
+
+def photo_block(notes: list[dict]) -> str:
+    lines = ["[사진 정보 - 번호는 작성자가 올린 순서]"]
+    for n in notes:
+        line = f"- 사진 {n['n']} ({n.get('category') or '기타'}): {n.get('desc') or '설명 없음'}"
+        if n.get("text"):
+            line += f" / 사진 속 글자: {n['text']}"
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def build_article_prompt(kind: str, title: str, keywords: list[str], memo: str, place: dict | None,
+                         photo_notes: list[dict] | None = None) -> str:
     parts = [f"[글 제목]\n{title}"]
     if keywords:
         parts.append("[핵심 키워드]\n" + ", ".join(keywords))
@@ -145,6 +190,8 @@ def build_article_prompt(kind: str, title: str, keywords: list[str], memo: str, 
         parts.append(pb)
     memo_label = "작성자 메모 - 직접 겪은 일과 느낀 점" if kind == "food" else "작성자 메모 - 경험, 의견, 참고 자료"
     parts.append(f"[{memo_label}]\n" + (memo.strip() if memo and memo.strip() else "(없음)"))
+    if photo_notes:
+        parts.append(photo_block(photo_notes))
     first_line = (
         "위 재료로 원고를 쓰세요. 첫 줄부터 바로 본문을 시작하고 제목 줄은 쓰지 않습니다."
         if kind == "info"
@@ -177,11 +224,12 @@ def build_title_prompt(kind: str, keyword: str, memo: str, place: dict | None, e
     return "\n".join(parts)
 
 
-def build_rewrite_prompt(kind: str, body: str, issues: list[str], keywords: list[str]) -> str:
+def build_rewrite_prompt(kind: str, body: str, issues: list[str], keywords: list[str], photo_notes: list[dict] | None = None) -> str:
     return "\n\n".join([
         "아래 원고를 같은 주제와 같은 사실을 유지한 채 다시 쓰세요. 아래 '고칠 점'을 모두 반영합니다.",
         "[고칠 점]\n" + "\n".join(f"- {i}" for i in issues),
         "[핵심 키워드]\n" + ", ".join(keywords) if keywords else "",
+        photo_block(photo_notes) + "\n- 기존 원고의 <사진N> 줄은 번호를 바꾸지 말고, 그 사진을 설명하는 문단 가까이에 그대로 둡니다." if photo_notes else "",
         "[기존 원고]\n" + body,
         "출력 형식 규칙은 그대로이며, 설명 없이 원고 본문만 출력합니다.",
     ]).strip()
