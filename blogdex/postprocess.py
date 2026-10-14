@@ -127,8 +127,44 @@ def insert_map_line(text: str, place_name: str) -> str:
     return "\n\n".join(paras)
 
 
+_PHOTO_ONLY = re.compile(r"<사진(\d+)>")
+
+
+def _is_text_paragraph(par: str) -> bool:
+    return not (_PHOTO_ONLY.fullmatch(par) or HEADING_RE.match(strip_tags(par)) or MAP_LINE_MARK in par
+                or (par.startswith("#") and par.count("#") >= 3))
+
+
+def _insert_missing_photos(paras: list[str], missing: list[int]) -> list[str]:
+    """AI가 빠뜨린 사진 번호를 번호 순서를 지키며 앞뒤 사진 사이 글 문단 뒤에 고르게 끼워 넣습니다."""
+    tag_i = find_hashtag_index(paras)
+    end = tag_i if tag_i is not None else len(paras)
+    placed = {int(_PHOTO_ONLY.fullmatch(p).group(1)): i for i, p in enumerate(paras) if _PHOTO_ONLY.fullmatch(p)}
+    # 같은 '앞 사진 ~ 뒤 사진' 구간에 들어갈 번호끼리 묶기
+    gaps: dict[tuple[int, int], list[int]] = {}
+    for n in missing:
+        lo = max((i for k, i in placed.items() if k < n), default=-1)
+        hi = min((i for k, i in placed.items() if k > n), default=end)
+        gaps.setdefault((lo, hi), []).append(n)
+    after: dict[int, list[int]] = {}  # 문단 인덱스 → 그 문단 뒤에 놓을 번호들
+    for (lo, hi), nums in gaps.items():
+        slots = [j for j in range(lo + 1, hi) if _is_text_paragraph(paras[j])]
+        # 소제목 바로 앞 문단은 피하고(있다면), 없으면 전체 문단을 씁니다
+        good = [j for j in slots if j + 1 >= len(paras) or not HEADING_RE.match(strip_tags(paras[j + 1]))] or slots
+        if not good:
+            good = [max(lo, 0)] if paras else [0]
+        for i, n in enumerate(nums):
+            j = good[min(len(good) - 1, (i + 1) * len(good) // (len(nums) + 1))]
+            after.setdefault(j, []).append(n)
+    out = []
+    for i, par in enumerate(paras):
+        out.append(par)
+        out += [f"<사진{n}>" for n in sorted(after.get(i, []))]
+    return out
+
+
 def normalize_photos(text: str, photo_count: int) -> tuple[str, list[str]]:
-    """<사진N> 자리를 정리합니다: 단독 줄로 분리, 없는 번호·중복 제거, 빠진 번호는 알림."""
+    """<사진N> 자리를 정리합니다: 단독 줄로 분리, 없는 번호·중복 제거, 빠진 번호는 자동으로 끼워 넣고 알림."""
     notes = []
     out, seen = [], set()
     for par in split_paragraphs(text):
@@ -146,10 +182,11 @@ def normalize_photos(text: str, photo_count: int) -> tuple[str, list[str]]:
             if 1 <= n <= photo_count and n not in seen:
                 seen.add(n)
                 out.append(f"<사진{n}>")
+    dropped = sum(len(PHOTO_RE.findall(p)) for p in split_paragraphs(text)) - len(seen)
     missing = [n for n in range(1, photo_count + 1) if n not in seen]
     if missing:
-        notes.append("사진 " + ", ".join(map(str, missing)) + "번 자리가 글에 없어요. 네이버 에디터에서 직접 놓을 위치를 정해 주세요.")
-    dropped = sum(len(PHOTO_RE.findall(p)) for p in split_paragraphs(text)) - len(seen)
+        out = _insert_missing_photos(out, missing)
+        notes.append("AI가 빠뜨린 사진 " + ", ".join(map(str, missing)) + "번 자리를 번호 순서에 맞게 자동으로 넣었어요. 위치가 어색하면 에디터에서 옮기세요.")
     if dropped > 0:
         notes.append(f"잘못되었거나 겹치는 사진 자리 {dropped}개를 뺐어요.")
     return "\n\n".join(out), notes

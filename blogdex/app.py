@@ -24,8 +24,8 @@ MAX_BODY = 60000
 EVIDENCE_MODES = {"strict", "template"}
 
 app = Flask(__name__, static_folder="static", static_url_path="/static")
-app.config["MAX_CONTENT_LENGTH"] = 40 * 1024 * 1024  # 사진 최대 10장(브라우저에서 줄인 JPEG) + 본문
-MAX_PHOTOS = 10
+app.config["MAX_CONTENT_LENGTH"] = 40 * 1024 * 1024  # 사진 최대 15장(브라우저에서 줄인 JPEG) + 본문
+MAX_PHOTOS = 15
 MAX_PHOTO_BYTES = 3 * 1024 * 1024
 PHOTO_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
 

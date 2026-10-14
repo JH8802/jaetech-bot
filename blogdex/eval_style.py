@@ -138,7 +138,7 @@ def evaluate(kind: str, body: str, keywords: list[str], memo: str = "", title: s
                          "해시태그를 28~30개, 중복 없이 맞출 것"))
 
     # 8) 분량
-    lo, hi = (1700, 2500) if kind == "food" else (2000, 3200)
+    lo, hi = (1900, 2700) if kind == "food" else (2000, 3200)
     n = count_chars(body)
     checks.append(_check("length", "분량(공백 제외)", f"{n:,}자", f"{lo:,}~{hi:,}자", lo <= n <= hi,
                          "분량을 %s~%s자로 맞출 것(현재 %s자)" % (f"{lo:,}", f"{hi:,}", f"{n:,}")))

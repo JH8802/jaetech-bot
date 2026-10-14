@@ -161,7 +161,7 @@
     <p class="hint" id="memoHint"></p>
     <p class="hint warnhint hidden" id="memoShort"></p>
 
-    <label class="cap" for="fileInput">사진 <small>(선택 · 최대 10장 · 올린 순서가 사진 번호예요)</small></label>
+    <label class="cap" for="fileInput">사진 <small>(선택 · 최대 15장 · 올린 순서가 사진 번호예요)</small></label>
     <div class="photo-actions">
       <button class="btn ghost" id="btnPhotos" type="button">사진 선택</button>
       <button class="btn ghost" id="btnFolder" type="button">폴더 선택</button>
@@ -486,7 +486,7 @@ $('btnTitles').onclick = () => makeTitles(false);
 $('btnRegen').onclick = () => makeTitles(true);
 
 /* ---------- 사진 ---------- */
-const MAX_PHOTOS = 10;
+const MAX_PHOTOS = 15;
 function loadResized(file) {
   return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(file); const img = new Image();
@@ -511,7 +511,7 @@ async function addPhotos(fileList, sort) {
   photoMsg([skipped ? `최대 ${MAX_PHOTOS}장이라 ${skipped}장은 뺐어요.` : '', bad.length ? `읽지 못한 사진: ${bad.join(', ')} (HEIC는 JPG로 바꿔 주세요)` : ''].filter(Boolean).join(' '));
   renderPhotos();
 }
-function photoMsg(m) { showError(''); $('photoCount').textContent = state.photos.length ? `${state.photos.length}장${m ? ' · ' + m : ''}` : (m || ''); }
+function photoMsg(m) { showError(m || ''); $('photoCount').textContent = state.photos.length ? `${state.photos.length}장` : ''; }
 function renderPhotos() {
   const grid = $('photoGrid'); grid.innerHTML = '';
   state.photos.forEach((p, i) => {

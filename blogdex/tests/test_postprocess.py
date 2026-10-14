@@ -1,4 +1,5 @@
 import os
+import re
 import sys
 import unittest
 
@@ -111,8 +112,9 @@ class PhotoTests(unittest.TestCase):
         t = "인트로입니다.\n\n<사진1>\n\n1. 소제목 <사진2>\n\n본문 <사진2> 이어서.\n\n<사진9>\n\n<사진2>"
         out, notes = pp.normalize_photos(t, 3)
         paras = out.split("\n\n")
-        self.assertEqual(paras, ["인트로입니다.", "<사진1>", "1. 소제목", "본문 이어서.", "<사진2>"])
-        self.assertTrue(any("3번" in n for n in notes))  # 빠진 번호 알림
+        self.assertEqual(paras[:5], ["인트로입니다.", "<사진1>", "1. 소제목", "본문 이어서.", "<사진2>"])
+        self.assertIn("<사진3>", paras)  # 빠진 3번은 자동으로 끼워 넣는다
+        self.assertTrue(any("3번" in n for n in notes))  # 알림
 
     def test_no_photos_removes_all_markers(self):
         out, _ = pp.normalize_photos("글입니다.\n\n<사진1>", 0)
@@ -121,6 +123,24 @@ class PhotoTests(unittest.TestCase):
     def test_marker_counts_like_original(self):
         # 원본은 사진 자리를 '사진N' 으로 셉니다(공백 제외)
         self.assertEqual(pp.count_chars("가나\n\n<사진1>\n\n#a #b #c"), len("가나사진1"))
+
+    def test_all_fifteen_photos_present_in_order_even_if_ai_skips_many(self):
+        paras = ["인트로 문단 하나", "인트로 문단 둘", "<사진1>", "1. 위치"] + [f"위치 문단 {i}" for i in range(4)] \
+            + ["2. 메뉴"] + [f"메뉴 문단 {i}" for i in range(5)] + ["<사진9>", "3. 추천"] + [f"추천 문단 {i}" for i in range(4)] \
+            + ["4. 재방문"] + [f"재방문 문단 {i}" for i in range(3)] + ["#a #b #c"]
+        out, notes = pp.normalize_photos("\n\n".join(paras), 15)
+        order = [int(m) for m in re.findall(r"<사진(\d+)>", out)]
+        self.assertEqual(order, list(range(1, 16)))  # 15장 모두, 번호 순서대로
+        self.assertTrue(out.rstrip().endswith("#a #b #c"))  # 해시태그는 마지막 유지
+        self.assertNotIn("<사진10>\n\n1.", out)  # 소제목 바로 앞 문단은 피함(가능한 경우)
+        self.assertTrue(notes)
+
+    def test_sections_do_not_start_with_marker_before_heading(self):
+        out, _ = pp.normalize_photos("글1\n\n글2\n\n1. 소제목\n\n글3\n\n글4\n\n#a #b #c", 2)
+        paras = out.split("\n\n")
+        for i, p in enumerate(paras[:-1]):
+            if p.startswith("<사진"):
+                self.assertFalse(paras[i + 1].startswith("1."))
 
 
 class BatFileTests(unittest.TestCase):

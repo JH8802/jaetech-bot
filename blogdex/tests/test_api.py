@@ -124,7 +124,7 @@ class ApiTests(unittest.TestCase):
 
     def test_photo_validation(self):
         self.assertEqual(self._stream(photos=["not-a-data-url"])[0].status_code, 400)
-        self.assertEqual(self._stream(photos=[self.PIXEL] * 11)[0].status_code, 400)
+        self.assertEqual(self._stream(photos=[self.PIXEL] * 16)[0].status_code, 400)
         self.assertEqual(self._stream(photos=["data:application/pdf;base64,AAAA"])[0].status_code, 400)
 
     def test_system_prompt_photo_rules(self):
