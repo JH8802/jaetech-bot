@@ -137,7 +137,7 @@ def merge_usage(a: dict, b: dict) -> dict:
             "output_tokens": a.get("output_tokens", 0) + b.get("output_tokens", 0), "cost_usd": cost}
 
 
-def ask_vision(system: str, text: str, images: list[dict], max_tokens: int = 3000, usage: dict | None = None) -> str:
+def ask_vision(system: str, text: str, images: list[dict], max_tokens: int = 6000, usage: dict | None = None) -> str:
     """사진(images: [{'media_type','data'(base64)}])을 보고 한 번에 답을 받습니다. 사진마다 '[사진 N]' 표시를 붙입니다."""
     if is_mock():
         if usage is not None:
