@@ -105,9 +105,11 @@ def stream_text(system: str, user: str, max_tokens: int = 16000, effort: str | N
         raise TruncatedError("원고가 너무 길어 중간에 끊겼어요. 다시 시도해 주세요.")
 
 
-def ask_text(system: str, user: str, max_tokens: int = 1024, effort: str = "low") -> str:
+def ask_text(system: str, user: str, max_tokens: int = 1024, effort: str = "low", usage: dict | None = None) -> str:
     """짧은 응답(제목 후보 등)을 한 번에 받습니다."""
     if is_mock():
+        if "[기존 원고]" in user and "모자랍니다" in user:
+            return _mock_expand(user)
         return "\n".join(_mock_titles(user))
     kwargs = _kwargs(system, user, max_tokens, effort)
     client = get_client()
@@ -115,8 +117,11 @@ def ask_text(system: str, user: str, max_tokens: int = 1024, effort: str = "low"
         resp = client.beta.messages.create(**kwargs, betas=[FALLBACK_BETA], fallbacks="default")
     else:
         resp = client.messages.create(**kwargs)
+    _fill_usage(usage, resp)
     if resp.stop_reason == "refusal":
         raise RefusedError("이 주제는 AI가 작성을 거절했어요. 주제나 표현을 바꿔서 다시 시도해 주세요.")
+    if resp.stop_reason == "max_tokens":
+        raise TruncatedError("응답이 길어 중간에 끊겼어요.")
     text = "".join(b.text for b in resp.content if b.type == "text").strip()
     if not text:
         raise RuntimeError("AI 응답이 비어 있어요. 다시 시도해 주세요.")
@@ -195,6 +200,15 @@ def _mock_titles(user: str) -> list[str]:
     m = re.search(r"주제/키워드: (.+)", user)
     kw = (m.group(1).strip() if m else "키워드")[:20]
     return [f"{kw} 후보 제목 {i}" for i in range(1, 6)]
+
+
+def _mock_expand(user: str) -> str:
+    """분량 보강 호출의 샘플 응답: 기존 원고의 해시태그 줄 앞에 문단을 덧붙입니다."""
+    body = user.split("[기존 원고]\n", 1)[1].rsplit("\n\n설명 없이", 1)[0]
+    paras = body.split("\n\n")
+    tag_i = next((i for i in range(len(paras) - 1, -1, -1) if paras[i].startswith("#")), len(paras))
+    extra = [f"샘플 보강 문단 {i}입니다. 메모와 사진에서 확인되는 내용을 조금 더 구체적으로 풀어 씁니다." for i in range(1, 61)]
+    return "\n\n".join(paras[:tag_i] + extra + paras[tag_i:])
 
 
 def _mock_stream(system: str, user: str):
