@@ -120,7 +120,7 @@ def draft_post(topic, key_points, personal_take="", platform="네이버 블로�
    (# 기호 없이, 예: 유산균, 건강기능식품, 표시광고)"""
 
     message = client.messages.create(
-        model="claude-sonnet-5",
+        model="claude-sonnet-5-5",
         max_tokens=8192,
         system=STYLE_GUIDE,
         messages=[{"role": "user", "content": prompt}]
@@ -143,7 +143,7 @@ def suggest_questions(topic):
 
     try:
         message = client.messages.create(
-            model="claude-haiku-4-5-20251001",
+            model="claude-haiku-5-5",
             max_tokens=300,
             messages=[{"role": "user", "content": prompt}]
         )
