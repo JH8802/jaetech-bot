@@ -138,6 +138,12 @@ class ApiTests(unittest.TestCase):
         self.assertIn("사진이 없습니다", prompts.build_system("food", False, "strict", 0))
         self.assertIn("다른 가게 이름", prompts.build_system("food", False, "strict", 2))
         self.assertIn("옆 가게 간판", prompts.VISION_SYSTEM)
+        rules = prompts.build_system("food", False, "strict", 2)
+        self.assertIn("올린 순서일 뿐 글의 순서가 아닙니다", rules)      # 번호 순서 강제 제거
+        self.assertNotIn("사진 1 → 2 → 3 순서", rules)
+        self.assertIn("인트로(첫 소제목 앞)에는 사진을 두지 않습니다", rules)
+        self.assertIn("분량을 채우는 수단이 아니", rules)               # 쓸모없는 사물 묘사 금지
+        self.assertIn("배경 소품", prompts.VISION_SYSTEM)
 
 
     def test_update_body_recomputes_quality_and_persists(self):

@@ -135,6 +135,15 @@ class PhotoTests(unittest.TestCase):
         self.assertNotIn("<사진10>\n\n1.", out)  # 소제목 바로 앞 문단은 피함(가능한 경우)
         self.assertTrue(notes)
 
+    def test_out_of_order_markers_are_kept_and_missing_ones_still_inserted(self):
+        # AI가 글 흐름에 맞춰 사진 4를 5보다 뒤에 놓아도(번호 순서 아님) 그대로 둔다
+        paras = ["인트로", "1. 위치", "위치 문단", "2. 메뉴", "빵 문단", "<사진5>", "스테이크 문단", "<사진4>", "마무리 문단", "#a #b #c"]
+        out, notes = pp.normalize_photos("\n\n".join(paras), 6)
+        order = [int(m) for m in re.findall(r"<사진(\d+)>", out)]
+        self.assertEqual(order.index(5) < order.index(4), True)  # 순서 유지
+        self.assertEqual(sorted(order), [1, 2, 3, 4, 5, 6])      # 빠진 번호는 채움
+        self.assertTrue(out.rstrip().endswith("#a #b #c"))
+
     def test_sections_do_not_start_with_marker_before_heading(self):
         out, _ = pp.normalize_photos("글1\n\n글2\n\n1. 소제목\n\n글3\n\n글4\n\n#a #b #c", 2)
         paras = out.split("\n\n")

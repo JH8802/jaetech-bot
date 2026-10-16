@@ -145,6 +145,8 @@ def _insert_missing_photos(paras: list[str], missing: list[int]) -> list[str]:
     for n in missing:
         lo = max((i for k, i in placed.items() if k < n), default=-1)
         hi = min((i for k, i in placed.items() if k > n), default=end)
+        if hi <= lo:  # AI가 번호 순서와 다르게 놓은 경우: 앞 사진 뒤 ~ 글 끝 사이를 씁니다
+            hi = end
         gaps.setdefault((lo, hi), []).append(n)
     after: dict[int, list[int]] = {}  # 문단 인덱스 → 그 문단 뒤에 놓을 번호들
     for (lo, hi), nums in gaps.items():

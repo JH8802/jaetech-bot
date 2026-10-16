@@ -290,6 +290,8 @@ const isTags = (p) => p.startsWith('#') && (p.match(/#/g) || []).length >= 3;
 const stripTags = (t) => t.replace(TAG_RE, '');
 const paragraphs = (t) => t.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);
 
+// 복사본의 사진 자리: 번호 순서와 글 순서가 다를 수 있어 파일 이름을 함께 적어 준다(이 화면에서 올린 사진만)
+const photoCopyLabel = (n) => { const ph = state.resultPhotos[n - 1]; return ph && ph.name ? `사진 ${n} (${ph.name})` : `사진 ${n}`; };
 const PHOTO_PAR = /^<\s*사진\s*(\d+)\s*>$/;
 const photoNo = (p) => { const m = p.match(PHOTO_PAR); return m ? +m[1] : null; };
 
@@ -352,7 +354,7 @@ function toCopyHTML(text) {
   const counter = { n: 0 };
   return paragraphs(text).map((p) => {
     const pn = photoNo(p);
-    if (pn) return `<p>사진 ${pn}</p>`;
+    if (pn) return `<p>${photoCopyLabel(pn)}</p>`;
     if (isTags(p)) return `<p>${esc(p)}</p>`;
     if (isHead(p)) return `<p><b>${todoCopy(inline(p, counter, 'copy'))}</b></p>`;
     return `<p>${todoCopy(inline(p, counter, 'copy'))}</p>`;
@@ -538,7 +540,7 @@ function renderPhotoNotes(notes) {
   if (!notes || !notes.length) { box.innerHTML = ''; return; }
   box.innerHTML = '<div class="photonotes"><h4>AI가 본 사진 (번호 확인용)</h4>' + notes.map((n) => {
     const ph = state.resultPhotos[n.n - 1];
-    return `<div class="pn-row">${ph ? `<img src="${ph.url}" alt="">` : ''}<div><b>사진 ${n.n}</b> · ${esc(n.category || '기타')} — ${esc(n.desc || '설명을 읽지 못했어요')}${n.text ? ` <span style="color:var(--sub)">(글자: ${esc(n.text)})</span>` : ''}</div></div>`;
+    return `<div class="pn-row">${ph ? `<img src="${ph.url}" alt="">` : ''}<div><b>사진 ${n.n}</b>${ph && ph.name ? ` <span style="color:var(--sub)">(${esc(ph.name)})</span>` : ''} · ${esc(n.category || '기타')} — ${esc(n.desc || '설명을 읽지 못했어요')}${n.text ? ` <span style="color:var(--sub)">(글자: ${esc(n.text)})</span>` : ''}</div></div>`;
   }).join('') + '</div>';
 }
 
@@ -575,7 +577,7 @@ async function copyArticle() {
   if (!state.article) return;
   const text = state.article.body;
   const withTitle = $('copyTitle').checked && state.article.title;
-  const plain = (withTitle ? state.article.title + '\n\n' : '') + paragraphs(stripTags(text)).map((p) => (photoNo(p) ? `사진 ${photoNo(p)}` : p)).join('\n\n');
+  const plain = (withTitle ? state.article.title + '\n\n' : '') + paragraphs(stripTags(text)).map((p) => (photoNo(p) ? photoCopyLabel(photoNo(p)) : p)).join('\n\n');
   const html = (withTitle ? `<p>${esc(state.article.title)}</p><p><br></p>` : '') + toCopyHTML(text);
   const btn = $('btnCopy'); const old = btn.innerHTML; let wait = 2200;
   try {
