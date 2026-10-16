@@ -91,6 +91,11 @@ class PhotoNotesTests(unittest.TestCase):
         self.assertEqual(notes[0]["desc"], "침대")
         self.assertEqual(notes[2]["desc"], "")
 
+    def test_parse_keeps_dish_name_and_confidence(self):
+        raw = '[{"n": 1, "category": "조식·음식", "desc": "초밥", "dish": "연어 초밥", "dish_confidence": "확실"}]'
+        n = llm.parse_photo_notes(raw, 1)[0]
+        self.assertEqual((n["dish"], n["dish_confidence"]), ("연어 초밥", "확실"))
+
     def test_parse_garbage_gives_empty_notes(self):
         self.assertEqual(len(llm.parse_photo_notes("JSON 아님", 2)), 2)
 

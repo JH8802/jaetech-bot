@@ -212,6 +212,21 @@ class ApiTests(unittest.TestCase):
         self.assertIn("#제주롯데호텔", tags[:4])
         self.assertEqual(self.c.get(f"/api/articles/{done['article_id']}").get_json()["article"]["kind"], "hotel")
 
+    def test_dish_name_confidence_rules_reach_the_prompts(self):
+        import prompts
+        notes = [{"n": 1, "category": "조식·음식", "desc": "초밥", "text": "", "dish": "연어 초밥", "dish_confidence": "확실"},
+                 {"n": 2, "category": "조식·음식", "desc": "소스를 곁들인 고기", "text": "", "dish": "고기 요리", "dish_confidence": "추정"},
+                 {"n": 3, "category": "조식·음식", "desc": "접시 위 음식", "text": "", "dish": "", "dish_confidence": "모름"}]
+        block = prompts.photo_block(notes)
+        self.assertIn("요리 이름(확실): 연어 초밥", block)
+        self.assertIn("요리 이름(추정): 고기 요리", block)
+        self.assertIn("요리 이름: 알 수 없음", block)
+        rules = prompts.build_system("hotel", False, "strict", 3)
+        self.assertIn("부드럽게", rules)
+        self.assertIn("[확인 필요: 메뉴 이름]", rules)
+        self.assertIn("dish_confidence", prompts.VISION_SYSTEM)
+        self.assertIn("알레르기", prompts.VISION_SYSTEM)
+
     def test_hotel_system_prompt_and_categories(self):
         import prompts
         sysmsg = prompts.build_system("hotel", False, "strict", 30)

@@ -185,8 +185,10 @@ def parse_photo_notes(raw: str, count: int, first: int = 1) -> list[dict]:
             continue
         if first <= n < first + count and n not in by_n:
             by_n[n] = {"n": n, "category": str(it.get("category") or "기타")[:12], "desc": str(it.get("desc") or "")[:200],
-                       "text": str(it.get("text") or "")[:100]}
-    return [by_n.get(n, {"n": n, "category": "기타", "desc": "", "text": ""}) for n in range(first, first + count)]
+                       "text": str(it.get("text") or "")[:100],
+                       "dish": str(it.get("dish") or "")[:60],
+                       "dish_confidence": str(it.get("dish_confidence") or "")[:4]}
+    return [by_n.get(n, {"n": n, "category": "기타", "desc": "", "text": "", "dish": "", "dish_confidence": ""}) for n in range(first, first + count)]
 
 
 # ---------- 샘플(MOCK) ----------
