@@ -156,5 +156,32 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(self.c.put(f"/api/articles/{aid}/body", json={"body": "  "}).status_code, 400)
 
 
+    def test_short_food_with_photos_gets_one_expansion_pass(self):
+        _, events = self._stream(photos=[self.PIXEL, self.PIXEL])
+        done = dict(events)["done"]
+        self.assertGreaterEqual(done["chars"], 1900)
+        self.assertTrue(any("보강" in n for n in done["notes"]))
+        self.assertEqual([p for p in done["body"].split("\n\n") if p.startswith("<사진")], ["<사진1>", "<사진2>"])  # 사진 자리 유지
+        self.assertTrue(done["body"].split("\n\n")[-1].startswith("#"))  # 해시태그는 마지막
+
+    def test_no_expansion_when_material_is_thin(self):
+        _, events = self._stream(memo="금요일 붐빔")  # 메모 짧고 사진 없음 → 늘리지 않는다
+        done = dict(events)["done"]
+        self.assertLess(done["chars"], 1900)
+        self.assertFalse(any("보강" in n for n in done["notes"]))
+
+    def test_expansion_failure_keeps_original(self):
+        from unittest import mock
+        with mock.patch.object(A.llm, "ask_text", side_effect=RuntimeError("boom")):
+            _, events = self._stream(photos=[self.PIXEL])
+        done = dict(events)["done"]
+        self.assertTrue(any("실패" in n for n in done["notes"]))
+        self.assertIn("<사진1>", done["body"])
+
+    def test_info_kind_is_not_expanded(self):
+        _, events = self._stream(kind="info", photos=[self.PIXEL], place={})
+        self.assertFalse(any("보강" in n for n in dict(events)["done"]["notes"]))
+
+
 if __name__ == "__main__":
     unittest.main()

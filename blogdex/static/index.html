@@ -358,13 +358,14 @@ function toCopyHTML(text) {
   }).join('<p><br></p>');
 }
 
-let rafPending = false, lastText = '';
+let rafPending = false, lastText = '', rafId = 0;
 function scheduleRender(text) {
   lastText = text;
   if (rafPending) return;
   rafPending = true;
-  requestAnimationFrame(() => { rafPending = false; renderResult(lastText, true); });
+  rafId = requestAnimationFrame(() => { rafPending = false; if (lastText !== null) renderResult(lastText, true); });
 }
+function stopStreamRender() { lastText = null; rafPending = false; if (rafId) cancelAnimationFrame(rafId); }  // 완성본이 오면 늦게 도착한 스트리밍 화면 갱신을 취소
 
 function renderResult(text, streaming, chars) {
   const box = $('resultBox');
@@ -551,7 +552,7 @@ async function runStream(url, body) {
       if (ev === 'status') setStatus(d.text, true);
       else if (ev === 'photos') renderPhotoNotes(d.notes);
       else if (ev === 'chunk') { raw += d.text; scheduleRender(raw); }
-      else if (ev === 'replace') { raw = d.text; renderResult(raw, false); }
+      else if (ev === 'replace') { stopStreamRender(); raw = d.text; renderResult(raw, false); }
       else if (ev === 'done') showArticle({ id: d.article_id, kind: body.kind || state.article?.kind || state.kind, title: d.title, body: d.body, chars: d.chars, quality: d.quality, notes: d.notes, usage: d.usage, photos: d.photos });
       else if (ev === 'error') throw new Error(d.message);
     });

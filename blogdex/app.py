@@ -21,6 +21,7 @@ MAX_TITLE = 200
 MAX_MEMO = 4000
 MAX_KEYWORDS = 8
 MAX_BODY = 60000
+EXPAND_MIN = {"food": 1900}  # 맛집글이 이 글자수에 못 미치면 사진·메모 안에서 한 번 더 풀어 씁니다(점검 하한과 같게)
 EVIDENCE_MODES = {"strict", "template"}
 
 app = Flask(__name__, static_folder="static", static_url_path="/static")
@@ -170,6 +171,24 @@ def _generate_events(*, kind, title, keywords, memo, place, guardrail, evidence_
         usage = llm.merge_usage(photo_usage, usage)
         yield sse("status", {"text": "태그와 해시태그를 정리하고 품질을 점검하고 있어요."})
         fin = postprocess.finalize(kind, "".join(parts), place, keywords, title, len(photo_notes or []))
+        floor = EXPAND_MIN.get(kind)
+        enough_material = len(re.sub(r"\s", "", memo or "")) >= 150 or bool(photo_notes)
+        if floor and fin["chars"] < floor and enough_material:
+            yield sse("status", {"text": f"분량이 {fin['chars']:,}자로 짧아서 메모와 사진을 더 풀어 쓰고 있어요."})
+            try:
+                ex_usage = {}
+                raw2 = llm.ask_text(system, prompts.build_expand_prompt(kind, fin["body"], fin["chars"], floor + 250, memo, photo_notes),
+                                    max_tokens=9000, effort=llm.EFFORT, usage=ex_usage)
+                fin2 = postprocess.finalize(kind, raw2, place, keywords, title, len(photo_notes or []))
+                usage = llm.merge_usage(usage, ex_usage)
+                if fin2["chars"] > fin["chars"]:
+                    fin2["notes"].append(f"분량이 짧아 한 번 보강했어요({fin['chars']:,}자 → {fin2['chars']:,}자).")
+                    fin = fin2
+                else:
+                    fin["notes"].append("분량 보강을 시도했지만 늘지 않아 처음 글을 그대로 썼어요.")
+            except Exception:  # 보강 실패가 원고 생성 전체를 막으면 안 됩니다
+                app.logger.exception("expand failed")
+                fin["notes"].append("분량 보강에 실패해 처음 글을 그대로 썼어요.")
         quality = eval_style.evaluate(kind, fin["body"], keywords, memo, title=title, ad_check=guardrail)
         yield sse("replace", {"text": fin["body"]})
         article_id = storage.save_article(
