@@ -41,6 +41,7 @@ SEO_RULES = """[검색 최적화 규칙]
 EVIDENCE_STRICT = """[재료 사용 규칙 - 사실 우선]
 - '작성자 메모'가 글의 뼈대입니다. 메모에 적힌 사실(메뉴, 가격, 시간, 동행, 느낀 점, 좋았던 점, 아쉬운 점)을 가장 구체적으로 풀어 쓰고, 메모의 감정과 판단을 바꾸지 않습니다.
 - 메모에 없는 구체 사실(가격, 메뉴 이름, 영업시간, 수치, 방문 날짜, 맛 평가)은 지어내지 않습니다. 꼭 필요하면 [확인 필요: 항목] 으로 표시합니다.
+- 메모에 없는 방문 동기·심리·행동 장면(예: '메뉴판을 한참 고민했다', '기대가 컸다', '이런 날이 있잖아요'식의 지어낸 사연)을 새로 만들지 않습니다. 메모에 적힌 느낌과 이유만 씁니다.
 - 방문·사용 경험은 메모에 있는 것만 씁니다. 메모에 없는 부분은 입력된 업체 정보와 일반적으로 확인 가능한 안내 중심으로 쓰고, 가본 것처럼 단정하지 않습니다."""
 
 EVIDENCE_TEMPLATE = """[재료 사용 규칙 - 템플릿형]
@@ -242,7 +243,8 @@ def build_rewrite_prompt(kind: str, body: str, issues: list[str], keywords: list
     ]).strip()
 
 
-def build_expand_prompt(kind: str, body: str, chars: int, target_min: int, memo: str, photo_notes: list[dict] | None) -> str:
+def build_expand_prompt(kind: str, body: str, chars: int, target_min: int, memo: str, photo_notes: list[dict] | None,
+                        keywords: list[str] | None = None) -> str:
     """분량이 모자란 원고를 같은 사실 안에서 더 풀어 쓰게 하는 지시(자동 보강용)."""
     parts = [
         f"아래 원고는 공백을 뺀 글자 수가 {chars:,}자로, 목표 {target_min:,}자에 {target_min - chars:,}자 이상 모자랍니다.",
@@ -250,8 +252,11 @@ def build_expand_prompt(kind: str, body: str, chars: int, target_min: int, memo:
         "늘리는 방법은 아래 두 가지뿐입니다.",
         "1) 작성자 메모의 각 사실을 문단 하나씩으로 구체적으로 풀어 씁니다(이유, 상황, 비교, 추천 대상 등 메모 안의 내용에서 나오는 것).",
         "2) 사진 정보에 있는 보이는 것(모양, 색, 양, 플레이팅, 곁들임, 공간 구성)을 사진마다 2~3문장으로 풀어 씁니다.",
-        "하지 않을 것: 메모와 사진에 없는 맛 평가·가격·메뉴 이름·시간·방문 사실 추가, 같은 말 되풀이, 글 쓴 과정에 대한 해명. <사진N> 줄과 해시태그 줄은 그대로 둡니다.",
+        "하지 않을 것: 메모와 사진에 없는 맛 평가·가격·메뉴 이름·시간·방문 사실 추가, 새로운 감정·기대·고민·놀람 같은 심리 묘사(메모에 있는 감정만 씁니다), 같은 말 되풀이, 글 쓴 과정에 대한 해명. <사진N> 줄과 해시태그 줄은 그대로 둡니다.",
+        "글이 길어지는 만큼 핵심 키워드도 함께 늘려, 전체에서 1,000자당 약 3~6회가 되도록 자연스러운 문맥에서 다시 넣습니다(첫 문단 포함 유지).",
     ]
+    if keywords:
+        parts.insert(0, "[핵심 키워드]\n" + ", ".join(keywords))
     if memo and memo.strip():
         parts.append("[작성자 메모]\n" + memo.strip())
     if photo_notes:
