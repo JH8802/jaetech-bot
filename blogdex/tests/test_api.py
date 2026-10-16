@@ -24,6 +24,11 @@ class ApiTests(unittest.TestCase):
     def setUp(self):
         self.c = A.app.test_client()
 
+    def test_version_endpoint(self):
+        r = self.c.get("/api/version")
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(r.get_json()["version"])
+
     def test_titles_food_returns_keywords(self):
         r = self.c.post("/api/titles", json={"kind": "food", "keyword": "마포 고깃집", "place": {"name": "락희옥 마포본점", "address": "서울 마포구 백범로 170"}})
         self.assertEqual(r.status_code, 200)

@@ -6,6 +6,7 @@ API 키는 서버(.env)에만 두고, 브라우저에는 내려보내지 않습�
 import json
 import os
 import re
+import subprocess
 
 import anthropic
 from flask import Flask, Response, jsonify, request, send_from_directory, stream_with_context
@@ -29,6 +30,19 @@ app.config["MAX_CONTENT_LENGTH"] = 40 * 1024 * 1024  # 사진 최대 15장(브�
 MAX_PHOTOS = 15
 MAX_PHOTO_BYTES = 3 * 1024 * 1024
 PHOTO_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
+
+
+def _code_version() -> str:
+    """서버가 켜질 때의 코드 버전(git 커밋 앞 7자리). 업데이트 후 서버를 다시 켰는지 확인하는 용도입니다."""
+    try:
+        r = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=os.path.dirname(os.path.abspath(__file__)),
+                           capture_output=True, text=True, timeout=3)
+        return r.stdout.strip() or "?"
+    except Exception:
+        return "?"
+
+
+APP_VERSION = _code_version()
 
 
 # ---------- 공통 ----------
@@ -118,6 +132,11 @@ def read_photos(data: dict) -> list[dict]:
 @app.get("/")
 def index():
     return send_from_directory(app.static_folder, "index.html")
+
+
+@app.get("/api/version")
+def version():
+    return jsonify(version=APP_VERSION)
 
 
 @app.get("/favicon.ico")
