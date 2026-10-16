@@ -164,7 +164,7 @@ class ApiTests(unittest.TestCase):
     def test_short_food_with_photos_gets_one_expansion_pass(self):
         _, events = self._stream(photos=[self.PIXEL, self.PIXEL])
         done = dict(events)["done"]
-        self.assertGreaterEqual(done["chars"], 1900)
+        self.assertGreaterEqual(done["chars"], 2100)
         self.assertTrue(any("보강" in n for n in done["notes"]))
         self.assertEqual([p for p in done["body"].split("\n\n") if p.startswith("<사진")], ["<사진1>", "<사진2>"])  # 사진 자리 유지
         self.assertTrue(done["body"].split("\n\n")[-1].startswith("#"))  # 해시태그는 마지막
@@ -174,6 +174,13 @@ class ApiTests(unittest.TestCase):
         done = dict(events)["done"]
         self.assertLess(done["chars"], 1900)
         self.assertFalse(any("보강" in n for n in done["notes"]))
+
+    def test_expand_prompt_carries_keywords_and_blocks_new_feelings(self):
+        import prompts
+        up = prompts.build_expand_prompt("food", "본문", 1500, 2400, "메모", [{"n": 1, "category": "음식", "desc": "스테이크", "text": ""}], ["놉스 사당점", "사당 스테이크"])
+        self.assertIn("[핵심 키워드]\n놉스 사당점, 사당 스테이크", up)
+        self.assertIn("1,000자당 약 3~6회", up)
+        self.assertIn("새로운 감정", up)
 
     def test_expansion_failure_keeps_original(self):
         from unittest import mock

@@ -22,7 +22,8 @@ MAX_TITLE = 200
 MAX_MEMO = 4000
 MAX_KEYWORDS = 8
 MAX_BODY = 60000
-EXPAND_MIN = {"food": 1900}  # 맛집글이 이 글자수에 못 미치면 사진·메모 안에서 한 번 더 풀어 씁니다(점검 하한과 같게)
+EXPAND_MIN = {"food": 2100}  # 맛집글이 이 글자수에 못 미치면 사진·메모 안에서 한 번 더 풀어 씁니다(목표 기준 2,100자)
+EXPAND_TARGET_EXTRA = 300  # 보강 시에는 모델이 덜 쓰는 경향을 감안해 기준보다 이만큼 더 쓰라고 요청
 EVIDENCE_MODES = {"strict", "template"}
 
 app = Flask(__name__, static_folder="static", static_url_path="/static")
@@ -196,7 +197,7 @@ def _generate_events(*, kind, title, keywords, memo, place, guardrail, evidence_
             yield sse("status", {"text": f"분량이 {fin['chars']:,}자로 짧아서 메모와 사진을 더 풀어 쓰고 있어요."})
             try:
                 ex_usage = {}
-                raw2 = llm.ask_text(system, prompts.build_expand_prompt(kind, fin["body"], fin["chars"], floor + 250, memo, photo_notes),
+                raw2 = llm.ask_text(system, prompts.build_expand_prompt(kind, fin["body"], fin["chars"], floor + EXPAND_TARGET_EXTRA, memo, photo_notes, keywords),
                                     max_tokens=9000, effort=llm.EFFORT, usage=ex_usage)
                 fin2 = postprocess.finalize(kind, raw2, place, keywords, title, len(photo_notes or []))
                 usage = llm.merge_usage(usage, ex_usage)
