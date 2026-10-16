@@ -89,9 +89,9 @@ def evaluate(kind: str, body: str, keywords: list[str], memo: str = "", title: s
         dens = [text.count(t) * 1000 / plain_len for t in tokens]
         avg = sum(dens) / len(dens)
         total_mentions = sum(text.count(k) for k in keywords if k) * 1000 / plain_len
-        ok = 1.5 <= avg <= 9.0 and total_mentions <= 25
-        checks.append(_check("kw_density", "핵심 키워드 밀도(1,000자당)", f"{avg:.1f}회", "1.5~9회", ok,
-                             "핵심 키워드 사용이 %s. 1,000자당 3~6회 수준으로 자연스럽게 조절할 것" % ("부족" if avg < 1.5 else "과다")))
+        ok = 4.0 <= avg <= 9.0 and total_mentions <= 25
+        checks.append(_check("kw_density", "핵심 키워드 밀도(1,000자당)", f"{avg:.1f}회", "4~9회", ok,
+                             "핵심 키워드 사용이 %s. 줄이지 않은 그대로의 문구로 1,000자당 4~6회 수준이 되게 자연스럽게 조절할 것" % ("부족" if avg < 4.0 else "과다")))
 
     # 3) 문장 길이 변화
     if sents:
@@ -116,8 +116,8 @@ def evaluate(kind: str, body: str, keywords: list[str], memo: str = "", title: s
             checks.append(_check("first_person", "'저는'으로 시작하는 문장", f"{first_p:.0%}", "35% 이하", first_p <= 0.35,
                                  "'저는/저도'로 시작하는 문장을 25% 이하로 줄일 것"))
         else:
-            checks.append(_check("endings", "말투(합니다체 비율)", f"{formal:.0%}", "85% 이상", formal >= 0.85,
-                                 "정보글은 합니다체로 통일할 것"))
+            checks.append(_check("endings", "말투(합니다체 비율)", f"{formal:.0%}", "합니다체 40~85%", 0.40 <= formal <= 0.85,
+                                 "합니다체 약 60%, 해요체 약 40%로 말하듯이 섞을 것"))
 
     # 5) 범용 표현
     if plain_len:
@@ -134,8 +134,8 @@ def evaluate(kind: str, body: str, keywords: list[str], memo: str = "", title: s
     # 7) 해시태그
     n_tags = len(re.findall(r"#[^\s#]+", tags))
     uniq = len(set(re.findall(r"#[^\s#]+", tags)))
-    checks.append(_check("hashtags", "해시태그 개수", f"{n_tags}개", "28~30개(중복 없음)", 28 <= n_tags <= 30 and uniq == n_tags,
-                         "해시태그를 28~30개, 중복 없이 맞출 것"))
+    checks.append(_check("hashtags", "해시태그 개수", f"{n_tags}개", "5~10개(중복 없음)", 5 <= n_tags <= 10 and uniq == n_tags,
+                         "해시태그를 핵심 키워드 중심으로 5~10개, 중복 없이 맞출 것"))
 
     # 8) 분량
     lo, hi = (1900, 2700) if kind == "food" else (2000, 3200)

@@ -11,7 +11,8 @@ UNKNOWN_TAG_RE = re.compile(r"\{\{/?(?!bold\b|color\b|highlight\b)[A-Za-z_]+\}\}
 HEADING_RE = re.compile(r"^\d+\.\s")
 MAP_LINE_MARK = "플레이스 지도 삽입"
 PHOTO_RE = re.compile(r"<\s*사진\s*(\d+)\s*>")
-MAX_HASHTAGS = 30
+MAX_HASHTAGS = 10
+MIN_HASHTAGS = 5
 
 
 def _norm(s: str) -> str:
@@ -229,8 +230,9 @@ def finalize(kind: str, raw: str, place: dict | None, keywords: list[str], title
         region = region_of(place)
         if region:
             must.append(f"{region}맛집")  # 상호 + 지역 태그는 빠지면 코드가 넣음(설계서 §4.6)
+        must += [k.replace(" ", "") for k in keywords[:2]]
     elif keywords:
-        must = [keywords[0].replace(" ", "")]
+        must = [k.replace(" ", "") for k in keywords[:3]]
     idx = find_hashtag_index(paras)
     if idx is None:
         notes.append("해시태그 문단이 없어 핵심 키워드로 만들었어요.")
@@ -238,8 +240,8 @@ def finalize(kind: str, raw: str, place: dict | None, keywords: list[str], title
     else:
         paras[idx] = normalize_hashtags(paras[idx], must)
         n_tags = paras[idx].count("#")
-        if n_tags < 28:
-            notes.append(f"해시태그가 {n_tags}개예요(권장 28~30개).")
+        if n_tags < MIN_HASHTAGS:
+            notes.append(f"해시태그가 {n_tags}개예요(권장 {MIN_HASHTAGS}~{MAX_HASHTAGS}개).")
     body = "\n\n".join(paras)
 
     if kind == "food":

@@ -60,7 +60,8 @@ class ApiTests(unittest.TestCase):
         done = events[-1][1]
         self.assertIn("플레이스 지도 삽입", done["body"])           # 맛집글은 지도 줄이 들어감
         self.assertEqual(done["body"].count("{{highlight}}"), 2)   # 형광펜은 정확히 2곳
-        self.assertGreaterEqual(done["body"].count("#"), 28)
+        tags = done["body"].split("\n\n")[-1]
+        self.assertTrue(5 <= tags.count("#") <= 10)  # 해시태그는 5~10개
         self.assertIn("checks", done["quality"])
         saved = self.c.get(f"/api/articles/{done['article_id']}").get_json()["article"]
         self.assertEqual(saved["kind"], "food")
@@ -167,6 +168,28 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(self.c.put(f"/api/articles/{aid}/body", json={"body": "  "}).status_code, 400)
 
 
+    def test_persona_in_both_kinds_and_new_hashtag_and_keyword_rules(self):
+        import prompts
+        for kind in ("info", "food"):
+            sysmsg = prompts.build_system(kind, False, "strict")
+            self.assertIn("30대 직장인 부부", sysmsg)
+            self.assertIn("딸 한 명", sysmsg)
+            self.assertIn("유머", sysmsg)
+            self.assertIn("긍정", sysmsg)
+            self.assertIn("딸과 함께 갔다", sysmsg)         # 지어내기 금지 예시
+            self.assertIn("5~10개", sysmsg)                # 해시태그
+            self.assertNotIn("28~30개", sysmsg)
+            self.assertIn("1,000자당 4~6회", sysmsg)       # 키워드
+
+    def test_hashtags_are_core_keywords_first_and_at_most_ten(self):
+        for kind, extra in (("food", {"place": {"name": "놉스 사당점", "address": "서울 동작구 동작대로5길 8"}}), ("info", {"place": {}})):
+            _, events = self._stream(kind=kind, keywords=["놉스 사당점", "사당 스테이크"], **extra)
+            tags = dict(events)["done"]["body"].split("\n\n")[-1].split()
+            self.assertLessEqual(len(tags), 10)
+            self.assertGreaterEqual(len(tags), 5)
+            self.assertIn("#놉스사당점", tags[:4])          # 핵심 키워드 태그가 앞쪽
+            self.assertEqual(len(tags), len(set(tags)))
+
     def test_short_food_with_photos_gets_one_expansion_pass(self):
         _, events = self._stream(photos=[self.PIXEL, self.PIXEL])
         done = dict(events)["done"]
@@ -185,7 +208,7 @@ class ApiTests(unittest.TestCase):
         import prompts
         up = prompts.build_expand_prompt("food", "본문", 1500, 2400, "메모", [{"n": 1, "category": "음식", "desc": "스테이크", "text": ""}], ["놉스 사당점", "사당 스테이크"])
         self.assertIn("[핵심 키워드]\n놉스 사당점, 사당 스테이크", up)
-        self.assertIn("1,000자당 약 3~6회", up)
+        self.assertIn("1,000자당 4~6회", up)
         self.assertIn("새로운 감정", up)
 
     def test_expansion_failure_keeps_original(self):
