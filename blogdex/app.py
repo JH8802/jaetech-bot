@@ -22,13 +22,14 @@ MAX_TITLE = 200
 MAX_MEMO = 4000
 MAX_KEYWORDS = 8
 MAX_BODY = 60000
-EXPAND_MIN = {"food": 2100}  # 맛집글이 이 글자수에 못 미치면 사진·메모 안에서 한 번 더 풀어 씁니다(목표 기준 2,100자)
+EXPAND_MIN = {"food": 2100, "hotel": 2400}  # 맛집글이 이 글자수에 못 미치면 사진·메모 안에서 한 번 더 풀어 씁니다(목표 기준 2,100자)
 EXPAND_TARGET_EXTRA = 300  # 보강 시에는 모델이 덜 쓰는 경향을 감안해 기준보다 이만큼 더 쓰라고 요청
 EVIDENCE_MODES = {"strict", "template"}
 
 app = Flask(__name__, static_folder="static", static_url_path="/static")
-app.config["MAX_CONTENT_LENGTH"] = 40 * 1024 * 1024  # 사진 최대 15장(브라우저에서 줄인 JPEG) + 본문
-MAX_PHOTOS = 15
+app.config["MAX_CONTENT_LENGTH"] = 40 * 1024 * 1024  # 사진 최대 30장(브라우저에서 줄인 JPEG) + 본문
+MAX_PHOTOS = 30
+VISION_BATCH = 10  # 사진 분석은 10장씩 나누어 호출(출력이 잘리거나 오래 걸리는 것을 막음)
 MAX_PHOTO_BYTES = 3 * 1024 * 1024
 PHOTO_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
 
@@ -104,7 +105,7 @@ def read_common(data: dict) -> dict:
     return {
         "kind": kind,
         "memo": memo,
-        "place": read_place(data.get("place")) if kind == "food" else {},
+        "place": read_place(data.get("place")) if kind in prompts.PLACE_KINDS else {},
         "guardrail": bool(data.get("guardrail", False)),
         "evidence_mode": evidence,
     }
@@ -176,10 +177,15 @@ def _generate_events(*, kind, title, keywords, memo, place, guardrail, evidence_
     parts, usage, photo_usage = [], {}, {}
     try:
         if photos and not photo_notes:
-            yield sse("status", {"text": f"사진 {len(photos)}장을 살펴보고 있어요."})
-            raw = llm.ask_vision(prompts.VISION_SYSTEM, prompts.build_photo_analysis_prompt(kind, title, place, len(photos)),
-                                 photos, usage=photo_usage)
-            photo_notes = llm.parse_photo_notes(raw, len(photos))
+            photo_notes = []
+            for start in range(0, len(photos), VISION_BATCH):
+                chunk = photos[start:start + VISION_BATCH]
+                yield sse("status", {"text": f"사진 {start + 1}~{start + len(chunk)}번째를 살펴보고 있어요(총 {len(photos)}장)."})
+                part_usage = {}
+                raw = llm.ask_vision(prompts.VISION_SYSTEM, prompts.build_photo_analysis_prompt(kind, title, place, len(chunk), start + 1),
+                                     chunk, usage=part_usage, start=start + 1)
+                photo_usage = llm.merge_usage(photo_usage, part_usage)
+                photo_notes += llm.parse_photo_notes(raw, len(chunk), start + 1)
         if photo_notes:
             yield sse("photos", {"notes": photo_notes})
         system = prompts.build_system(kind, guardrail, evidence_mode, len(photo_notes or []))

@@ -142,14 +142,14 @@ def merge_usage(a: dict, b: dict) -> dict:
             "output_tokens": a.get("output_tokens", 0) + b.get("output_tokens", 0), "cost_usd": cost}
 
 
-def ask_vision(system: str, text: str, images: list[dict], max_tokens: int = 6000, usage: dict | None = None) -> str:
+def ask_vision(system: str, text: str, images: list[dict], max_tokens: int = 6000, usage: dict | None = None, start: int = 1) -> str:
     """사진(images: [{'media_type','data'(base64)}])을 보고 한 번에 답을 받습니다. 사진마다 '[사진 N]' 표시를 붙입니다."""
     if is_mock():
         if usage is not None:
             usage.update(model="mock", input_tokens=0, output_tokens=0, cost_usd=0.0)
-        return _mock_vision(len(images))
+        return _mock_vision(len(images), start)
     content = []
-    for i, im in enumerate(images, 1):
+    for i, im in enumerate(images, start):
         content.append({"type": "text", "text": f"[사진 {i}]"})
         content.append({"type": "image", "source": {"type": "base64", "media_type": im["media_type"], "data": im["data"]}})
     content.append({"type": "text", "text": text})
@@ -169,8 +169,8 @@ def ask_vision(system: str, text: str, images: list[dict], max_tokens: int = 600
     return out
 
 
-def parse_photo_notes(raw: str, count: int) -> list[dict]:
-    """사진 분석 JSON 을 읽어 1..count 번호별 항목으로 맞춥니다. 읽지 못한 사진은 설명 없는 항목으로 채웁니다."""
+def parse_photo_notes(raw: str, count: int, first: int = 1) -> list[dict]:
+    """사진 분석 JSON 을 읽어 first..first+count-1 번호별 항목으로 맞춥니다. 읽지 못한 사진은 설명 없는 항목으로 채웁니다."""
     import json
     m = re.search(r"\[.*\]", raw, re.S)
     try:
@@ -183,18 +183,18 @@ def parse_photo_notes(raw: str, count: int) -> list[dict]:
             n = int(it.get("n"))
         except (TypeError, ValueError, AttributeError):
             continue
-        if 1 <= n <= count and n not in by_n:
+        if first <= n < first + count and n not in by_n:
             by_n[n] = {"n": n, "category": str(it.get("category") or "기타")[:12], "desc": str(it.get("desc") or "")[:200],
                        "text": str(it.get("text") or "")[:100]}
-    return [by_n.get(n, {"n": n, "category": "기타", "desc": "", "text": ""}) for n in range(1, count + 1)]
+    return [by_n.get(n, {"n": n, "category": "기타", "desc": "", "text": ""}) for n in range(first, first + count)]
 
 
 # ---------- 샘플(MOCK) ----------
-def _mock_vision(count: int) -> str:
+def _mock_vision(count: int, first: int = 1) -> str:
     cats = ["외관", "내부", "음식", "음식", "메뉴판"]
     return "[" + ",".join(
         '{"n": %d, "category": "%s", "desc": "샘플 사진 %d의 모습", "text": ""}' % (i, cats[(i - 1) % len(cats)], i)
-        for i in range(1, count + 1)) + "]"
+        for i in range(first, first + count)) + "]"
 
 def _mock_titles(user: str) -> list[str]:
     m = re.search(r"주제/키워드: (.+)", user)
@@ -213,7 +213,7 @@ def _mock_expand(user: str) -> str:
 
 def _mock_stream(system: str, user: str):
     title = (re.search(r"\[글 제목\]\n(.+)", user) or [None, "샘플"])[1]
-    food = "맛집글" in system
+    food = "맛집글" in system or "호텔·숙소 후기" in system
     kw = (re.search(r"\[핵심 키워드\]\n(.+)", user) or [None, title])[1].split(",")[0].strip()
     memo_m = re.search(r"\[작성자 메모[^\]]*\]\n(.+?)(?:\n\n|$)", user, re.S)
     memo = memo_m.group(1).strip() if memo_m and memo_m.group(1).strip() != "(없음)" else "샘플 메모"

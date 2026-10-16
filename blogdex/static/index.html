@@ -134,10 +134,11 @@
     <div class="chips" id="chips">
       <button class="chip active" data-kind="info">정보글</button>
       <button class="chip" data-kind="food">맛집글</button>
+      <button class="chip" data-kind="hotel">호텔·숙소 후기</button>
     </div>
 
     <div id="foodBox" class="hidden">
-      <label class="cap" for="placeQuery">매장 이름</label>
+      <label class="cap" for="placeQuery" id="placeCap">매장 이름</label>
       <input type="text" id="placeQuery" maxlength="100" placeholder="예) 마포 락희옥" autocomplete="off">
       <div class="row" style="margin-top:8px">
         <input type="text" id="mCategory" placeholder="업종 (예: 돼지고기구이)">
@@ -162,7 +163,7 @@
     <p class="hint" id="memoHint"></p>
     <p class="hint warnhint hidden" id="memoShort"></p>
 
-    <label class="cap" for="fileInput">사진 <small>(선택 · 최대 15장 · 올린 순서가 사진 번호예요)</small></label>
+    <label class="cap" for="fileInput">사진 <small>(선택 · 최대 30장 · 올린 순서가 사진 번호예요)</small></label>
     <div class="photo-actions">
       <button class="btn ghost" id="btnPhotos" type="button">사진 선택</button>
       <button class="btn ghost" id="btnFolder" type="button">폴더 선택</button>
@@ -212,7 +213,8 @@
 <script>
 const $ = (id) => document.getElementById(id);
 const COLORS = ['#e03131', '#1c7ed6', '#d6336c'];
-const KIND_LABEL = { info: '정보글', food: '맛집글' };
+const KIND_LABEL = { info: '정보글', food: '맛집글', hotel: '호텔·숙소 후기' };
+const PLACE_KINDS = ['food', 'hotel'];
 const state = { kind: 'info', titles: [], busy: false, article: null, photos: [], resultPhotos: [], adTerms: [] };  // photos: 입력칸의 사진 / resultPhotos: 결과에 보여 줄 사진(현재 세션에서 생성한 글만)
 
 /* ---------- 글 종류별 화면 ---------- */
@@ -226,27 +228,36 @@ const KIND_UI = {
     titleCap: '제목 또는 키워드', memoCap: '방문 소감·느낀 점 (권장)',
     memoPh: '예) 금요일 저녁 동료 4명과 방문. 항정살 1인분 18,000원, 직원이 불판을 계속 갈아줘서 편했음.\n웨이팅 20분, 주차 불가. 아쉬운 점: 된장찌개가 짰음. 다시 간다면 평일 이른 시간.',
     memoHint: '메뉴·가격·분위기·기분·아쉬운 점을 편하게 적어 주세요. 여기 적은 내용만 후기 경험으로 쓰여요.', guardrail: false,
+    placeCap: '매장 이름', placePh: '예) 마포 락희옥', catPh: '업종 (예: 돼지고기구이)',
+  },
+  hotel: {
+    titleCap: '제목 또는 키워드', memoCap: '투숙 소감·느낀 점 (권장)',
+    memoPh: '예) 4월 주말 1박, 부부와 아이 1명. 오션뷰 디럭스 객실, 침구가 푹신했고 욕실이 넓었음.\n조식 뷔페는 종류가 많았지만 주말이라 붐빔. 수영장은 아이가 좋아함. 아쉬운 점: 주차 대기, 엘리베이터가 느림.',
+    memoHint: '객실·침구·욕실·전망·조식·시설·서비스·아쉬운 점을 편하게 적어 주세요. 여기 적은 내용만 후기 경험으로 쓰여요. 사진은 최대 30장까지 글에 모두 들어가요.', guardrail: false,
+    placeCap: '숙소 이름', placePh: '예) 제주 롯데호텔', catPh: '유형 (예: 5성급 호텔, 리조트)',
   },
 };
+KIND_UI.food.placeCap = '매장 이름';
 
 function setKind(kind) {
   state.kind = kind;
   const ui = KIND_UI[kind];
   document.querySelectorAll('#chips .chip').forEach((b) => b.classList.toggle('active', b.dataset.kind === kind));
-  $('foodBox').classList.toggle('hidden', kind !== 'food');
+  $('foodBox').classList.toggle('hidden', !PLACE_KINDS.includes(kind));
+  if (PLACE_KINDS.includes(kind)) { $('placeCap').textContent = ui.placeCap; $('placeQuery').placeholder = ui.placePh; $('mCategory').placeholder = ui.catPh; }
   $('titleCap').textContent = ui.titleCap; $('memoCap').textContent = ui.memoCap;
   $('memo').placeholder = ui.memoPh; $('memoHint').textContent = ui.memoHint;
   $('guardrail').checked = ui.guardrail;
-  if (kind === 'food') $('evidence').value = 'strict';
+  if (PLACE_KINDS.includes(kind)) $('evidence').value = 'strict';
   updateHints();
 }
 function updateHints() {
   const n = $('memo').value.replace(/\s/g, '').length;
-  const short = state.kind === 'food' && n < 150;
+  const short = PLACE_KINDS.includes(state.kind) && n < 150;
   const el = $('memoShort');
-  el.textContent = short ? `메모가 짧아요(${n}자). 메뉴·가격·맛·분위기·아쉬운 점을 적을수록 글이 풍부해지고, 짧으면 글이 짧아지고 [확인 필요]가 많아져요.` : '';
+  el.textContent = short ? `메모가 짧아요(${n}자). ${state.kind === 'hotel' ? '객실·침구·전망·조식·시설·아쉬운 점' : '메뉴·가격·맛·분위기·아쉬운 점'}을 적을수록 글이 풍부해지고, 짧으면 글이 짧아지고 [확인 필요]가 많아져요.` : '';
   el.classList.toggle('hidden', !short);
-  $('evidenceHint').classList.toggle('hidden', !(state.kind === 'food' && $('evidence').value === 'template'));
+  $('evidenceHint').classList.toggle('hidden', !(PLACE_KINDS.includes(state.kind) && $('evidence').value === 'template'));
 }
 $('memo').addEventListener('input', updateHints);
 $('evidence').addEventListener('change', updateHints);
@@ -460,7 +471,7 @@ function showArticle(art) {
 
 /* ---------- 매장 검색 ---------- */
 function currentPlace() {
-  if (state.kind !== 'food') return null;
+  if (!PLACE_KINDS.includes(state.kind)) return null;
   const name = $('placeQuery').value.trim();
   return name ? { name, category: $('mCategory').value.trim(), address: $('mAddress').value.trim(), phone: '' } : null;
 }
@@ -490,12 +501,12 @@ $('btnTitles').onclick = () => makeTitles(false);
 $('btnRegen').onclick = () => makeTitles(true);
 
 /* ---------- 사진 ---------- */
-const MAX_PHOTOS = 15;
-function loadResized(file) {
+const MAX_PHOTOS = 30;
+function loadResized(file, maxEdge = 1280) {
   return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(file); const img = new Image();
     img.onload = () => {
-      const k = Math.min(1, 1280 / Math.max(img.width, img.height));
+      const k = Math.min(1, maxEdge / Math.max(img.width, img.height));
       const c = document.createElement('canvas'); c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
       const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); g.drawImage(img, 0, 0, c.width, c.height);
       URL.revokeObjectURL(url); resolve({ url: c.toDataURL('image/jpeg', 0.82), name: file.name });
@@ -511,7 +522,8 @@ async function addPhotos(fileList, sort) {
   if (!files.length) { photoMsg('이미지 파일이 없어요. JPG, PNG, WEBP 사진을 올려 주세요.'); return; }
   const room = MAX_PHOTOS - state.photos.length; const skipped = files.length - Math.min(files.length, room);
   files = files.slice(0, Math.max(0, room)); const bad = [];
-  for (const f of files) { try { state.photos.push(await loadResized(f)); } catch { bad.push(f.name); } }
+  const edge = state.photos.length + files.length > 12 ? 1024 : 1280;  // 사진이 많으면 조금 더 줄여 전송량·분석 비용을 아낀다
+  for (const f of files) { try { state.photos.push(await loadResized(f, edge)); } catch { bad.push(f.name); } }
   photoMsg([skipped ? `최대 ${MAX_PHOTOS}장이라 ${skipped}장은 뺐어요.` : '', bad.length ? `읽지 못한 사진: ${bad.join(', ')} (HEIC는 JPG로 바꿔 주세요)` : ''].filter(Boolean).join(' '));
   renderPhotos();
 }

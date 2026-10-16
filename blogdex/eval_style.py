@@ -110,7 +110,7 @@ def evaluate(kind: str, body: str, keywords: list[str], memo: str = "", title: s
         formal = ends.count("formal") / len(ends)
         casual = (ends.count("polite") + ends.count("colloquial")) / len(ends)
         first_p = sum(bool(FIRST_PERSON_RE.match(s)) for s in sents) / len(sents)
-        if kind == "food":
+        if kind in ("food", "hotel"):
             checks.append(_check("endings", "말투 섞임(합니다체 / 해요·구어)", f"{formal:.0%} / {casual:.0%}", "합니다체 30~70%", 0.30 <= formal <= 0.70 and casual >= 0.20,
                                  "합니다체를 약 50%, 해요체와 구어 어미(~더라고요, ~거든요, ~잖아요)를 약 50% 섞을 것"))
             checks.append(_check("first_person", "'저는'으로 시작하는 문장", f"{first_p:.0%}", "35% 이하", first_p <= 0.35,
@@ -138,7 +138,7 @@ def evaluate(kind: str, body: str, keywords: list[str], memo: str = "", title: s
                          "해시태그를 핵심 키워드 중심으로 5~10개, 중복 없이 맞출 것"))
 
     # 8) 분량
-    lo, hi = (1900, 2700) if kind == "food" else (2000, 3200)
+    lo, hi = {"food": (1900, 2700), "hotel": (2400, 3400)}.get(kind, (2000, 3200))
     n = count_chars(body)
     checks.append(_check("length", "분량(공백 제외)", f"{n:,}자", f"{lo:,}~{hi:,}자", lo <= n <= hi,
                          "분량을 %s~%s자로 맞출 것(현재 %s자)" % (f"{lo:,}", f"{hi:,}", f"{n:,}")))

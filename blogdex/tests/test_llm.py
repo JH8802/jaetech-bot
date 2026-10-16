@@ -84,6 +84,13 @@ class PhotoNotesTests(unittest.TestCase):
         self.assertEqual(notes[1]["desc"], "삼겹살")
         self.assertEqual(notes[0]["desc"], "")  # 읽지 못한 사진은 빈 항목
 
+    def test_parse_with_offset_for_batches(self):
+        raw = '[{"n": 11, "category": "객실", "desc": "침대"}, {"n": 12, "desc": "욕실"}, {"n": 3, "desc": "범위 밖"}]'
+        notes = llm.parse_photo_notes(raw, 3, first=11)
+        self.assertEqual([n["n"] for n in notes], [11, 12, 13])
+        self.assertEqual(notes[0]["desc"], "침대")
+        self.assertEqual(notes[2]["desc"], "")
+
     def test_parse_garbage_gives_empty_notes(self):
         self.assertEqual(len(llm.parse_photo_notes("JSON 아님", 2)), 2)
 

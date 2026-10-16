@@ -224,12 +224,12 @@ def finalize(kind: str, raw: str, place: dict | None, keywords: list[str], title
 
     paras = split_paragraphs(body)
     must = []
-    if kind == "food" and place and place.get("name"):
+    if kind in ("food", "hotel") and place and place.get("name"):
         name = place["name"].strip()
         must = [name.replace(" ", ""), name.split()[0]]
         region = region_of(place)
         if region:
-            must.append(f"{region}맛집")  # 상호 + 지역 태그는 빠지면 코드가 넣음(설계서 §4.6)
+            must.append(f"{region}{'호텔' if kind == 'hotel' else '맛집'}")  # 상호 + 지역 태그는 빠지면 코드가 넣음(설계서 §4.6)
         must += [k.replace(" ", "") for k in keywords[:2]]
     elif keywords:
         must = [k.replace(" ", "") for k in keywords[:3]]
@@ -244,6 +244,6 @@ def finalize(kind: str, raw: str, place: dict | None, keywords: list[str], title
             notes.append(f"해시태그가 {n_tags}개예요(권장 {MIN_HASHTAGS}~{MAX_HASHTAGS}개).")
     body = "\n\n".join(paras)
 
-    if kind == "food":
+    if kind in ("food", "hotel"):
         body = insert_map_line(body, (place or {}).get("name", ""))
     return {"body": body, "chars": count_chars(body), "notes": notes}

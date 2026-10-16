@@ -130,7 +130,7 @@ class ApiTests(unittest.TestCase):
 
     def test_photo_validation(self):
         self.assertEqual(self._stream(photos=["not-a-data-url"])[0].status_code, 400)
-        self.assertEqual(self._stream(photos=[self.PIXEL] * 16)[0].status_code, 400)
+        self.assertEqual(self._stream(photos=[self.PIXEL] * 31)[0].status_code, 400)
         self.assertEqual(self._stream(photos=["data:application/pdf;base64,AAAA"])[0].status_code, 400)
 
     def test_system_prompt_photo_rules(self):
@@ -189,6 +189,38 @@ class ApiTests(unittest.TestCase):
             self.assertGreaterEqual(len(tags), 5)
             self.assertIn("#놉스사당점", tags[:4])          # 핵심 키워드 태그가 앞쪽
             self.assertEqual(len(tags), len(set(tags)))
+
+    def test_thirty_photos_analyzed_in_batches_and_all_placed(self):
+        _, events = self._stream(photos=[self.PIXEL] * 30)
+        kinds = [e for e, _ in events]
+        statuses = [d["text"] for e, d in events if e == "status"]
+        self.assertTrue(any("1~10번째" in t for t in statuses) and any("21~30번째" in t for t in statuses))  # 10장씩 3번
+        done = dict(events)["done"]
+        self.assertEqual([n["n"] for n in done["photos"]], list(range(1, 31)))
+        marks = [int(p[3:-1]) for p in done["body"].split("\n\n") if p.startswith("<사진")]
+        self.assertEqual(sorted(marks), list(range(1, 31)))  # 30장 모두 글에 들어감
+        self.assertIn("photos", kinds)
+
+    def test_hotel_kind_pipeline(self):
+        _, events = self._stream(kind="hotel", title="제주 호텔 투숙 후기", keywords=["제주 롯데호텔"],
+                                 place={"name": "제주 롯데호텔", "category": "5성급 호텔", "address": "제주특별자치도 서귀포시 중문관광로 72번길 35"},
+                                 photos=[self.PIXEL] * 3, memo="오션뷰 객실이 좋았음. 조식은 붐볐음. " * 8)
+        done = dict(events)["done"]
+        self.assertIn("(플레이스 지도 삽입:", done["body"])
+        tags = done["body"].split("\n\n")[-1].split()
+        self.assertTrue(5 <= len(tags) <= 10)
+        self.assertIn("#제주롯데호텔", tags[:4])
+        self.assertEqual(self.c.get(f"/api/articles/{done['article_id']}").get_json()["article"]["kind"], "hotel")
+
+    def test_hotel_system_prompt_and_categories(self):
+        import prompts
+        sysmsg = prompts.build_system("hotel", False, "strict", 30)
+        self.assertIn("호텔·숙소 후기", sysmsg)
+        self.assertIn("객실", sysmsg)
+        self.assertIn("30장이면 섹션당 6~8장", sysmsg)
+        self.assertIn("2~3장까지 연달아", sysmsg)            # 갤러리형 연속 사진 허용
+        self.assertNotIn("주문한 메뉴", prompts.KIND_SPECS["hotel"])
+        self.assertIn("객실", prompts.PHOTO_CATEGORIES["hotel"])
 
     def test_short_food_with_photos_gets_one_expansion_pass(self):
         _, events = self._stream(photos=[self.PIXEL, self.PIXEL])
