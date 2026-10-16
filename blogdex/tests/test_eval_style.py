@@ -5,7 +5,7 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import eval_style as ev  # noqa: E402
 
-TAGS = "#" + " #".join(f"태그{i}" for i in range(29))
+TAGS = "#" + " #".join(f"태그{i}" for i in range(8))
 
 
 def body(paragraphs):
@@ -71,6 +71,30 @@ class PromptTests(unittest.TestCase):
         for kind in ("info", "food"):
             for mode in ("strict", "template"):
                 self.assertIn("자기 사정", prompts.build_system(kind, False, mode))
+
+
+class NewRuleTests(unittest.TestCase):
+    def test_hashtag_range_is_five_to_ten(self):
+        def n_tags(n):
+            tags = " ".join(f"#태그{i}" for i in range(n))
+            res = ev.evaluate("info", "본문입니다.\n\n" + tags, ["본문"])
+            return next(c for c in res["checks"] if c["key"] == "hashtags")["ok"]
+        self.assertFalse(n_tags(4))
+        self.assertTrue(n_tags(5))
+        self.assertTrue(n_tags(10))
+        self.assertFalse(n_tags(11))
+
+    def test_keyword_density_needs_at_least_four_per_thousand(self):
+        filler = "정보를 전달하는 보통 길이의 문장이라서 읽는 흐름을 자연스럽게 이어 주는 역할을 합니다. " * 12
+        low = ev.evaluate("info", body([filler + "놉스가 있습니다."] * 3), ["놉스"])
+        high = ev.evaluate("info", body([filler + "놉스 놉스 놉스 놉스 매장입니다."] * 3), ["놉스"])
+        self.assertFalse(next(c for c in low["checks"] if c["key"] == "kw_density")["ok"])
+        self.assertTrue(next(c for c in high["checks"] if c["key"] == "kw_density")["ok"])
+
+    def test_info_endings_accept_mixed_tone(self):
+        mixed = "이 부분은 꼭 확인해야 합니다. 저는 이렇게 하고 있어요. 순서는 이렇습니다. 어렵지 않더라고요."
+        res = ev.evaluate("info", body([mixed] * 4), ["부분"])
+        self.assertTrue(next(c for c in res["checks"] if c["key"] == "endings")["ok"])
 
 
 class AdCheckTests(unittest.TestCase):
