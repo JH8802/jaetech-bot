@@ -32,6 +32,15 @@ CREATE TABLE IF NOT EXISTS articles (
 """
 
 
+SETTINGS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+"""
+
+
 def db_path() -> Path:
     return Path(os.getenv("BLOGDEX_DB", str(DEFAULT_DB)))
 
@@ -42,6 +51,7 @@ def _connect() -> sqlite3.Connection:
     con = sqlite3.connect(path)
     con.row_factory = sqlite3.Row
     con.execute(SCHEMA)
+    con.execute(SETTINGS_SCHEMA)
     return con
 
 
@@ -83,6 +93,21 @@ def update_body(article_id: int, body: str, chars: int, quality: dict) -> bool:
     with closing(_connect()) as con, con:
         return con.execute("UPDATE articles SET body=?, chars=?, quality_json=? WHERE id=?",
                            (body, chars, json.dumps(quality, ensure_ascii=False), article_id)).rowcount > 0
+
+
+def get_setting(key: str, default: str = "") -> tuple[str, str]:
+    """설정값과 마지막 수정 시각을 돌려줍니다. 없으면 (default, '')."""
+    with closing(_connect()) as con:
+        r = con.execute("SELECT value, updated_at FROM settings WHERE key=?", (key,)).fetchone()
+        return (r["value"], r["updated_at"]) if r else (default, "")
+
+
+def set_setting(key: str, value: str) -> str:
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with closing(_connect()) as con, con:
+        con.execute("INSERT INTO settings (key, value, updated_at) VALUES (?,?,?) "
+                    "ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at", (key, value, now))
+    return now
 
 
 def delete_articles(ids: list[int]) -> int:

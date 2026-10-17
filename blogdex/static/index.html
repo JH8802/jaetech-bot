@@ -84,6 +84,9 @@
   .qdetail .tag { display: inline-block; font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 6px; margin-right: 6px; background: #ffe8cc; color: #b35c00; }
   .qdetail .tag.high { background: #ffe3e3; color: #c92a2a; } .qdetail .tag.soft { background: #f1f3f5; color: #6b7280; }
   .qdetail .note { margin: 8px 0 0; color: var(--sub); }
+  .stylecard { padding: 14px 24px; margin-bottom: 16px; }
+  .stylecard summary { cursor: pointer; font-size: 14px; }
+  .stylecard textarea { margin-top: 6px; }
   .hidden { display: none !important; }
 
   /* 결과 */
@@ -127,6 +130,16 @@
 
 <main>
 <section id="viewWrite">
+  <details class="card stylecard" id="styleCard">
+    <summary><b>내 말투 샘플</b> <span class="hint" style="margin:0 0 0 8px" id="styleSummary">모든 글(정보글·맛집글·호텔 후기)에 적용돼요</span></summary>
+    <p class="hint">내가 평소 쓰는 말투·어투를 적어 두면 모든 글에 반영돼요. 실제로 쓴 문장 몇 개, 말버릇, 컨셉 설명(예: "30대 직장인 부부, 담백하고 솔직하게, 가끔 가벼운 농담")을 자유롭게 적으세요. 언제든 고쳐서 [저장]하면 다음 글부터 바로 적용돼요. 샘플 속 내용(사건·장소)은 글에 가져오지 않고 말투만 따라 해요.</p>
+    <textarea id="styleSample" maxlength="3000" style="min-height:130px" placeholder="예) 솔직히 처음엔 반신반의했는데, 막상 먹어 보니 이게 은근히 괜찮더라고요.&#10;가격은 살짝 아쉽지만 그래도 기분 좋게 먹었습니다. 다음엔 아내랑 딸 데리고 와 보려고요.&#10;(말버릇: '솔직히', '은근히', 문장 끝은 ~더라고요 / ~입니다를 섞어요)"></textarea>
+    <div class="row" style="margin-top:8px;align-items:center">
+      <button class="btn" id="btnStyleSave" type="button" style="height:36px">저장</button>
+      <span class="hint" id="styleStatus" style="margin:0"></span>
+    </div>
+  </details>
+
   <div class="card">
     <h2>새 원고 만들기</h2>
 
@@ -649,6 +662,31 @@ document.addEventListener('keydown', (e) => {
 });
 
 setKind('info');
+/* ---------- 내 말투 샘플 ---------- */
+async function loadStyle() {
+  try {
+    const d = await api('/api/style');
+    $('styleSample').value = d.style_sample || '';
+    renderStyleStatus(d.style_sample, d.updated_at);
+  } catch (e) { /* 서버가 아직 준비 안 됐거나 옛 서버면 조용히 무시 */ }
+}
+function renderStyleStatus(text, updated) {
+  const n = (text || '').length;
+  $('styleStatus').textContent = n ? `저장됨 · ${n.toLocaleString()}자${updated ? ' · ' + updated : ''}` : '아직 비어 있어요(기본 말투 컨셉만 적용)';
+  $('styleSummary').textContent = n ? `적용 중 (${n.toLocaleString()}자) — 모든 글에 반영돼요` : '모든 글(정보글·맛집글·호텔 후기)에 적용돼요';
+}
+$('btnStyleSave').onclick = async () => {
+  $('btnStyleSave').disabled = true;
+  try {
+    const res = await fetch('/api/style', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ style_sample: $('styleSample').value }) });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(d.error || '저장하지 못했어요.');
+    $('styleSample').value = d.style_sample; renderStyleStatus(d.style_sample, d.updated_at);
+  } catch (e) { $('styleStatus').textContent = e.message; }
+  $('btnStyleSave').disabled = false;
+};
+loadStyle();
+
 fetch('/api/version').then((r) => r.json()).then((d) => { $('ver').textContent = '버전 ' + d.version; }).catch(() => {});
 </script>
 </body>
