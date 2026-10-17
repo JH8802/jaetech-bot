@@ -215,7 +215,7 @@ def _mock_expand(user: str) -> str:
 
 def _mock_stream(system: str, user: str):
     title = (re.search(r"\[글 제목\]\n(.+)", user) or [None, "샘플"])[1]
-    food = "맛집글" in system or "호텔·숙소 후기" in system
+    food = "맛집글" in system or "호텔·여행 후기" in system
     kw = (re.search(r"\[핵심 키워드\]\n(.+)", user) or [None, title])[1].split(",")[0].strip()
     memo_m = re.search(r"\[작성자 메모[^\]]*\]\n(.+?)(?:\n\n|$)", user, re.S)
     memo = memo_m.group(1).strip() if memo_m and memo_m.group(1).strip() != "(없음)" else "샘플 메모"
