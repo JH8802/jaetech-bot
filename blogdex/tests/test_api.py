@@ -128,6 +128,23 @@ class ApiTests(unittest.TestCase):
         self.assertNotIn("photos", [e for e, _ in events])
         self.assertNotIn("<사진", dict(events)["done"]["body"])
 
+    def test_photo_limits_per_kind(self):
+        ok = lambda kind, n: self._stream(kind=kind, place={} if kind == "info" else {"name": "테스트"}, photos=[self.PIXEL] * n)[0].status_code
+        self.assertEqual(ok("info", 20), 200)
+        self.assertEqual(ok("info", 21), 400)
+        self.assertEqual(ok("food", 20), 200)
+        self.assertEqual(ok("food", 21), 400)
+        self.assertEqual(ok("hotel", 30), 200)
+        self.assertEqual(ok("hotel", 31), 400)
+        r, _ = self._stream(kind="food", photos=[self.PIXEL] * 21)
+        self.assertIn("최대 20장", r.get_json()["error"])
+
+    def test_travel_review_is_covered_by_hotel_kind(self):
+        import prompts
+        self.assertIn("관광지·체험", prompts.PHOTO_CATEGORIES["hotel"])
+        self.assertIn("가는 길·교통·주차·입장", prompts.KIND_SPECS["hotel"])
+        self.assertEqual(prompts.KINDS["hotel"]["label"], "호텔·여행 후기")
+
     def test_photo_validation(self):
         self.assertEqual(self._stream(photos=["not-a-data-url"])[0].status_code, 400)
         self.assertEqual(self._stream(photos=[self.PIXEL] * 31)[0].status_code, 400)
@@ -191,7 +208,7 @@ class ApiTests(unittest.TestCase):
             self.assertEqual(len(tags), len(set(tags)))
 
     def test_thirty_photos_analyzed_in_batches_and_all_placed(self):
-        _, events = self._stream(photos=[self.PIXEL] * 30)
+        _, events = self._stream(kind="hotel", place={"name": "테스트 호텔"}, photos=[self.PIXEL] * 30)
         kinds = [e for e, _ in events]
         statuses = [d["text"] for e, d in events if e == "status"]
         self.assertTrue(any("1~10번째" in t for t in statuses) and any("21~30번째" in t for t in statuses))  # 10장씩 3번
@@ -276,7 +293,8 @@ class ApiTests(unittest.TestCase):
     def test_hotel_system_prompt_and_categories(self):
         import prompts
         sysmsg = prompts.build_system("hotel", False, "strict", 30)
-        self.assertIn("호텔·숙소 후기", sysmsg)
+        self.assertIn("호텔·여행 후기", sysmsg)
+        self.assertIn("여행·나들이 후기 구성", sysmsg)
         self.assertIn("객실", sysmsg)
         self.assertIn("30장이면 섹션당 6~8장", sysmsg)
         self.assertIn("2~3장까지 연달아", sysmsg)            # 갤러리형 연속 사진 허용

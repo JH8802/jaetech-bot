@@ -28,7 +28,8 @@ EVIDENCE_MODES = {"strict", "template"}
 
 app = Flask(__name__, static_folder="static", static_url_path="/static")
 app.config["MAX_CONTENT_LENGTH"] = 40 * 1024 * 1024  # 사진 최대 30장(브라우저에서 줄인 JPEG) + 본문
-MAX_PHOTOS = 30
+MAX_PHOTOS = 30  # 가장 큰 한도(요청 크기 계산용)
+PHOTO_LIMITS = {"info": 20, "food": 20, "hotel": 30}  # 글 종류별 사진 한도
 VISION_BATCH = 10  # 사진 분석은 10장씩 나누어 호출(출력이 잘리거나 오래 걸리는 것을 막음)
 MAX_PHOTO_BYTES = 3 * 1024 * 1024
 PHOTO_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
@@ -111,13 +112,14 @@ def read_common(data: dict) -> dict:
     }
 
 
-def read_photos(data: dict) -> list[dict]:
+def read_photos(data: dict, kind: str = "food") -> list[dict]:
     """브라우저가 줄여서 보낸 사진(data URL)을 읽어 [{'media_type','data'}] 로 돌려줍니다."""
     raw = data.get("photos") or []
     if not isinstance(raw, list):
         raise ValueError("사진 형식이 올바르지 않아요.")
-    if len(raw) > MAX_PHOTOS:
-        raise ValueError(f"사진은 최대 {MAX_PHOTOS}장까지 올릴 수 있어요.")
+    limit = PHOTO_LIMITS.get(kind, 20)
+    if len(raw) > limit:
+        raise ValueError(f"{prompts.KINDS[kind]['label']}은 사진을 최대 {limit}장까지 올릴 수 있어요. ({len(raw)}장 선택됨)")
     out = []
     for i, item in enumerate(raw, 1):
         m = re.match(r"^data:([\w/+.-]+);base64,([A-Za-z0-9+/=\s]+)$", item if isinstance(item, str) else "")
@@ -260,7 +262,7 @@ def article_stream():
     keywords = [str(k).strip()[:40] for k in (data.get("keywords") or []) if str(k).strip()][:MAX_KEYWORDS]
     if not keywords:
         keywords = prompts.derive_keywords(c["kind"], title, c["place"])
-    photos = read_photos(data)
+    photos = read_photos(data, c["kind"])
     return sse_response(_generate_events(
         kind=c["kind"], title=title, keywords=keywords, memo=c["memo"], place=c["place"],
         guardrail=c["guardrail"], evidence_mode=c["evidence_mode"], photos=photos,

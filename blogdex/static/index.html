@@ -147,7 +147,7 @@
     <div class="chips" id="chips">
       <button class="chip active" data-kind="info">정보글</button>
       <button class="chip" data-kind="food">맛집글</button>
-      <button class="chip" data-kind="hotel">호텔·숙소 후기</button>
+      <button class="chip" data-kind="hotel">호텔·여행 후기</button>
     </div>
 
     <div id="foodBox" class="hidden">
@@ -176,7 +176,7 @@
     <p class="hint" id="memoHint"></p>
     <p class="hint warnhint hidden" id="memoShort"></p>
 
-    <label class="cap" for="fileInput">사진 <small>(선택 · 최대 30장 · 올린 순서가 사진 번호예요)</small></label>
+    <label class="cap" for="fileInput">사진 <small>(선택 · 최대 <span id="photoLimit">20</span>장 · 올린 순서가 사진 번호예요)</small></label>
     <div class="photo-actions">
       <button class="btn ghost" id="btnPhotos" type="button">사진 선택</button>
       <button class="btn ghost" id="btnFolder" type="button">폴더 선택</button>
@@ -226,7 +226,7 @@
 <script>
 const $ = (id) => document.getElementById(id);
 const COLORS = ['#e03131', '#1c7ed6', '#d6336c'];
-const KIND_LABEL = { info: '정보글', food: '맛집글', hotel: '호텔·숙소 후기' };
+const KIND_LABEL = { info: '정보글', food: '맛집글', hotel: '호텔·여행 후기' };
 const PLACE_KINDS = ['food', 'hotel'];
 const state = { kind: 'info', titles: [], busy: false, article: null, photos: [], resultPhotos: [], adTerms: [] };  // photos: 입력칸의 사진 / resultPhotos: 결과에 보여 줄 사진(현재 세션에서 생성한 글만)
 
@@ -244,10 +244,10 @@ const KIND_UI = {
     placeCap: '매장 이름', placePh: '예) 마포 락희옥', catPh: '업종 (예: 돼지고기구이)',
   },
   hotel: {
-    titleCap: '제목 또는 키워드', memoCap: '투숙 소감·느낀 점 (권장)',
-    memoPh: '예) 4월 주말 1박, 부부와 아이 1명. 오션뷰 디럭스 객실, 침구가 푹신했고 욕실이 넓었음.\n조식 뷔페는 종류가 많았지만 주말이라 붐빔. 수영장은 아이가 좋아함. 아쉬운 점: 주차 대기, 엘리베이터가 느림.',
-    memoHint: '객실·침구·욕실·전망·조식·시설·서비스·아쉬운 점을 편하게 적어 주세요. 여기 적은 내용만 후기 경험으로 쓰여요. 사진은 최대 30장까지 글에 모두 들어가요.', guardrail: false,
-    placeCap: '숙소 이름', placePh: '예) 제주 롯데호텔', catPh: '유형 (예: 5성급 호텔, 리조트)',
+    titleCap: '제목 또는 키워드', memoCap: '투숙·여행 소감·느낀 점 (권장)',
+    memoPh: '예) (숙소) 4월 주말 1박, 부부와 아이 1명. 오션뷰 디럭스 객실, 침구가 푹신했고 욕실이 넓었음.\n조식 뷔페는 종류가 많았지만 주말이라 붐빔. 수영장은 아이가 좋아함. 아쉬운 점: 주차 대기, 엘리베이터가 느림.',
+    memoHint: '객실·침구·욕실·전망·조식·시설·서비스·아쉬운 점을 편하게 적어 주세요. 여기 적은 내용만 후기 경험으로 쓰여요. 사진은 최대 30장까지 글에 모두 들어가요. 숙소 후기와 여행·나들이 후기 모두 쓸 수 있어요.', guardrail: false,
+    placeCap: '숙소 또는 장소 이름', placePh: '예) 제주 롯데호텔 / 제주 올레길', catPh: '유형 (예: 5성급 호텔, 리조트, 관광지)',
   },
 };
 KIND_UI.food.placeCap = '매장 이름';
@@ -262,6 +262,7 @@ function setKind(kind) {
   $('memo').placeholder = ui.memoPh; $('memoHint').textContent = ui.memoHint;
   $('guardrail').checked = ui.guardrail;
   if (PLACE_KINDS.includes(kind)) $('evidence').value = 'strict';
+  $('photoLimit').textContent = photoLimit();
   updateHints();
 }
 function updateHints() {
@@ -514,7 +515,8 @@ $('btnTitles').onclick = () => makeTitles(false);
 $('btnRegen').onclick = () => makeTitles(true);
 
 /* ---------- 사진 ---------- */
-const MAX_PHOTOS = 30;
+const PHOTO_LIMITS = { info: 20, food: 20, hotel: 30 };  // 글 종류별 사진 한도(서버와 같게)
+const photoLimit = () => PHOTO_LIMITS[state.kind] || 20;
 function loadResized(file, maxEdge = 1280) {
   return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(file); const img = new Image();
@@ -533,11 +535,11 @@ async function addPhotos(fileList, sort) {
   let files = [...fileList].filter((f) => /^image\//.test(f.type) || /\.(jpe?g|png|webp|gif)$/i.test(f.name));
   if (sort) files.sort(natural);
   if (!files.length) { photoMsg('이미지 파일이 없어요. JPG, PNG, WEBP 사진을 올려 주세요.'); return; }
-  const room = MAX_PHOTOS - state.photos.length; const skipped = files.length - Math.min(files.length, room);
+  const room = photoLimit() - state.photos.length; const skipped = files.length - Math.min(files.length, room);
   files = files.slice(0, Math.max(0, room)); const bad = [];
   const edge = state.photos.length + files.length > 12 ? 1024 : 1280;  // 사진이 많으면 조금 더 줄여 전송량·분석 비용을 아낀다
   for (const f of files) { try { state.photos.push(await loadResized(f, edge)); } catch { bad.push(f.name); } }
-  photoMsg([skipped ? `최대 ${MAX_PHOTOS}장이라 ${skipped}장은 뺐어요.` : '', bad.length ? `읽지 못한 사진: ${bad.join(', ')} (HEIC는 JPG로 바꿔 주세요)` : ''].filter(Boolean).join(' '));
+  photoMsg([skipped ? `이 글 종류는 최대 ${photoLimit()}장이라 ${skipped}장은 뺐어요.` : '', bad.length ? `읽지 못한 사진: ${bad.join(', ')} (HEIC는 JPG로 바꿔 주세요)` : ''].filter(Boolean).join(' '));
   renderPhotos();
 }
 function photoMsg(m) { showError(m || ''); $('photoCount').textContent = state.photos.length ? `${state.photos.length}장` : ''; }
@@ -592,6 +594,7 @@ async function runStream(url, body) {
 
 $('btnWrite').onclick = () => {
   if (state.busy) return;
+  if (state.photos.length > photoLimit()) { showError(`이 글 종류는 사진을 최대 ${photoLimit()}장까지 올릴 수 있어요. ${state.photos.length - photoLimit()}장을 빼거나 글 종류를 바꿔 주세요.`); return; }
   state.resultPhotos = [...state.photos];
   runStream('/api/articles/stream', { ...commonBody(), title: $('title').value.trim(), keywords: keywordList(), photos: state.photos.map((p) => p.url) });
 };
