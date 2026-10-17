@@ -141,6 +141,22 @@ def version():
     return jsonify(version=APP_VERSION)
 
 
+@app.get("/api/style")
+def style_get():
+    text, updated = storage.get_setting("style_sample")
+    return jsonify(style_sample=text, updated_at=updated, max_chars=prompts.MAX_STYLE_SAMPLE)
+
+
+@app.put("/api/style")
+def style_put():
+    """내 말투 샘플을 저장합니다. 모든 글 종류의 생성·보강·다시 쓰기에 적용되고 언제든 고칠 수 있습니다."""
+    text = str((request.get_json(silent=True) or {}).get("style_sample", "")).replace("\r\n", "\n").strip()
+    if len(text) > prompts.MAX_STYLE_SAMPLE:
+        raise ValueError(f"말투 샘플은 {prompts.MAX_STYLE_SAMPLE:,}자 이내로 적어 주세요.")
+    updated = storage.set_setting("style_sample", text)
+    return jsonify(style_sample=text, updated_at=updated)
+
+
 @app.get("/favicon.ico")
 def favicon():
     return "", 204
@@ -188,7 +204,8 @@ def _generate_events(*, kind, title, keywords, memo, place, guardrail, evidence_
                 photo_notes += llm.parse_photo_notes(raw, len(chunk), start + 1)
         if photo_notes:
             yield sse("photos", {"notes": photo_notes})
-        system = prompts.build_system(kind, guardrail, evidence_mode, len(photo_notes or []))
+        system = prompts.build_system(kind, guardrail, evidence_mode, len(photo_notes or []),
+                                      style_sample=storage.get_setting("style_sample")[0])
         user_prompt = build_prompt(photo_notes)
         yield sse("status", {"text": "원고를 쓰고 있어요."})
         for chunk in llm.stream_text(system, user_prompt, max_tokens=16000, usage=usage):
