@@ -117,6 +117,15 @@ def scan_seo(meta, platform, target_keyword=""):
     if title_len > 35:
         issues.append(f"제목 {title_len}자 — 검색결과에서 뒷부분이 잘릴 수 있음 (30자 안팎 권장)")
 
+    tags = [t.strip() for t in re.split(r"[,，]", meta.get("tags", "")) if t.strip()]
+    if not 3 <= len(tags) <= 10:
+        issues.append(f"태그 {len(tags)}개 — 5~7개 권장")
+    flat_tags = [t.replace(" ", "").lower() for t in tags]
+    if len(set(flat_tags)) < len(flat_tags):
+        issues.append("중복된 태그가 있음")
+    if target_keyword and tags and not any(has_keyword(t, target_keyword) for t in tags):
+        issues.append(f"태그에 타깃 키워드 '{target_keyword}'가 없음 (첫 태그로 넣는 걸 권장)")
+
     if is_google:
         if not 3 <= len(subheadings) <= 5:
             issues.append(f"소제목 {len(subheadings)}개 — 구글용 글은 3~5개 권장")
