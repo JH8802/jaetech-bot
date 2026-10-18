@@ -123,6 +123,13 @@ class ApiTests(unittest.TestCase):
         # 재작성에도 같은 사진 정보가 쓰이고 마커가 유지된다
         self.assertEqual(self.c.get(f"/api/articles/{done['article_id']}").get_json()["article"]["options"]["photos"], done["photos"])
 
+    def test_photo_file_names_are_saved_with_notes(self):
+        _, events = self._stream(photos=[self.PIXEL, self.PIXEL], photo_names=["IMG_0101.jpg", "IMG_0102.jpg"])
+        done = dict(events)["done"]
+        self.assertEqual([n["name"] for n in done["photos"]], ["IMG_0101.jpg", "IMG_0102.jpg"])
+        saved = self.c.get(f"/api/articles/{done['article_id']}").get_json()["article"]["options"]["photos"]
+        self.assertEqual([n["name"] for n in saved], ["IMG_0101.jpg", "IMG_0102.jpg"])
+
     def test_no_photos_means_no_photo_markers(self):
         _, events = self._stream()
         self.assertNotIn("photos", [e for e, _ in events])
