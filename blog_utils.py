@@ -14,6 +14,34 @@ def extract_text(message):
     return ""
 
 
+def create_text(client, **kwargs):
+    """client.messages.create()를 호출하고 텍스트만 돌려준다 — 글이 비었거나
+    중간에 끊기면(stop_reason == "max_tokens") 생각(thinking)을 줄여서 1번 재시도하고,
+    그래도 안 되면 이유를 담아 RuntimeError를 낸다.
+
+    Sonnet은 답을 쓰기 전에 '생각'에 토큰을 쓰는데, 입력이 길면 이게 max_tokens를
+    다 써버려서 본문이 0자로 오는 경우가 있다. (예전엔 이걸 조용히 빈 글로 넘겼음)
+    """
+    message = client.messages.create(**kwargs)
+    text = extract_text(message).strip()
+
+    if message.stop_reason != "refusal" and (message.stop_reason == "max_tokens" or not text):
+        retry = dict(kwargs)
+        body = dict(retry.get("extra_body") or {})
+        body["output_config"] = {"effort": "low"}  # 생각 최소화 (구버전 SDK도 받도록 extra_body로)
+        retry["extra_body"] = body
+        message = client.messages.create(**retry)
+        text = extract_text(message).strip()
+
+    if message.stop_reason == "refusal":
+        raise RuntimeError("Claude가 이 요청을 거절했어 (안전 필터). 주제나 입력 내용을 조금 바꿔서 다시 시도해봐.")
+    if message.stop_reason == "max_tokens":
+        raise RuntimeError("글이 길이 제한에 걸려 중간에 끊겼어. 입력(사실/출처)을 조금 줄이거나 다시 눌러봐.")
+    if not text:
+        raise RuntimeError(f"Claude가 빈 응답을 돌려줬어 (stop_reason={message.stop_reason}). 다시 눌러봐.")
+    return text
+
+
 METADATA_TAGS = {
     "[제목]": "title",
     "[카테고리]": "category",
