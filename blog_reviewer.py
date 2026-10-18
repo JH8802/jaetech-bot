@@ -179,7 +179,8 @@ def review_draft(draft):
     try:
         message = client.messages.create(
             model="claude-haiku-5-5",
-            max_tokens=600,
+            max_tokens=2000,
+            extra_body={"output_config": {"effort": "low"}},
             messages=[{"role": "user", "content": prompt}]
         )
         result = extract_text(message).strip()

@@ -1,6 +1,6 @@
 import anthropic
 from blog_style_guide import STYLE_GUIDE
-from blog_utils import extract_text
+from blog_utils import extract_text, create_text
 from datetime import datetime
 from dotenv import load_dotenv
 import os
@@ -167,13 +167,13 @@ def draft_post(topic, key_points, personal_take="", platform="네이버 블로�
 {links_rule}6. 맨 마지막 줄에 [태그] 관련 키워드 3~5개를 쉼표로 구분해서
    (# 기호 없이, 예: 유산균, 건강기능식품, 표시광고)"""
 
-    message = client.messages.create(
+    return create_text(
+        client,
         model="claude-sonnet-5-5",
-        max_tokens=8192,
+        max_tokens=16000,  # 생각(thinking)에 쓰는 토큰까지 포함한 한도 — 본문은 이 중 일부만 씀
         system=STYLE_GUIDE,
         messages=[{"role": "user", "content": prompt}]
     )
-    return extract_text(message).strip()
 
 
 def revise_draft(draft, issues, key_points, sources=None, personal_take="",
@@ -231,13 +231,13 @@ def revise_draft(draft, issues, key_points, sources=None, personal_take="",
   마지막 [태그]. 마크다운 기호(#, * 등)는 쓰지 마. 분량도 비슷하게.
 - 수정본 전체만 출력해. 설명이나 변경 내역은 붙이지 마."""
 
-    message = client.messages.create(
+    return create_text(
+        client,
         model="claude-sonnet-5-5",
-        max_tokens=8192,
+        max_tokens=16000,  # 생각(thinking)에 쓰는 토큰까지 포함한 한도 — 본문은 이 중 일부만 씀
         system=STYLE_GUIDE,
         messages=[{"role": "user", "content": prompt}]
     )
-    return extract_text(message).strip()
 
 
 def suggest_questions(topic):
@@ -256,7 +256,8 @@ def suggest_questions(topic):
     try:
         message = client.messages.create(
             model="claude-haiku-5-5",
-            max_tokens=300,
+            max_tokens=1500,
+            extra_body={"output_config": {"effort": "low"}},
             messages=[{"role": "user", "content": prompt}]
         )
         lines = extract_text(message).strip().split("\n")
