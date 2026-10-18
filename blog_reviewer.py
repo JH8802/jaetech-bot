@@ -198,17 +198,24 @@ def review_draft(draft):
 
     last_error = None
     for attempt in range(2):  # 형식이 깨지거나 일시적으로 실패하면 1번 더 시도
+        # 1차: 생각(thinking)을 끄고 빠르게 / 2차: 기본 설정 + 넉넉한 토큰
+        # (생각에 토큰을 다 쓰면 JSON이 중간에 끊겨 'Unterminated string' 오류가 났음)
+        extra = {"output_config": {"effort": "low"}}
+        if attempt == 0:
+            extra["thinking"] = {"type": "disabled"}
         try:
             message = client.messages.create(
                 model="claude-haiku-5-5",
-                max_tokens=2000,
-                extra_body={"output_config": {"effort": "low"}},
+                max_tokens=2000 if attempt == 0 else 6000,
+                extra_body=extra,
                 messages=[{"role": "user", "content": prompt}]
             )
-            parsed = _parse_review_json(extract_text(message))
+            raw = extract_text(message)
+            parsed = _parse_review_json(raw)
             if parsed:
                 return parsed
-            last_error = "응답에서 점검 결과를 읽지 못함"
+            last_error = (f"응답에서 점검 결과를 읽지 못함 (stop_reason={message.stop_reason}, "
+                          f"응답 앞부분: {raw[:80]!r})")
         except Exception as e:
             last_error = e
 
