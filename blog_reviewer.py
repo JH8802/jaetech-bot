@@ -137,6 +137,21 @@ def scan_seo(meta, platform, target_keyword=""):
     return issues
 
 
+def collect_issues(review):
+    """화면에 저장해 둔 점검 결과(dict)에서 '고쳐야 할 지적'만 문자열 리스트로 모은다
+    (다듬기 요청에 그대로 넘기기 위함)."""
+    issues = []
+    issues += [f"[클리셰/반복] {i}" for i in review.get("cliche", [])]
+    issues += [f"[글 구조] {i}" for i in review.get("structure", [])]
+    issues += [f"[검색 최적화] {i}" for i in review.get("seo", [])]
+    issues += [f"[표시광고 표현 확인] {i}" for i in review.get("claims", [])]
+    for key, label in AI_REVIEW_LABELS.items():
+        val = ((review.get("ai") or {}).get(key) or "").strip()
+        if val and val != "없음":
+            issues.append(f"[{label}] {val}")
+    return issues
+
+
 def review_draft(draft):
     """AI 기반 점검 (문장 리듬 / 저자 의견 / 사실 구체성 / 차별화 / SEO 키워드) — Haiku로 저비용 호출."""
     prompt = f"""아래는 블로그 초안이야. 다음 5개 기준으로만 점검해줘.
