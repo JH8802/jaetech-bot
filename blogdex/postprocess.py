@@ -13,6 +13,8 @@ MAP_LINE_MARK = "플레이스 지도 삽입"
 PHOTO_RE = re.compile(r"<\s*사진\s*(\d+)\s*>")
 MAX_HASHTAGS = 10
 MIN_HASHTAGS = 5
+RATING_HEAD = "★ 별점 한눈에 보기"
+ONE_LINER_RE = re.compile(r"^(한\s*줄\s*(평|정리))\s*[:：]")
 
 
 def _norm(s: str) -> str:
@@ -210,7 +212,29 @@ def region_of(place: dict | None) -> str:
     return m.group(1) if m else ""
 
 
-def finalize(kind: str, raw: str, place: dict | None, keywords: list[str], title: str = "", photo_count: int = 0) -> dict:
+def build_rating_block(ratings: list[dict]) -> str:
+    """항목별 별점(1~5점)을 글 끝에 넣을 한 문단으로 만듭니다. 모양이 매번 같도록 코드가 직접 만듭니다."""
+    lines = [RATING_HEAD]
+    for r in ratings:
+        n = max(1, min(5, int(r["score"])))
+        lines.append(f"{r['label']} {'★' * n}{'☆' * (5 - n)} {n}/5")
+    return "\n".join(lines)
+
+
+def _put_rating_block(paras: list[str], ratings: list[dict]) -> tuple[list[str], list[str]]:
+    """'한 줄 평' 문단 바로 앞(없으면 해시태그 앞)에 별점 블록을 넣습니다. 이미 있던 블록은 지우고 다시 만듭니다."""
+    notes = []
+    paras = [p for p in paras if not p.startswith(RATING_HEAD)]
+    tag_i = find_hashtag_index(paras)
+    end = tag_i if tag_i is not None else len(paras)
+    one = next((i for i in range(end - 1, -1, -1) if ONE_LINER_RE.match(strip_tags(paras[i]))), None)
+    if ratings:
+        paras.insert(one if one is not None else end, build_rating_block(ratings))
+    return paras, notes
+
+
+def finalize(kind: str, raw: str, place: dict | None, keywords: list[str], title: str = "", photo_count: int = 0,
+             ratings: list[dict] | None = None) -> dict:
     """원고를 정리해 {body, chars, notes} 를 돌려줍니다."""
     body, notes = clean_markdown(raw.replace("\r\n", "\n"), title)
     body = normalize_tags(body)
@@ -242,6 +266,12 @@ def finalize(kind: str, raw: str, place: dict | None, keywords: list[str], title
         n_tags = paras[idx].count("#")
         if n_tags < MIN_HASHTAGS:
             notes.append(f"해시태그가 {n_tags}개예요(권장 {MIN_HASHTAGS}~{MAX_HASHTAGS}개).")
+    if kind in ("food", "hotel"):
+        paras, rn = _put_rating_block(paras, ratings or [])
+        notes += rn
+        end = find_hashtag_index(paras)
+        if not any(ONE_LINER_RE.match(strip_tags(p)) for p in paras[: end if end is not None else len(paras)]):
+            notes.append("글 끝의 '한 줄 평'이 없어요. 직접 한 줄 평을 써 넣어 주세요.")
     body = "\n\n".join(paras)
 
     if kind in ("food", "hotel"):

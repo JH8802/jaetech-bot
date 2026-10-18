@@ -112,6 +112,30 @@ def read_common(data: dict) -> dict:
     }
 
 
+def read_ratings(data: dict, kind: str) -> list[dict]:
+    """항목별 별점 [{label, score(1~5)}]. 맛집글·호텔·여행 후기만 쓰고, 점수가 없는 항목은 뺍니다."""
+    if kind not in prompts.PLACE_KINDS:
+        return []
+    raw = data.get("ratings") or []
+    if not isinstance(raw, list) or len(raw) > 8:
+        raise ValueError("별점 항목은 최대 8개까지 넣을 수 있어요.")
+    out = []
+    for r in raw:
+        if not isinstance(r, dict):
+            continue
+        label = re.sub(r"\s+", " ", str(r.get("label", ""))).strip()[:12]
+        try:
+            score = int(r.get("score"))
+        except (TypeError, ValueError):
+            continue
+        if not label:
+            continue
+        if not 1 <= score <= 5:
+            raise ValueError("별점은 1~5점으로 입력해 주세요.")
+        out.append({"label": label, "score": score})
+    return out
+
+
 def read_photos(data: dict, kind: str = "food") -> list[dict]:
     """브라우저가 줄여서 보낸 사진(data URL)을 읽어 [{'media_type','data'}] 로 돌려줍니다."""
     raw = data.get("photos") or []
@@ -159,6 +183,28 @@ def style_put():
     return jsonify(style_sample=text, updated_at=updated)
 
 
+@app.get("/api/rating-labels")
+def rating_labels_get():
+    raw, _ = storage.get_setting("rating_labels", "{}")
+    try:
+        return jsonify(labels=json.loads(raw))
+    except ValueError:
+        return jsonify(labels={})
+
+
+@app.put("/api/rating-labels")
+def rating_labels_put():
+    """종류별 별점 항목 이름(예: 맛집글 [맛, 가격, …])을 저장합니다. 언제든 바꿀 수 있습니다."""
+    labels = (request.get_json(silent=True) or {}).get("labels") or {}
+    clean = {}
+    for kind in prompts.PLACE_KINDS:
+        items = labels.get(kind)
+        if isinstance(items, list):
+            clean[kind] = [re.sub(r"\s+", " ", str(x)).strip()[:12] for x in items[:8]]
+    storage.set_setting("rating_labels", json.dumps(clean, ensure_ascii=False))
+    return jsonify(labels=clean)
+
+
 @app.get("/favicon.ico")
 def favicon():
     return "", 204
@@ -189,7 +235,7 @@ def titles():
 
 # ---------- 원고 ----------
 def _generate_events(*, kind, title, keywords, memo, place, guardrail, evidence_mode, build_prompt,
-                     photos=None, photo_notes=None, parent_id=None, title_input=None):
+                     photos=None, photo_notes=None, parent_id=None, title_input=None, ratings=None):
     """원고를 스트리밍으로 만들고, 후처리·점검·저장 후 SSE 이벤트를 흘려보냅니다.
     photos(사진 원본)가 있으면 먼저 사진을 살펴보고, photo_notes(이미 분석된 결과)가 있으면 그대로 씁니다."""
     parts, usage, photo_usage = [], {}, {}
@@ -215,16 +261,16 @@ def _generate_events(*, kind, title, keywords, memo, place, guardrail, evidence_
             yield sse("chunk", {"text": chunk})
         usage = llm.merge_usage(photo_usage, usage)
         yield sse("status", {"text": "태그와 해시태그를 정리하고 품질을 점검하고 있어요."})
-        fin = postprocess.finalize(kind, "".join(parts), place, keywords, title, len(photo_notes or []))
+        fin = postprocess.finalize(kind, "".join(parts), place, keywords, title, len(photo_notes or []), ratings)
         floor = EXPAND_MIN.get(kind)
         enough_material = len(re.sub(r"\s", "", memo or "")) >= 150 or bool(photo_notes)
         if floor and fin["chars"] < floor and enough_material:
             yield sse("status", {"text": f"분량이 {fin['chars']:,}자로 짧아서 메모와 사진을 더 풀어 쓰고 있어요."})
             try:
                 ex_usage = {}
-                raw2 = llm.ask_text(system, prompts.build_expand_prompt(kind, fin["body"], fin["chars"], floor + EXPAND_TARGET_EXTRA, memo, photo_notes, keywords),
+                raw2 = llm.ask_text(system, prompts.build_expand_prompt(kind, fin["body"], fin["chars"], floor + EXPAND_TARGET_EXTRA, memo, photo_notes, keywords, ratings),
                                     max_tokens=9000, effort=llm.EFFORT, usage=ex_usage)
-                fin2 = postprocess.finalize(kind, raw2, place, keywords, title, len(photo_notes or []))
+                fin2 = postprocess.finalize(kind, raw2, place, keywords, title, len(photo_notes or []), ratings)
                 usage = llm.merge_usage(usage, ex_usage)
                 if fin2["chars"] > fin["chars"]:
                     fin2["notes"].append(f"분량이 짧아 한 번 보강했어요({fin['chars']:,}자 → {fin2['chars']:,}자).")
@@ -238,7 +284,7 @@ def _generate_events(*, kind, title, keywords, memo, place, guardrail, evidence_
         yield sse("replace", {"text": fin["body"]})
         article_id = storage.save_article(
             kind=kind, title_input=title_input or title, title_final=title, memo=memo, place=place, keywords=keywords,
-            options={"guardrail": guardrail, "evidence_mode": evidence_mode, "usage": usage, "photos": photo_notes or []},
+            options={"guardrail": guardrail, "evidence_mode": evidence_mode, "usage": usage, "photos": photo_notes or [], "ratings": ratings or []},
             body=fin["body"], chars=fin["chars"],
             quality=quality, model=usage.get("model") or llm.MODEL, parent_id=parent_id)
         yield sse("done", {"article_id": article_id, "title": title, "body": fin["body"], "chars": fin["chars"],
@@ -263,10 +309,11 @@ def article_stream():
     if not keywords:
         keywords = prompts.derive_keywords(c["kind"], title, c["place"])
     photos = read_photos(data, c["kind"])
+    ratings = read_ratings(data, c["kind"])
     return sse_response(_generate_events(
         kind=c["kind"], title=title, keywords=keywords, memo=c["memo"], place=c["place"],
-        guardrail=c["guardrail"], evidence_mode=c["evidence_mode"], photos=photos,
-        build_prompt=lambda notes: prompts.build_article_prompt(c["kind"], title, keywords, c["memo"], c["place"], notes)))
+        guardrail=c["guardrail"], evidence_mode=c["evidence_mode"], photos=photos, ratings=ratings,
+        build_prompt=lambda notes: prompts.build_article_prompt(c["kind"], title, keywords, c["memo"], c["place"], notes, ratings)))
 
 
 @app.post("/api/articles/<int:article_id>/rewrite")
@@ -282,8 +329,8 @@ def article_rewrite(article_id: int):
     return sse_response(_generate_events(
         kind=art["kind"], title=art["title"], keywords=art["keywords"], memo=art["memo"], place=art["place"],
         guardrail=bool(opts.get("guardrail")), evidence_mode=opts.get("evidence_mode", "strict"),
-        photo_notes=notes, parent_id=article_id, title_input=art["title_input"],
-        build_prompt=lambda n: prompts.build_rewrite_prompt(art["kind"], art["body"], issues, art["keywords"], n)))
+        photo_notes=notes, parent_id=article_id, title_input=art["title_input"], ratings=opts.get("ratings") or [],
+        build_prompt=lambda n: prompts.build_rewrite_prompt(art["kind"], art["body"], issues, art["keywords"], n, opts.get("ratings") or [])))
 
 
 @app.get("/api/articles")

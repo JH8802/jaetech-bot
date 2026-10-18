@@ -206,7 +206,7 @@ def _mock_titles(user: str) -> list[str]:
 
 def _mock_expand(user: str) -> str:
     """분량 보강 호출의 샘플 응답: 기존 원고의 해시태그 줄 앞에 문단을 덧붙입니다."""
-    body = user.split("[기존 원고]\n", 1)[1].rsplit("\n\n설명 없이", 1)[0]
+    body = user.split("[기존 원고]\n", 1)[1].rsplit("\n\n'★ 별점", 1)[0].rsplit("\n\n설명 없이", 1)[0]
     paras = body.split("\n\n")
     tag_i = next((i for i in range(len(paras) - 1, -1, -1) if paras[i].startswith("#")), len(paras))
     extra = [f"샘플 보강 문단 {i}입니다. 메모와 사진에서 확인되는 내용을 조금 더 구체적으로 풀어 씁니다." for i in range(1, 61)]

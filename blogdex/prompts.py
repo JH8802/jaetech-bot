@@ -87,7 +87,8 @@ KIND_SPECS = {
 1) 인트로 2문단. 첫 문장에 핵심 키워드와 독자가 가장 먼저 알아야 할 한 가지를 넣고, 둘째 문단에서 이 글이 다룰 내용을 안내합니다.
 2) 소제목 4개('1. ' ~ '4. '). 독자의 질문 순서(개념 → 확인 방법 → 주의할 점 → 실천)로 배열합니다. 각 섹션은 4~7문단, 문단당 2~3문장입니다.
 3) 소제목 없는 정리 문단 3~5개. 정리 마지막에 짧은 끝인사 한 줄(문구는 매번 다르게).
-4) 해시태그 한 줄(5~10개): 핵심 키워드와 그 변형(고르는법, 추천, 주의사항, 비교 등)을 중심으로 하고, 상위 카테고리 한두 개만 더합니다. 관련 없는 태그로 개수를 채우지 않습니다.
+4) 마지막 본문 문단(해시태그 바로 앞)은 '한 줄 정리: ' 로 시작하는 한 문장(25~45자)으로 글 전체의 핵심을 요약합니다. 말투 컨셉대로 쓰고 효능·치료를 단정하지 않습니다.
+5) 해시태그 한 줄(5~10개): 핵심 키워드와 그 변형(고르는법, 추천, 주의사항, 비교 등)을 중심으로 하고, 상위 카테고리 한두 개만 더합니다. 관련 없는 태그로 개수를 채우지 않습니다.
 문체: 합니다체 약 60%, 해요체 약 40%로 말하듯이 씁니다(말투 컨셉 참고). 단정 대신 근거와 한계를 함께 씁니다. 1인칭 경험담은 메모에 있을 때만 씁니다.
 분량: 공백을 뺀 글자 수로 2,700자 안팎(최소 2,500자). 짧아지기 쉬우니 아래 배분을 지킵니다(모두 공백 제외).
 - 인트로 2문단 300자 / 소제목 섹션 4개 각 580자(문단 4~5개, 문단당 120~150자) / 정리 3~4문단 300자 / 해시태그 별도
@@ -160,6 +161,8 @@ def build_system(kind: str, guardrail: bool, evidence_mode: str, photo_count: in
     if style_sample and style_sample.strip():
         parts.append(STYLE_SAMPLE_HEAD + style_sample.strip()[:MAX_STYLE_SAMPLE] + STYLE_SAMPLE_TAIL)
     parts += [KIND_SPECS[kind], TAG_RULES, WRITING_RULES, SEO_RULES]
+    if kind in PLACE_KINDS:
+        parts.append(RATING_RULES)
     parts.append(EVIDENCE_STRICT if evidence_mode == "strict" else EVIDENCE_TEMPLATE)
     parts.append(NO_META)
     parts.append(PHOTO_RULES if photo_count else NO_PHOTO)
@@ -204,6 +207,11 @@ def _place_block(place: dict | None) -> str:
     return "\n".join(lines)
 
 
+RATING_RULES = """[한 줄 평과 별점 - 맛집글·호텔·여행 후기 공통]
+- 글의 마지막 본문 문단(해시태그 바로 앞)은 '한 줄 평: ' 으로 시작하는 한 문장(25~45자)입니다. 글 전체의 결론을 말투 컨셉대로 요약하고, 긍정적이되 억지 칭찬은 하지 않습니다.
+- 별점 줄('★ 별점 한눈에 보기' 문단)은 시스템이 한 줄 평 앞에 넣으니 쓰지 않습니다.
+- '작성자 별점'이 주어지면 그것은 작성자가 실제로 준 점수(1~5점)입니다. 글과 한 줄 평이 별점과 어긋나지 않게 쓰고(예: 가격 2점인데 '가성비 최고'라고 쓰지 않기), 2점 이하 항목은 아쉬운 점으로, 4점 이상 항목은 좋았던 점으로 다룹니다. 메모에 이유가 없으면 이유를 지어내지 않고 점수에 맞는 정도로만 언급합니다. 별점 숫자를 본문에 반복해서 쓰지는 않습니다."""
+
 PHOTO_CATEGORIES = {
     "food": ["외관", "내부", "음식", "메뉴판", "기타"],
     "info": ["제품", "라벨·표시사항", "화면·자료", "기타"],
@@ -245,8 +253,14 @@ def photo_block(notes: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def rating_block(ratings: list[dict] | None) -> str:
+    if not ratings:
+        return ""
+    return "[작성자 별점 - 작성자가 직접 준 점수(5점 만점)]\n" + "\n".join(f"- {r['label']}: {r['score']}점" for r in ratings)
+
+
 def build_article_prompt(kind: str, title: str, keywords: list[str], memo: str, place: dict | None,
-                         photo_notes: list[dict] | None = None) -> str:
+                         photo_notes: list[dict] | None = None, ratings: list[dict] | None = None) -> str:
     parts = [f"[글 제목]\n{title}"]
     if keywords:
         parts.append("[핵심 키워드]\n" + ", ".join(keywords))
@@ -257,6 +271,8 @@ def build_article_prompt(kind: str, title: str, keywords: list[str], memo: str, 
     parts.append(f"[{memo_label}]\n" + (memo.strip() if memo and memo.strip() else "(없음)"))
     if photo_notes:
         parts.append(photo_block(photo_notes))
+    if kind in PLACE_KINDS and ratings:
+        parts.append(rating_block(ratings))
     first_line = (
         "위 재료로 원고를 쓰세요. 첫 줄부터 바로 본문을 시작하고 제목 줄은 쓰지 않습니다."
         if kind == "info"
@@ -289,19 +305,22 @@ def build_title_prompt(kind: str, keyword: str, memo: str, place: dict | None, e
     return "\n".join(parts)
 
 
-def build_rewrite_prompt(kind: str, body: str, issues: list[str], keywords: list[str], photo_notes: list[dict] | None = None) -> str:
+def build_rewrite_prompt(kind: str, body: str, issues: list[str], keywords: list[str], photo_notes: list[dict] | None = None,
+                         ratings: list[dict] | None = None) -> str:
     return "\n\n".join([
         "아래 원고를 같은 주제와 같은 사실을 유지한 채 다시 쓰세요. 아래 '고칠 점'을 모두 반영합니다.",
         "[고칠 점]\n" + "\n".join(f"- {i}" for i in issues),
         "[핵심 키워드]\n" + ", ".join(keywords) if keywords else "",
         photo_block(photo_notes) + "\n- 기존 원고의 <사진N> 줄은 번호를 바꾸지 말고, 그 사진을 설명하는 문단 가까이에 그대로 둡니다." if photo_notes else "",
+        rating_block(ratings),
         "[기존 원고]\n" + body,
+        "'★ 별점 한눈에 보기' 문단은 시스템이 다시 넣으니 그대로 두거나 빼도 됩니다. '한 줄 평:'(또는 '한 줄 정리:') 문단은 해시태그 바로 앞의 마지막 본문 문단으로 유지합니다.",
         "출력 형식 규칙은 그대로이며, 설명 없이 원고 본문만 출력합니다.",
     ]).strip()
 
 
 def build_expand_prompt(kind: str, body: str, chars: int, target_min: int, memo: str, photo_notes: list[dict] | None,
-                        keywords: list[str] | None = None) -> str:
+                        keywords: list[str] | None = None, ratings: list[dict] | None = None) -> str:
     """분량이 모자란 원고를 같은 사실 안에서 더 풀어 쓰게 하는 지시(자동 보강용)."""
     parts = [
         f"아래 원고는 공백을 뺀 글자 수가 {chars:,}자로, 목표 {target_min:,}자에 {target_min - chars:,}자 이상 모자랍니다.",
@@ -320,6 +339,9 @@ def build_expand_prompt(kind: str, body: str, chars: int, target_min: int, memo:
         parts.append("[작성자 메모]\n" + memo.strip())
     if photo_notes:
         parts.append(photo_block(photo_notes))
+    if ratings:
+        parts.append(rating_block(ratings))
     parts.append("[기존 원고]\n" + body)
+    parts.append("'★ 별점 한눈에 보기' 문단은 시스템이 다시 넣으니 그대로 두거나 빼도 됩니다. '한 줄 평:'(또는 '한 줄 정리:') 문단은 해시태그 바로 앞의 마지막 본문 문단으로 유지합니다.")
     parts.append("설명 없이 보강한 원고 본문만 출력합니다.")
     return "\n\n".join(parts)

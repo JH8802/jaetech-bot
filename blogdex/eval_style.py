@@ -8,7 +8,7 @@ import re
 import statistics as st
 
 import adcheck
-from postprocess import HEADING_RE, MAP_LINE_MARK, count_chars, find_hashtag_index, split_paragraphs, strip_tags
+from postprocess import HEADING_RE, MAP_LINE_MARK, RATING_HEAD, count_chars, find_hashtag_index, split_paragraphs, strip_tags
 
 GENERIC_WORDS = ["편안", "무난", "자연스럽", "부담", "좋았", "좋겠", "차분", "다양한", "효과적", "전반적으로"]
 FIRST_PERSON_RE = re.compile(r"^(저는|저도|제가|저의)")
@@ -22,7 +22,7 @@ def _body_parts(body: str):
     tags = paras.pop(tag_i) if tag_i is not None else ""
     heads = [p for p in paras if HEADING_RE.match(p)]
     text_paras = [p for p in paras if not HEADING_RE.match(p) and MAP_LINE_MARK not in p
-                  and not re.fullmatch(r"(<)?사진 ?\d+(>)?", p)]
+                  and not p.startswith(RATING_HEAD) and not re.fullmatch(r"(<)?사진 ?\d+(>)?", p)]
     return text_paras, heads, tags
 
 
