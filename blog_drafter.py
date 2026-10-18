@@ -1,6 +1,7 @@
 import anthropic
 from blog_style_guide import STYLE_GUIDE
 from blog_utils import extract_text
+from datetime import datetime
 from dotenv import load_dotenv
 import os
 import random
@@ -79,6 +80,7 @@ def draft_post(topic, key_points, personal_take="", platform="네이버 블로�
     points_text = "\n".join(f"- {p}" for p in key_points)
     opening_style = random.choice(OPENING_STYLES)
     style_hint = PLATFORM_STYLE_HINTS.get(platform, PLATFORM_STYLE_HINTS["네이버 블로그"])
+    today = f"{datetime.now().year}년 {datetime.now().month}월"
     keyword_text = target_keyword or "(지정 안 함 — 주제에서 사람들이 실제로 검색할 법한 검색어 하나를 골라서 그걸 기준으로 써)"
 
     if sources:
@@ -159,6 +161,9 @@ def draft_post(topic, key_points, personal_take="", platform="네이버 블로�
      목록 형식 말고 문장 안에서). 규제·효능·수치처럼 근거가 꼭 필요한
      주장인데 제공된 출처가 없으면, 출처를 지어내지 말고 그 문장 바로 뒤에
      [출처 필요: 어떤 근거가 필요한지] 라고 표시해줘.
+   - 기준일: 규제·기준·가격·통계처럼 시간이 지나면 바뀔 수 있는 정보를
+     다룬다면, 그 정보가 처음 나오는 문단에 "{today} 기준"이라고 자연스럽게
+     한 번 밝혀줘. 그런 정보가 없으면 넣지 마.
 {links_rule}6. 맨 마지막 줄에 [태그] 관련 키워드 3~5개를 쉼표로 구분해서
    (# 기호 없이, 예: 유산균, 건강기능식품, 표시광고)"""
 

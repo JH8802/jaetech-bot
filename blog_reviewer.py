@@ -3,6 +3,7 @@ from blog_utils import extract_text, has_keyword
 from dotenv import load_dotenv
 import os
 import json
+import re
 
 load_dotenv()
 
@@ -21,6 +22,14 @@ HARD_BAN = [
 # 반복될 때만 문제로 보는 표현 (한두 번은 자연스러움)
 REPEAT_WATCH = ["또한", "특히", "이처럼"]
 REPEAT_THRESHOLD = 2
+
+# 질병 치료·예방을 암시할 수 있는 표현 — 나오면 "확인 필요"로만 알려줌
+# (표시광고를 다루는 글이면 "이런 표현은 못 쓴다"는 설명 문맥에서도 나오므로
+#  자동 불합격 처리는 안 함). 실무 기준에 맞게 자유롭게 추가/삭제해서 쓰면 됨.
+HEALTH_CLAIM_WATCH = [
+    "치료", "완치", "예방", "특효", "만병", "기적", "부작용 없", "부작용이 없",
+    "약 대신", "약을 끊", "의약품 대체", "100% 효과", "즉효",
+]
 
 # review_draft()가 반환하는 키 -> 화면에 보여줄 라벨 (blog_write.py, blog_app.py 공용)
 AI_REVIEW_LABELS = {
@@ -67,6 +76,21 @@ def scan_structure(draft):
         issues.append("[태그] 태그가 없음 — 발행 시 넣을 키워드 태그가 없음")
 
     return issues
+
+
+def scan_health_claims(draft):
+    """규칙 기반 표시광고 표현 점검 — HEALTH_CLAIM_WATCH 표현이 들어간 문장을
+    찾아 '표현: 문장 일부' 형태로 돌려준다 (문맥은 사람이 판단)."""
+    found = []
+    sentences = re.split(r"(?<=[.!?。])\s+|\n", draft)
+    for sentence in sentences:
+        sentence = sentence.strip()
+        for phrase in HEALTH_CLAIM_WATCH:
+            if phrase in sentence:
+                snippet = sentence if len(sentence) <= 80 else sentence[:80] + "…"
+                found.append(f"'{phrase}' → {snippet}")
+                break
+    return found
 
 
 def scan_seo(meta, platform, target_keyword=""):
