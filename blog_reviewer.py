@@ -174,24 +174,29 @@ def collect_issues(review):
 
 def review_draft(draft):
     """AI 기반 점검 (문장 리듬 / 저자 의견 / 사실 구체성 / 차별화 / SEO 키워드) — Haiku로 저비용 호출."""
-    prompt = f"""아래는 블로그 초안이야. 다음 5개 기준으로만 점검해줘.
-문제 되는 부분은 원문 문장을 그대로 짧게 인용해서 지적하고,
-문제 없으면 설명을 덧붙이지 말고 정확히 "없음" 한 단어만 답해.
+    prompt = f"""아래는 블로그 초안이야. 다음 5개 기준으로 점검해줘.
+각 기준마다 "문제가 있는지(problem: true/false)"를 먼저 판정하고, 문제가 있을 때만
+detail에 원문 문장을 그대로 짧게 인용해서 무엇이 문제인지 적어줘.
+문제가 없으면 problem을 false로 하고 detail은 빈 문자열("")로 둬 — 문제 없다는
+설명을 detail에 쓰지 마.
 
 1. sentence_rhythm: 문장 길이가 단조로운가 (대부분 비슷한 길이인가)
 2. opinion: 저자의 의견/판단 없이 중립적 나열에 그치는가
 3. specificity: 사실/사례가 뭉뚱그려져 있고 구체성이 떨어지는가
 4. differentiation: 이 주제를 검색하면 어디서나 나올 법한 뻔하고 일반적인
    설명/사례에 그치는가 (직접 겪은 일이나 실무자만 아는 디테일이 아니라
-   교과서적/통념적 설명 위주인가). 뻔한 부분이 있으면 그 문장을 인용해서
-   지적하고, 이 글만의 구체적 시각·경험이 충분하면 "없음"
+   교과서적/통념적 설명 위주인가). 이 글만의 구체적 시각·경험이 충분하면 false
 5. keyword_clarity: [제목]과 본문 첫 문단만 보고 "이 글이 정확히 무엇에
    대한 글인지" 검색하는 사람 입장에서 바로 알 수 있는가. 제목이나
-   도입부가 모호하거나 핵심 키워드 없이 겉돈다면 지적하고, 명확하면 "없음"
+   도입부가 모호하거나 핵심 키워드 없이 겉돈다면 true
    (키워드를 억지로 많이 넣으라는 뜻이 아니라, 명확성 문제만 봐줘)
 
 반드시 아래 JSON 형식으로만 답해. 다른 설명 없이 JSON만 출력해.
-{{"sentence_rhythm": "...", "opinion": "...", "specificity": "...", "differentiation": "...", "keyword_clarity": "..."}}
+{{"sentence_rhythm": {{"problem": false, "detail": ""}},
+ "opinion": {{"problem": false, "detail": ""}},
+ "specificity": {{"problem": false, "detail": ""}},
+ "differentiation": {{"problem": false, "detail": ""}},
+ "keyword_clarity": {{"problem": false, "detail": ""}}}}
 
 초안:
 {draft}"""
@@ -223,25 +228,37 @@ def review_draft(draft):
     return {}
 
 
+def _normalize(value):
+    """항목 하나를 '없음' 또는 지적 문장으로 통일한다.
+    새 형식 {"problem": bool, "detail": str}과 옛 형식(문자열)을 모두 받는다."""
+    if isinstance(value, dict):
+        if value.get("problem") is True or str(value.get("problem")).lower() == "true":
+            return (value.get("detail") or "").strip() or "문제가 있다고 판정됨 (상세 설명 없음)"
+        return "없음"
+    return (value or "").strip() or "없음"
+
+
 def _parse_review_json(text):
-    """AI 응답에서 5개 항목을 뽑는다. 지적 문장에 따옴표(")가 섞여 JSON이 깨져도
-    항목별로 직접 찾아서 최대한 살린다."""
+    """AI 응답에서 5개 항목을 뽑아 {키: '없음' 또는 지적 문장}으로 돌려준다.
+    지적 문장에 따옴표(")가 섞여 JSON이 깨져도 항목별로 직접 찾아서 최대한 살린다."""
     text = text.replace("```json", "").replace("```", "").strip()
+    keys = list(AI_REVIEW_LABELS)
+
     m = re.search(r"\{.*\}", text, re.DOTALL)
     if m:
         try:
             data = json.loads(m.group(0), strict=False)
-            if isinstance(data, dict) and data:
-                return data
+            if isinstance(data, dict) and all(k in data for k in keys):
+                return {k: _normalize(data[k]) for k in keys}
         except ValueError:
             pass
 
-    keys = list(AI_REVIEW_LABELS)
     result = {}
-    for i, key in enumerate(keys):
-        nxt = keys[i + 1] if i + 1 < len(keys) else None
-        end = rf'"\s*,\s*"{nxt}"\s*:' if nxt else r'"\s*\}\s*$'
-        pm = re.search(rf'"{key}"\s*:\s*"(.*?){end}', text, re.DOTALL)
+    for key in keys:
+        # 새 형식: "key": {"problem": true/false, "detail": "..."}
+        pm = re.search(
+            rf'"{key}"\s*:\s*\{{\s*"problem"\s*:\s*(true|false)\s*,\s*"detail"\s*:\s*"(.*?)"\s*\}}',
+            text, re.DOTALL | re.IGNORECASE)
         if pm:
-            result[key] = pm.group(1).strip()
+            result[key] = _normalize({"problem": pm.group(1).lower() == "true", "detail": pm.group(2)})
     return result if len(result) == len(keys) else {}
