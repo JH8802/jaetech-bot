@@ -69,6 +69,7 @@
   .photonotes h4 { margin: 0; padding: 10px 16px; font-size: 13px; background: #f9fafb; border-bottom: 1px solid var(--line); }
   .photonotes .pn-row { display: flex; gap: 10px; padding: 8px 16px; border-bottom: 1px solid #f1f3f5; align-items: center; }
   .photonotes .pn-row:last-child { border-bottom: 0; }
+  .photonotes .thumbpick { padding: 10px 16px; background: #fff9db; border-bottom: 1px solid var(--line); font-size: 13px; line-height: 1.6; }
   .photonotes img { width: 44px; height: 44px; object-fit: cover; border-radius: 6px; }
   .todopanel { margin-top: 14px; border: 1px solid #ffd8a8; border-radius: 10px; overflow: hidden; background: #fffaf2; }
   .todopanel h4 { margin: 0; padding: 10px 16px; font-size: 13px; background: #fff3bf; border-bottom: 1px solid #ffd8a8; color: #8a4b00; }
@@ -277,7 +278,7 @@ fetch('/api/rating-labels').then((r) => r.json()).then((d) => {
 
 const KIND_LABEL = { info: '정보글', food: '맛집글', hotel: '호텔·여행 후기' };
 const PLACE_KINDS = ['food', 'hotel'];
-const state = { kind: 'info', titles: [], busy: false, article: null, photos: [], resultPhotos: [], photoNames: [], adTerms: [] };  // photos: 입력칸의 사진 / resultPhotos: 결과에 보여 줄 사진(현재 세션에서 생성한 글만)
+const state = { kind: 'info', titles: [], busy: false, article: null, photos: [], resultPhotos: [], photoNames: [], photoNotes: [], adTerms: [] };  // photos: 입력칸의 사진 / resultPhotos: 결과에 보여 줄 사진(현재 세션에서 생성한 글만)
 
 /* ---------- 글 종류별 화면 ---------- */
 const KIND_UI = {
@@ -369,6 +370,9 @@ const paragraphs = (t) => t.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean
 // 파일명: 방금 올린 사진이 있으면 그 이름, 저장된 원고를 다시 열었을 땐 서버에 저장된 이름
 const photoName = (n) => { const ph = state.resultPhotos[n - 1]; return (ph && ph.name) || state.photoNames[n - 1] || ''; };
 const photoCopyLabel = (n) => { const nm = photoName(n); return nm ? `사진 ${n} (${nm})` : `사진 ${n}`; };
+const photoCaption = (n) => ((state.photoNotes || [])[n - 1] || {}).caption || '';
+// 캡션이 있으면 사진 자리 아래에 한 줄로 붙여 복사한다(네이버 에디터에서 사진 아래 설명칸에 옮겨 적기)
+const photoCopyText = (n) => { const c = photoCaption(n); return c ? `${photoCopyLabel(n)}\n캡션: ${c}` : photoCopyLabel(n); };
 const PHOTO_PAR = /^<\s*사진\s*(\d+)\s*>$/;
 const photoNo = (p) => { const m = p.match(PHOTO_PAR); return m ? +m[1] : null; };
 
@@ -414,7 +418,7 @@ function renderBody(text) {
     const pn = photoNo(p);
     if (pn) {
       const ph = state.resultPhotos[pn - 1];
-      return `<div class="photoslot">${ph ? `<img src="${ph.url}" alt="사진 ${pn}">` : ''}${esc(photoCopyLabel(pn))}</div>`;
+      return `<div class="photoslot">${ph ? `<img src="${ph.url}" alt="사진 ${pn}">` : ''}${esc(photoCopyLabel(pn))}${photoCaption(pn) ? `<br><span style="color:var(--sub)">캡션: ${esc(photoCaption(pn))}</span>` : ''}</div>`;
     }
     if (p.includes('플레이스 지도 삽입')) return `<p class="mapline">${esc(p)}</p>`;
     if (isTags(p)) return `<p class="tags">${markAd(esc(p))}</p>`;
@@ -433,7 +437,7 @@ function toCopyHTML(text) {
   return paragraphs(text).map((p) => {
     if (p.startsWith('★ 별점 한눈에 보기')) return `<p>${p.split('\n').map((l, i) => (i === 0 ? `<b>${esc(l)}</b>` : esc(l))).join('<br>')}</p>`;
     const pn = photoNo(p);
-    if (pn) return `<p>${photoCopyLabel(pn)}</p>`;
+    if (pn) return `<p>${photoCopyLabel(pn)}${photoCaption(pn) ? `<br>캡션: ${esc(photoCaption(pn))}` : ''}</p>`;
     if (isTags(p)) return `<p>${esc(p)}</p>`;
     if (isHead(p)) return `<p><b>${todoCopy(inline(p, counter, 'copy'))}</b></p>`;
     return `<p>${todoCopy(inline(p, counter, 'copy'))}</p>`;
@@ -525,10 +529,10 @@ function showArticle(art) {
   state.article = art;
   state.photoNames = [];
   for (const n of art.photos || (art.options && art.options.photos) || []) if (n && n.name) state.photoNames[n.n - 1] = n.name;
+  renderPhotoNotes(art.photos || (art.options && art.options.photos));  // 캡션·파일명을 본문 사진 자리에 쓰므로 본문보다 먼저
   renderResult(art.body, false, art.chars);
   setStatus(`저장됨 · ${KIND_LABEL[art.kind] || ''} · ${art.title}`);
   renderQuality(art.quality);
-  renderPhotoNotes(art.photos || (art.options && art.options.photos));
   renderTodoPanel();
   $('actions').classList.remove('hidden');
   $('btnRewrite').classList.toggle('hidden', !(art.quality && art.quality.issues && art.quality.issues.length));
@@ -620,10 +624,15 @@ $('fileInput').onchange = (e) => { addPhotos(e.target.files, false); e.target.va
 $('folderInput').onchange = (e) => { addPhotos(e.target.files, true); e.target.value = ''; };
 function renderPhotoNotes(notes) {
   const box = $('photoNotes');
+  state.photoNotes = notes || [];
   if (!notes || !notes.length) { box.innerHTML = ''; return; }
-  box.innerHTML = '<div class="photonotes"><h4>AI가 본 사진 (번호 확인용)</h4>' + notes.map((n) => {
+  // 대표 사진 추천: 대표 적합도(thumb)가 가장 높은 사진, 같으면 번호가 앞선 사진. 메뉴판·글자 위주 사진은 뺀다
+  const cands = notes.filter((n) => n.thumb > 0 && !/메뉴판|라벨|화면|자료/.test(n.category || ''));
+  const best = cands.reduce((a, b) => (!a || b.thumb > a.thumb ? b : a), null);
+  const thumbHtml = best ? `<div class="thumbpick">⭐ 대표 사진 추천: <b>사진 ${best.n}</b>${photoName(best.n) ? ` (${esc(photoName(best.n))})` : ''}${best.caption ? ` · ${esc(best.caption)}` : ''}<br><span style="color:var(--sub)">네이버 에디터에서 이 사진을 대표 사진으로 지정하면 홈·검색 목록에 가장 먼저 보여요.</span></div>` : '';
+  box.innerHTML = '<div class="photonotes"><h4>AI가 본 사진 (번호 확인용)</h4>' + thumbHtml + notes.map((n) => {
     const ph = state.resultPhotos[n.n - 1];
-    return `<div class="pn-row">${ph ? `<img src="${ph.url}" alt="">` : ''}<div><b>사진 ${n.n}</b>${n.name || (ph && ph.name) ? ` <span style="color:var(--sub)">(${esc(n.name || ph.name)})</span>` : ''} · ${esc(n.category || '기타')} — ${esc(n.desc || '설명을 읽지 못했어요')}${n.text ? ` <span style="color:var(--sub)">(글자: ${esc(n.text)})</span>` : ''}</div></div>`;
+    return `<div class="pn-row">${ph ? `<img src="${ph.url}" alt="">` : ''}<div><b>사진 ${n.n}</b>${n.name || (ph && ph.name) ? ` <span style="color:var(--sub)">(${esc(n.name || ph.name)})</span>` : ''} · ${esc(n.category || '기타')} — ${esc(n.desc || '설명을 읽지 못했어요')}${n.caption ? ` <span style="color:var(--sub)">· 캡션: ${esc(n.caption)}</span>` : ''}${n.text ? ` <span style="color:var(--sub)">(글자: ${esc(n.text)})</span>` : ''}</div></div>`;
   }).join('') + '</div>';
 }
 
@@ -661,7 +670,7 @@ async function copyArticle() {
   if (!state.article) return;
   const text = state.article.body;
   const withTitle = $('copyTitle').checked && state.article.title;
-  const plain = (withTitle ? state.article.title + '\n\n' : '') + paragraphs(stripTags(text)).map((p) => (photoNo(p) ? photoCopyLabel(photoNo(p)) : p)).join('\n\n');
+  const plain = (withTitle ? state.article.title + '\n\n' : '') + paragraphs(stripTags(text)).map((p) => (photoNo(p) ? photoCopyText(photoNo(p)) : p)).join('\n\n');
   const html = (withTitle ? `<p>${esc(state.article.title)}</p><p><br></p>` : '') + toCopyHTML(text);
   const btn = $('btnCopy'); const old = btn.innerHTML; let wait = 2200;
   try {
