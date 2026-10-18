@@ -129,12 +129,32 @@ def scan_seo(meta, platform, target_keyword=""):
     if platform == "워드프레스" and not meta.get("slug"):
         issues.append("글 주소(슬러그)가 없음")
 
+    pending = body.count("[추가 필요")
+    if pending:
+        issues.append(f"[추가 필요] {pending}곳 — AI가 재료가 없어 못 채운 부분. 발행 전에 직접 채우거나 "
+                      "그 줄을 지워야 함 (그대로 올라가면 대괄호 문구가 글에 노출됨)")
+
     missing_sources = body.count("[출처 필요")
     if missing_sources:
         issues.append(f"[출처 필요] {missing_sources}곳 — 발행 전에 근거를 채우거나 문장을 고쳐야 함 "
                       "(건강·돈 주제는 구글이 근거를 특히 엄격하게 봄)")
 
     return issues
+
+
+def ai_issue(val):
+    """AI 점검 항목 하나의 응답에서 '진짜 지적'만 돌려준다 (문제 없으면 빈 문자열).
+
+    AI가 '문제 없음'을 "…다양하다고 보기 어렵다. 없음"처럼 설명을 붙여서 답하는
+    경우가 있어서, 정확히 '없음'일 때뿐 아니라 문장이 끝난 뒤 '없음'으로 마무리되는
+    경우도 문제 없음으로 본다. ('출처가 없음'처럼 지적 문장 자체가 '없음'으로 끝나는
+    경우는 앞에 마침표가 없으므로 지적으로 유지됨.)"""
+    val = (val or "").strip()
+    if not val or val.rstrip(" .") == "없음":
+        return ""
+    if re.search(r"[.。!?]\s*없음\.?$", val):
+        return ""
+    return val
 
 
 def collect_issues(review):
@@ -146,8 +166,8 @@ def collect_issues(review):
     issues += [f"[검색 최적화] {i}" for i in review.get("seo", [])]
     issues += [f"[표시광고 표현 확인] {i}" for i in review.get("claims", [])]
     for key, label in AI_REVIEW_LABELS.items():
-        val = ((review.get("ai") or {}).get(key) or "").strip()
-        if val and val != "없음":
+        val = ai_issue((review.get("ai") or {}).get(key))
+        if val:
             issues.append(f"[{label}] {val}")
     return issues
 
@@ -156,7 +176,7 @@ def review_draft(draft):
     """AI 기반 점검 (문장 리듬 / 저자 의견 / 사실 구체성 / 차별화 / SEO 키워드) — Haiku로 저비용 호출."""
     prompt = f"""아래는 블로그 초안이야. 다음 5개 기준으로만 점검해줘.
 문제 되는 부분은 원문 문장을 그대로 짧게 인용해서 지적하고,
-문제 없으면 정확히 "없음"이라고만 답해.
+문제 없으면 설명을 덧붙이지 말고 정확히 "없음" 한 단어만 답해.
 
 1. sentence_rhythm: 문장 길이가 단조로운가 (대부분 비슷한 길이인가)
 2. opinion: 저자의 의견/판단 없이 중립적 나열에 그치는가
@@ -176,16 +196,45 @@ def review_draft(draft):
 초안:
 {draft}"""
 
-    try:
-        message = client.messages.create(
-            model="claude-haiku-5-5",
-            max_tokens=2000,
-            extra_body={"output_config": {"effort": "low"}},
-            messages=[{"role": "user", "content": prompt}]
-        )
-        result = extract_text(message).strip()
-        result = result.replace("```json", "").replace("```", "").strip()
-        return json.loads(result)
-    except Exception as e:
-        print(f"⚠️ AI 점검 실패 (건너뜀): {e}")
-        return {}
+    last_error = None
+    for attempt in range(2):  # 형식이 깨지거나 일시적으로 실패하면 1번 더 시도
+        try:
+            message = client.messages.create(
+                model="claude-haiku-5-5",
+                max_tokens=2000,
+                extra_body={"output_config": {"effort": "low"}},
+                messages=[{"role": "user", "content": prompt}]
+            )
+            parsed = _parse_review_json(extract_text(message))
+            if parsed:
+                return parsed
+            last_error = "응답에서 점검 결과를 읽지 못함"
+        except Exception as e:
+            last_error = e
+
+    print(f"⚠️ AI 점검 실패 (건너뜀): {last_error}")
+    return {}
+
+
+def _parse_review_json(text):
+    """AI 응답에서 5개 항목을 뽑는다. 지적 문장에 따옴표(")가 섞여 JSON이 깨져도
+    항목별로 직접 찾아서 최대한 살린다."""
+    text = text.replace("```json", "").replace("```", "").strip()
+    m = re.search(r"\{.*\}", text, re.DOTALL)
+    if m:
+        try:
+            data = json.loads(m.group(0), strict=False)
+            if isinstance(data, dict) and data:
+                return data
+        except ValueError:
+            pass
+
+    keys = list(AI_REVIEW_LABELS)
+    result = {}
+    for i, key in enumerate(keys):
+        nxt = keys[i + 1] if i + 1 < len(keys) else None
+        end = rf'"\s*,\s*"{nxt}"\s*:' if nxt else r'"\s*\}\s*$'
+        pm = re.search(rf'"{key}"\s*:\s*"(.*?){end}', text, re.DOTALL)
+        if pm:
+            result[key] = pm.group(1).strip()
+    return result if len(result) == len(keys) else {}

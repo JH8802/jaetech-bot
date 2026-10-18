@@ -142,7 +142,7 @@ def body_to_html(body):
     편집기에 바로 붙여넣을 HTML로 바꾼다.
     - [소제목] → <h2> (구글이 읽는 제목 구조가 확실하게 들어감)
     - 문단 → <p>
-    - [사진/그래프/지도 제안], [내부링크 제안] → 눈에 띄는 안내 문단으로 남김
+    - [사진/그래프/지도 제안], [내부링크 제안], [추가 필요] → 눈에 띄는 안내 문단으로 남김
       (실제 사진 업로드·링크 연결은 직접 해야 하므로 지우지 않고 표시)
     """
     blocks = []
@@ -160,7 +160,7 @@ def body_to_html(body):
         elif stripped.startswith("[소제목]"):
             flush()
             blocks.append(f"<h2>{html.escape(stripped[len('[소제목]'):].strip())}</h2>")
-        elif stripped.startswith(VISUAL_TAGS) or stripped.startswith("[내부링크 제안]"):
+        elif stripped.startswith(VISUAL_TAGS) or stripped.startswith(("[내부링크 제안]", "[추가 필요")):
             flush()
             blocks.append(
                 '<p style="background:#fff3cd;padding:8px;">'

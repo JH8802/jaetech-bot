@@ -8,7 +8,7 @@
 import streamlit as st
 from blog_drafter import draft_post, suggest_questions, revise_draft
 from blog_reviewer import (scan_cliches, scan_structure, scan_seo, scan_health_claims,
-                           review_draft, collect_issues, AI_REVIEW_LABELS)
+                           review_draft, collect_issues, ai_issue, AI_REVIEW_LABELS)
 from blog_sources import resolve_sources, is_bare_url
 from blog_utils import parse_draft_metadata, load_past_titles, find_keyword_overlap, body_to_html
 from datetime import datetime
@@ -294,8 +294,8 @@ if st.session_state.drafts:
             for key, label in AI_REVIEW_LABELS.items():
                 if not review["ai"]:
                     break
-                val = (review["ai"].get(key) or "").strip()
-                if val and val != "없음":
+                val = ai_issue(review["ai"].get(key))
+                if val:
                     st.error(f"**{label}**\n{val}")
                 else:
                     st.success(f"{label}: 문제 없음")
@@ -334,7 +334,12 @@ if st.session_state.drafts:
                         except Exception as e:
                             revised = ""
                             st.error(f"❌ 다듬기 실패: {e}\n(네트워크 문제일 수 있어 — 다시 눌러봐)")
-                    if revised:
+                    if revised and revised.strip() == draft.strip():
+                        st.info(
+                            "수정본이 이전 초안과 똑같아 — 지적된 부분을 AI가 재료 없이는 고칠 수 없다고 "
+                            "판단한 거야. 위 '추가 메모'에 그 지적을 해결할 사실·사례·기준을 적고 다시 눌러봐."
+                        )
+                    elif revised:
                         path = st.session_state.filenames[platform]
                         os.makedirs("drafts/history", exist_ok=True)
                         stamp = datetime.now().strftime("%H%M%S")

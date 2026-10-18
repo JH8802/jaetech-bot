@@ -8,7 +8,7 @@
 """
 from blog_drafter import draft_post, suggest_questions
 from blog_reviewer import (scan_cliches, scan_structure, scan_seo, scan_health_claims,
-                           review_draft, AI_REVIEW_LABELS)
+                           review_draft, ai_issue, AI_REVIEW_LABELS)
 from blog_sources import resolve_sources, is_bare_url
 from blog_utils import parse_draft_metadata, load_past_titles, find_keyword_overlap, body_to_html
 from datetime import datetime
@@ -137,8 +137,8 @@ def print_review(draft, meta, platform, target_keyword):
     for key, label in AI_REVIEW_LABELS.items():
         if not ai_result:
             break
-        val = (ai_result.get(key) or "").strip()
-        if val and val != "없음":
+        val = ai_issue(ai_result.get(key))
+        if val:
             print(f"❌ {label}: {val}")
         else:
             print(f"✅ {label}: 문제 없음")
