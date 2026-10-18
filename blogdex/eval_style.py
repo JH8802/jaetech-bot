@@ -16,6 +16,15 @@ JOSA_RE = re.compile(r"(으로|에서|까지|부터|이랑|에게|은|는|이|�
 STOP_TOKENS = {"과연", "어떤", "특히", "대해", "최근", "그리고", "하지만", "그런데", "너무", "정말", "진짜", "그냥", "조금", "많이", "있었", "했다", "했어"}
 
 
+# 한국어에서 거의 쓰이지 않는 조사 겹침·어미+조사 오류, 쉼표 앞 공백
+TYPO_RE = re.compile(r"[가-힣]{1,6}(?:는를|은를|을를|를를|는을|다으로|요으로)|\S{1,6}\s,(?=\S)")
+
+
+def find_typos(text: str) -> list[str]:
+    """깨진 조사·어미 의심 구간 목록(앞뒤 문맥 포함, 중복 제거)"""
+    return list(dict.fromkeys(m.group(0).strip() for m in TYPO_RE.finditer(text)))
+
+
 def _body_parts(body: str):
     paras = split_paragraphs(strip_tags(body))
     tag_i = find_hashtag_index(paras)
@@ -163,6 +172,12 @@ def evaluate(kind: str, body: str, keywords: list[str], memo: str = "", title: s
     # 11) 발행 전 확인 필요 표시: AI가 지어내지 않고 남긴 자리. 다시 쓰기로 해결할 수 없어 직접 확인해야 하므로 advice 는 비움
     todo = len(re.findall(r"\[확인 필요[^\]]*\]", strip_tags(body)))
     checks.append(_check("todo", "발행 전 확인 필요 표시", f"{todo}곳", "0곳 (본문에서 직접 확인하고 지우기)", todo == 0, ""))
+
+    # 12) 조사·어미 오류 의심: 직접 고치다 생기는 '커피는를', '있다으로' 같은 깨진 문장 찾기
+    typos = find_typos(" ".join(paras))
+    shown = ", ".join(f"'{t}'" for t in typos[:3])
+    checks.append(_check("typo", "조사·어미 오류 의심", "없음" if not typos else f"{len(typos)}곳 ({shown})", "0곳", not typos,
+                         f"깨진 조사·어미({shown})가 있는 문장을 자연스럽게 고칠 것"))
 
     issues = [c["advice"] for c in checks if not c["ok"] and c["advice"]]
     return {"checks": checks, "issues": issues, "ok_count": sum(c["ok"] for c in checks), "total": len(checks), "headings": len(heads)}

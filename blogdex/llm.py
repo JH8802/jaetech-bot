@@ -187,15 +187,24 @@ def parse_photo_notes(raw: str, count: int, first: int = 1) -> list[dict]:
             by_n[n] = {"n": n, "category": str(it.get("category") or "기타")[:12], "desc": str(it.get("desc") or "")[:200],
                        "text": str(it.get("text") or "")[:100],
                        "dish": str(it.get("dish") or "")[:60],
-                       "dish_confidence": str(it.get("dish_confidence") or "")[:4]}
-    return [by_n.get(n, {"n": n, "category": "기타", "desc": "", "text": "", "dish": "", "dish_confidence": ""}) for n in range(first, first + count)]
+                       "dish_confidence": str(it.get("dish_confidence") or "")[:4],
+                       "caption": re.sub(r"[.!?…]+$", "", str(it.get("caption") or "").strip())[:40],
+                       "thumb": _thumb_score(it.get("thumb"))}
+    return [by_n.get(n, {"n": n, "category": "기타", "desc": "", "text": "", "dish": "", "dish_confidence": "", "caption": "", "thumb": 0}) for n in range(first, first + count)]
+
+
+def _thumb_score(v) -> int:
+    try:
+        return max(0, min(5, int(v)))
+    except (TypeError, ValueError):
+        return 0
 
 
 # ---------- 샘플(MOCK) ----------
 def _mock_vision(count: int, first: int = 1) -> str:
     cats = ["외관", "내부", "음식", "음식", "메뉴판"]
     return "[" + ",".join(
-        '{"n": %d, "category": "%s", "desc": "샘플 사진 %d의 모습", "text": ""}' % (i, cats[(i - 1) % len(cats)], i)
+        '{"n": %d, "category": "%s", "desc": "샘플 사진 %d의 모습", "text": "", "caption": "샘플 사진 %d", "thumb": %d}' % (i, cats[(i - 1) % len(cats)], i, i, 5 if i == 2 else 3)
         for i in range(first, first + count)) + "]"
 
 def _mock_titles(user: str) -> list[str]:
