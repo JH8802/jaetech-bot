@@ -7,7 +7,8 @@
 """
 import streamlit as st
 from blog_drafter import draft_post, suggest_questions
-from blog_reviewer import scan_cliches, scan_structure, scan_seo, review_draft, AI_REVIEW_LABELS
+from blog_reviewer import (scan_cliches, scan_structure, scan_seo, scan_health_claims,
+                           review_draft, AI_REVIEW_LABELS)
 from blog_utils import parse_draft_metadata, load_past_titles, find_keyword_overlap, body_to_html
 from datetime import datetime
 import os
@@ -46,6 +47,8 @@ platforms = st.multiselect(
     ["네이버 블로그", "티스토리", "워드프레스"],
     default=["티스토리"],
 )
+if "티스토리" in platforms and "워드프레스" in platforms:
+    st.warning("**중복 콘텐츠 주의** — 같은 주제를 티스토리와 워드프레스에 둘 다 올리면 내용이 거의 같아서, 구글이 하나만 검색에 보여주고 나머지는 거의 숨겨 — 두 블로그가 서로 경쟁하게 돼. 원칙은 '한 주제는 한 블로그'. 굳이 둘 다 쓸 거면 주제나 관점을 확실히 나눠서 (예: 소비자 관점 / 실무자 관점) 따로 생성해.")
 
 topic = st.text_input("주제", placeholder="예: 홈쇼핑 유산균 표시광고, 뭐가 문제인가")
 target_keyword = st.text_input(
@@ -130,6 +133,7 @@ if st.session_state.drafts:
                         "cliche": scan_cliches(draft),
                         "structure": scan_structure(draft),
                         "seo": scan_seo(meta, platform, st.session_state.target_keyword),
+                        "claims": scan_health_claims(meta["body"]),
                         "ai": review_draft(draft),
                         "overlap": find_keyword_overlap(
                             platform, st.session_state.target_keyword,
@@ -205,6 +209,16 @@ if st.session_state.drafts:
                 st.error("**검색 최적화(키워드/소제목/메타설명/출처)**\n" + "\n".join(f"- {i}" for i in review["seo"]))
             else:
                 st.success("검색 최적화(키워드/소제목/메타설명/출처): 문제 없음")
+
+            if review["claims"]:
+                st.warning(
+                    "**표시광고 표현 확인 필요** (질병 치료·예방을 암시할 수 있는 표현 — "
+                    "'이런 표현은 쓰면 안 된다'는 설명 문맥이면 괜찮아)\n"
+                    + "\n".join(f"- {i}" for i in review["claims"])
+                    + "\n\n협찬·제공받은 제품이면 글 첫머리에 그 사실을 밝혀야 해 (공정위 추천·보증 심사지침)."
+                )
+            else:
+                st.success("표시광고 표현: 걸리는 표현 없음")
 
             if not review["ai"]:
                 st.warning("AI 점검(문장 리듬·의견·구체성·차별화·키워드)이 실패했어 — 네트워크 문제일 수 있어. "

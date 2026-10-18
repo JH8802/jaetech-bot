@@ -7,7 +7,8 @@
 자동 점검까지 돌려서 drafts/ 폴더에 파일로 저장한다.
 """
 from blog_drafter import draft_post, suggest_questions
-from blog_reviewer import scan_cliches, scan_structure, scan_seo, review_draft, AI_REVIEW_LABELS
+from blog_reviewer import (scan_cliches, scan_structure, scan_seo, scan_health_claims,
+                           review_draft, AI_REVIEW_LABELS)
 from blog_utils import parse_draft_metadata, load_past_titles, find_keyword_overlap, body_to_html
 from datetime import datetime
 import os
@@ -123,6 +124,13 @@ def print_review(draft, meta, platform, target_keyword):
         print("✅ 검색 최적화(키워드/소제목/메타설명/출처): 문제 없음")
         passed += 1
 
+    claims = scan_health_claims(meta["body"])
+    if claims:
+        print("⚠️ 표시광고 표현 확인 필요 (설명 문맥이면 괜찮음 — 통과/실패 집계엔 안 들어감)")
+        for c in claims:
+            print(f"   - {c}")
+        print("   협찬·제공받은 제품이면 글 첫머리에 그 사실을 밝혀야 함 (공정위 추천·보증 심사지침).")
+
     if not ai_result:
         print("⚠️ AI 점검 실패 (네트워크 문제일 수 있음) — 아래 AI 항목은 점검 안 됨")
     for key, label in AI_REVIEW_LABELS.items():
@@ -143,6 +151,8 @@ if __name__ == "__main__":
     print("=== 블로그 초안 생성 === (주제는 뭐든 상관없음)")
 
     platforms = choose_platforms()
+    if "티스토리" in platforms and "워드프레스" in platforms:
+        print("\n⚠️ 중복 콘텐츠 주의 — 같은 주제를 티스토리와 워드프레스에 둘 다 올리면 내용이 거의 같아서, 구글이 하나만 검색에 보여주고 나머지는 거의 숨겨 — 두 블로그가 서로 경쟁하게 돼. 원칙은 '한 주제는 한 블로그'. 굳이 둘 다 쓸 거면 주제나 관점을 확실히 나눠서 (예: 소비자 관점 / 실무자 관점) 따로 생성해.")
 
     topic = input("\n주제: ").strip()
     target_keyword = input("타깃 키워드 (잡고 싶은 검색어, 없으면 엔터 — AI가 고름): ").strip()
