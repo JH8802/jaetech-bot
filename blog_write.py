@@ -165,7 +165,9 @@ if __name__ == "__main__":
         for q in questions:
             print(f"  - {q}")
 
-    key_points = get_lines("\n실제 경험/숫자/사례를 한 줄씩 입력해 (다 넣었으면 빈 줄에서 엔터):")
+    key_points = get_lines("\n실제 경험/숫자/사례를 입력해 (한 줄에 하나씩, 또는 길게 이어서 붙여넣기 / 다 넣었으면 빈 줄에서 엔터):")
+    if sum(len(p) for p in key_points) > 1000:
+        print("⚠️ 경험/숫자/사례가 1,000자를 넘었어 — 길면 핵심이 묻힐 수 있으니 1,000자 이내로 줄이는 걸 권장해.")
 
     if not key_points:
         print("\n❌ 사실/경험을 최소 1개는 입력해야 해. 다시 실행해줘.")
@@ -183,7 +185,10 @@ if __name__ == "__main__":
         print("  (요약은 AI가 한 거라 원문과 대조해서 확인해줘. 읽지 못한 링크는 출처에서 뺐어)")
         sources = [x for x in sources if not is_bare_url(x)]
 
-    personal_take = input("\n본인 의견/입장 (없으면 그냥 엔터): ").strip()
+    personal_take = input("\n본인 의견/입장 (300자 이내, 없으면 그냥 엔터): ").strip()
+    if len(personal_take) > 300:
+        print(f"⚠️ 의견이 {len(personal_take)}자야 — 300자까지만 반영할게.")
+        personal_take = personal_take[:300]
 
     os.makedirs("drafts", exist_ok=True)
 

@@ -110,7 +110,9 @@ def draft_post(topic, key_points, personal_take="", platform="네이버 블로�
 
 타깃 키워드: {keyword_text}
 
-제공된 사실/숫자/경험 (이것만 사용하고, 새로 지어내지 마):
+제공된 사실/숫자/경험 (이것만 사용하고, 새로 지어내지 마 — 항목별 목록일 수도,
+길게 이어 쓴 문단일 수도 있어. 문단이면 그 안에 든 사실·수치·경험·저자의 판단을
+빠짐없이 읽어내서 글에 반영해):
 {points_text}
 {sources_block}
 저자의 의견/입장: {personal_take or "(별도 입력 없음 — 사실 전달 위주로 작성)"}

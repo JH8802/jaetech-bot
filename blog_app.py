@@ -75,11 +75,17 @@ if st.session_state.questions:
         for q in st.session_state.questions:
             st.write(f"- {q}")
 
+KEY_POINTS_MAX = 1000  # 실제 경험/숫자/사례 최대 글자 수
+PERSONAL_TAKE_MAX = 300  # 본인 의견/입장 최대 글자 수
+
 key_points_text = st.text_area(
-    "실제 경험/숫자/사례 (한 줄에 하나씩)",
-    height=150,
-    placeholder="예)\n균주명 없이 보장균수만 강조하는 표시 사례를 실무에서 자주 봄\n식약처 기준상 효능 표시엔 건강기능식품 인증이 필요함",
+    f"실제 경험/숫자/사례 (최대 {KEY_POINTS_MAX:,}자 — 한 줄씩 나눠 써도, 문단으로 길게 써도 돼)",
+    height=220,
+    max_chars=KEY_POINTS_MAX,
+    placeholder="예)\n균주명 없이 보장균수만 강조하는 표시 사례를 실무에서 자주 봄. 식약처 기준상 효능 표시엔 건강기능식품 인증이 필요한데, 일반식품으로 팔면서 효능을 암시하는 문구를 쓰는 사례도 종종 봄.\n\n(항목별로 줄바꿈해서 써도 되고, 이렇게 이어서 써도 돼)",
+    help="글에 꼭 반영하고 싶은 사실·숫자·실무 경험을 편하게 적어줘. 여기 없는 내용은 AI가 지어서 쓰지 않아.",
 )
+st.caption(f"{len(key_points_text):,} / {KEY_POINTS_MAX:,}자")
 
 
 def fetch_sources_callback():
@@ -115,9 +121,16 @@ for item in st.session_state.get("sources_report", []):
         st.success(f"✅ {item['url']}\n\n{item['message']}")
     else:
         st.error(f"❌ {item['url']} — {item['message']}\n\n이 링크는 위 입력칸에 문서명 + 핵심 내용을 직접 적어줘.")
-personal_take = st.text_input("본인 의견/입장 (없으면 비워둬도 됨)")
+personal_take = st.text_area(
+    f"본인 의견/입장 (최대 {PERSONAL_TAKE_MAX}자 — 없으면 비워둬도 됨)",
+    height=100,
+    max_chars=PERSONAL_TAKE_MAX,
+    help="이 글에서 내가 주장하고 싶은 관점·판단. 글의 방향을 잡는 데 쓰여.",
+)
+st.caption(f"{len(personal_take):,} / {PERSONAL_TAKE_MAX:,}자")
 
 if st.button("✍️ 초안 생성", type="primary"):
+    # 줄바꿈으로 나눠 쓰면 항목별로, 문단으로 길게 써도 그대로 한 덩어리로 전달됨
     key_points = [line.strip() for line in key_points_text.split("\n") if line.strip()]
     sources = [line.strip() for line in sources_text.split("\n") if line.strip()]
     if any(is_bare_url(s) for s in sources):
