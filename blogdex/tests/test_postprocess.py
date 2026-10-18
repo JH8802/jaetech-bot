@@ -152,6 +152,40 @@ class PhotoTests(unittest.TestCase):
                 self.assertFalse(paras[i + 1].startswith("1."))
 
 
+class RatingTests(unittest.TestCase):
+    R = [{"label": "맛", "score": 4}, {"label": "가격", "score": 3}, {"label": "주차", "score": 5}]
+
+    def test_block_format(self):
+        b = pp.build_rating_block(self.R)
+        self.assertEqual(b.split("\n"), ["★ 별점 한눈에 보기", "맛 ★★★★☆ 4/5", "가격 ★★★☆☆ 3/5", "주차 ★★★★★ 5/5"])
+
+    def test_inserted_before_one_liner_and_before_hashtags(self):
+        raw = "인트로 문단입니다.\n\n마무리 문단입니다.\n\n한 줄 평: 양이 넉넉해서 만족스러운 곳이에요.\n\n#맛집 #마포 #고기 #후기 #추천"
+        out = pp.finalize("food", raw, {"name": "테스트 마포점"}, ["테스트"], ratings=self.R)["body"].split("\n\n")
+        i = next(k for k, p in enumerate(out) if p.startswith("★ 별점"))
+        self.assertTrue(out[i + 1].startswith("한 줄 평:"))   # 별점 블록 바로 뒤에 한 줄 평
+        self.assertTrue(out[-1].startswith("#"))              # 해시태그는 마지막 유지
+
+    def test_idempotent_and_ai_written_block_replaced(self):
+        raw = "본문입니다.\n\n★ 별점 한눈에 보기\n맛 ★☆☆☆☆ 1/5\n\n한 줄 평: 괜찮아요.\n\n#a #b #c #d #e"
+        once = pp.finalize("hotel", raw, {"name": "호텔"}, ["호텔"], ratings=self.R)["body"]
+        twice = pp.finalize("hotel", once, {"name": "호텔"}, ["호텔"], ratings=self.R)["body"]
+        self.assertEqual(once.count("★ 별점 한눈에 보기"), 1)
+        self.assertNotIn("1/5", once)                          # AI가 만든 값은 버리고 입력값으로 교체
+        self.assertEqual(once, twice)
+
+    def test_no_ratings_and_missing_one_liner(self):
+        r = pp.finalize("food", "본문입니다.\n\n#a #b #c #d #e", {"name": "가게"}, ["가게"])
+        self.assertNotIn("별점", r["body"])
+        self.assertTrue(any("한 줄 평" in n for n in r["notes"]))
+        r2 = pp.finalize("food", "본문입니다.\n\n#a #b #c #d #e", {"name": "가게"}, ["가게"], ratings=self.R)
+        self.assertLess(r2["body"].index("★ 별점"), r2["body"].index("#a"))  # 한 줄 평이 없어도 해시태그 앞
+
+    def test_info_kind_never_gets_rating_block(self):
+        r = pp.finalize("info", "본문입니다.\n\n한 줄 정리: 확인이 먼저입니다.\n\n#a #b #c #d #e", None, ["본문"], ratings=self.R)
+        self.assertNotIn("★", r["body"])
+
+
 class BatFileTests(unittest.TestCase):
     def test_bat_files_use_crlf_and_have_no_nested_quote_trap(self):
         base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

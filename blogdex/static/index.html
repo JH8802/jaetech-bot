@@ -87,6 +87,11 @@
   .stylecard { padding: 14px 24px; margin-bottom: 16px; }
   .stylecard summary { cursor: pointer; font-size: 14px; }
   .stylecard textarea { margin-top: 6px; }
+  .ratingrows { display: grid; gap: 6px; }
+  .ratingrow { display: grid; grid-template-columns: 1fr 150px 30px; gap: 8px; align-items: center; }
+  .ratingrow input, .ratingrow select { height: 38px; font-size: 13px; padding-top: 0; padding-bottom: 0; line-height: 1.2; }
+  .ratingrow .x { width: 28px; height: 28px; }
+  .article .ratingbox { border: 1px solid var(--line); border-radius: 10px; padding: 12px 16px; background: #fffdf5; line-height: 1.9; }
   .hidden { display: none !important; }
 
   /* 결과 */
@@ -176,6 +181,15 @@
     <p class="hint" id="memoHint"></p>
     <p class="hint warnhint hidden" id="memoShort"></p>
 
+    <div id="ratingBox" class="hidden">
+      <label class="cap">별점 <small>(선택 · 5점 만점, 1~5점 정수 · 점수를 고른 항목만 글 끝에 들어가요 · 항목 이름은 고쳐 쓸 수 있어요)</small></label>
+      <div class="ratingrows" id="ratingRows"></div>
+      <div class="row" style="margin-top:8px;align-items:center">
+        <button class="btn ghost" id="btnRatingAdd" type="button" style="height:32px;font-size:12px">+ 항목 추가</button>
+        <span class="hint" style="margin:0">내가 직접 준 점수예요. AI가 점수를 정하지 않고, 글과 한 줄 평이 이 점수에 맞게 쓰여요.</span>
+      </div>
+    </div>
+
     <label class="cap" for="fileInput">사진 <small>(선택 · 최대 <span id="photoLimit">20</span>장 · 올린 순서가 사진 번호예요)</small></label>
     <div class="photo-actions">
       <button class="btn ghost" id="btnPhotos" type="button">사진 선택</button>
@@ -226,6 +240,41 @@
 <script>
 const $ = (id) => document.getElementById(id);
 const COLORS = ['#e03131', '#1c7ed6', '#d6336c'];
+const DEFAULT_RATING_LABELS = { food: ['맛', '가격', '분위기', '주차', '좌석·테이블 편리성'], hotel: ['위치', '객실·시설', '서비스', '식사', '가성비'] };
+const STAR_OPTS = [['', '선택 안 함'], ['1', '★☆☆☆☆ 1점'], ['2', '★★☆☆☆ 2점'], ['3', '★★★☆☆ 3점'], ['4', '★★★★☆ 4점'], ['5', '★★★★★ 5점']];
+const ratingRows = { food: DEFAULT_RATING_LABELS.food.map((label) => ({ label, score: '' })), hotel: DEFAULT_RATING_LABELS.hotel.map((label) => ({ label, score: '' })) };
+let ratingSaveTimer = 0;
+function saveRatingLabels() {
+  clearTimeout(ratingSaveTimer);
+  ratingSaveTimer = setTimeout(() => {
+    const labels = { food: ratingRows.food.map((r) => r.label), hotel: ratingRows.hotel.map((r) => r.label) };
+    fetch('/api/rating-labels', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ labels }) }).catch(() => {});
+  }, 600);
+}
+function renderRatings() {
+  const box = $('ratingBox');
+  const on = PLACE_KINDS.includes(state.kind);
+  box.classList.toggle('hidden', !on);
+  if (!on) return;
+  const rows = ratingRows[state.kind];
+  $('ratingRows').innerHTML = '';
+  rows.forEach((r, i) => {
+    const d = document.createElement('div'); d.className = 'ratingrow';
+    d.innerHTML = `<input type="text" maxlength="12" value="${esc(r.label)}" placeholder="항목 이름"><select>${STAR_OPTS.map(([v, t]) => `<option value="${v}" ${String(r.score) === v ? 'selected' : ''}>${t}</option>`).join('')}</select><button class="x" type="button" title="항목 빼기">✕</button>`;
+    d.querySelector('input').oninput = (e) => { r.label = e.target.value; saveRatingLabels(); };
+    d.querySelector('select').onchange = (e) => { r.score = e.target.value; };
+    d.querySelector('.x').onclick = () => { rows.splice(i, 1); renderRatings(); saveRatingLabels(); };
+    $('ratingRows').append(d);
+  });
+  $('btnRatingAdd').disabled = rows.length >= 8;
+}
+$('btnRatingAdd').onclick = () => { const rows = ratingRows[state.kind]; if (rows && rows.length < 8) { rows.push({ label: '', score: '' }); renderRatings(); saveRatingLabels(); } };
+const currentRatings = () => (PLACE_KINDS.includes(state.kind) ? ratingRows[state.kind].filter((r) => r.label.trim() && r.score).map((r) => ({ label: r.label.trim(), score: +r.score })) : []);
+fetch('/api/rating-labels').then((r) => r.json()).then((d) => {
+  ['food', 'hotel'].forEach((k) => { const L = d.labels && d.labels[k]; if (Array.isArray(L) && L.length) ratingRows[k] = L.map((label) => ({ label, score: '' })); });
+  renderRatings();
+}).catch(() => {});
+
 const KIND_LABEL = { info: '정보글', food: '맛집글', hotel: '호텔·여행 후기' };
 const PLACE_KINDS = ['food', 'hotel'];
 const state = { kind: 'info', titles: [], busy: false, article: null, photos: [], resultPhotos: [], adTerms: [] };  // photos: 입력칸의 사진 / resultPhotos: 결과에 보여 줄 사진(현재 세션에서 생성한 글만)
@@ -263,6 +312,7 @@ function setKind(kind) {
   $('guardrail').checked = ui.guardrail;
   if (PLACE_KINDS.includes(kind)) $('evidence').value = 'strict';
   $('photoLimit').textContent = photoLimit();
+  renderRatings();
   updateHints();
 }
 function updateHints() {
@@ -358,6 +408,7 @@ function markAd(html) {
 function renderBody(text) {
   const counter = { n: 0 };
   return paragraphs(text).map((p) => {
+    if (p.startsWith('★ 별점 한눈에 보기')) return `<p class="ratingbox">${p.split('\n').map((l, i) => (i === 0 ? `<b>${esc(l)}</b>` : esc(l))).join('<br>')}</p>`;
     const pn = photoNo(p);
     if (pn) {
       const ph = state.resultPhotos[pn - 1];
@@ -378,6 +429,7 @@ const todoCopy = (h) => h.replace(TODO_RE, '<b><span style="color:#e8590c">$&</s
 function toCopyHTML(text) {
   const counter = { n: 0 };
   return paragraphs(text).map((p) => {
+    if (p.startsWith('★ 별점 한눈에 보기')) return `<p>${p.split('\n').map((l, i) => (i === 0 ? `<b>${esc(l)}</b>` : esc(l))).join('<br>')}</p>`;
     const pn = photoNo(p);
     if (pn) return `<p>${photoCopyLabel(pn)}</p>`;
     if (isTags(p)) return `<p>${esc(p)}</p>`;
@@ -490,7 +542,7 @@ function currentPlace() {
   return name ? { name, category: $('mCategory').value.trim(), address: $('mAddress').value.trim(), phone: '' } : null;
 }
 const keywordList = () => $('kw').value.split(/[,，]/).map((s) => s.trim()).filter(Boolean);
-const commonBody = () => ({ kind: state.kind, memo: $('memo').value.trim(), place: currentPlace(), guardrail: $('guardrail').checked, evidence_mode: $('evidence').value });
+const commonBody = () => ({ kind: state.kind, memo: $('memo').value.trim(), place: currentPlace(), ratings: currentRatings(), guardrail: $('guardrail').checked, evidence_mode: $('evidence').value });
 
 /* ---------- 제목 후보 ---------- */
 async function makeTitles(regen) {
@@ -621,7 +673,7 @@ async function copyArticle() {
 $('btnCopy').onclick = copyArticle;
 function newArticle() {
   state.article = null; $('title').value = ''; $('memo').value = ''; $('kw').value = ''; $('candidates').classList.add('hidden');
-  $('placeQuery').value = ''; $('mCategory').value = ''; $('mAddress').value = ''; updateHints(); state.photos = []; state.resultPhotos = []; renderPhotos(); $('photoNotes').innerHTML = ''; $('todoPanel').innerHTML = ''; state.adTerms = [];
+  $('placeQuery').value = ''; $('mCategory').value = ''; $('mAddress').value = ''; updateHints(); Object.values(ratingRows).forEach((rows) => rows.forEach((r) => { r.score = ''; })); renderRatings(); state.photos = []; state.resultPhotos = []; renderPhotos(); $('photoNotes').innerHTML = ''; $('todoPanel').innerHTML = ''; state.adTerms = [];
   $('resultBox').innerHTML = '<div class="empty">원고 제목을 입력하세요.<br>원고를 생성하면 결과가 여기에 표시됩니다.</div>';
   $('actions').classList.add('hidden'); $('quality').innerHTML = ''; $('notes').textContent = ''; $('btnWrite').disabled = true; showError('');
   window.scrollTo({ top: 0, behavior: 'smooth' });

@@ -275,6 +275,49 @@ class ApiTests(unittest.TestCase):
         self.assertIn("메뉴판을 한참 고민했다", strict)                      # 구체 행동 장면은 여전히 금지
         self.assertNotIn("메모에 적힌 느낌과 이유만 씁니다", strict)
 
+    def test_ratings_flow_validation_and_prompt(self):
+        ratings = [{"label": "맛", "score": 4}, {"label": "가격", "score": 2}, {"label": "", "score": 5}, {"label": "분위기", "score": ""}]
+        from unittest import mock
+        seen = {}
+        real = A.llm.stream_text
+        def spy(system, user, **kw):
+            seen["system"], seen["user"] = system, user
+            return real(system, user, **kw)
+        with mock.patch.object(A.llm, "stream_text", side_effect=spy):
+            _, events = self._stream(ratings=ratings)
+        done = dict(events)["done"]
+        self.assertIn("★ 별점 한눈에 보기\n맛 ★★★★☆ 4/5\n가격 ★★☆☆☆ 2/5", done["body"])   # 점수 있는 항목만, 입력 순서대로
+        self.assertNotIn("분위기", done["body"].split("★ 별점")[1].split("\n\n")[0])
+        self.assertIn("- 맛: 4점", seen["user"])
+        self.assertIn("- 가격: 2점", seen["user"])
+        self.assertIn("한 줄 평: ", seen["system"])
+        saved = self.c.get(f"/api/articles/{done['article_id']}").get_json()["article"]
+        self.assertEqual(saved["options"]["ratings"], [{"label": "맛", "score": 4}, {"label": "가격", "score": 2}])
+        # 다시 쓰기에서도 별점이 유지된다
+        r = self.c.post(f"/api/articles/{done['article_id']}/rewrite")
+        if r.status_code == 200:
+            body2 = dict(parse_sse(r.get_data(as_text=True)))["done"]["body"]
+            self.assertEqual(body2.count("★ 별점 한눈에 보기"), 1)
+        # 범위 밖 점수는 400, 정보글은 별점 무시
+        self.assertEqual(self._stream(ratings=[{"label": "맛", "score": 6}])[0].status_code, 400)
+        self.assertEqual(self._stream(ratings=[{"label": "맛", "score": 3}] * 9)[0].status_code, 400)
+        _, ev_info = self._stream(kind="info", place={}, ratings=[{"label": "맛", "score": 3}])
+        self.assertNotIn("★", dict(ev_info)["done"]["body"])
+
+    def test_rating_labels_are_saved_and_editable(self):
+        self.assertEqual(self.c.get("/api/rating-labels").get_json()["labels"], {})
+        self.c.put("/api/rating-labels", json={"labels": {"food": ["맛", "가격", "주차"], "hotel": ["위치", "조식"]}})
+        self.assertEqual(self.c.get("/api/rating-labels").get_json()["labels"]["food"], ["맛", "가격", "주차"])
+        self.c.put("/api/rating-labels", json={"labels": {"food": ["맛", "양"]}})   # 수정
+        self.assertEqual(self.c.get("/api/rating-labels").get_json()["labels"], {"food": ["맛", "양"]})
+
+    def test_one_liner_rules_in_prompts(self):
+        import prompts
+        for kind in ("food", "hotel"):
+            self.assertIn("'한 줄 평: ' 으로 시작", prompts.build_system(kind, False, "strict"))
+        self.assertIn("'한 줄 정리: '", prompts.build_system("info", False, "strict"))
+        self.assertNotIn("별점 줄(", prompts.build_system("info", False, "strict"))
+
     def test_dish_name_confidence_rules_reach_the_prompts(self):
         import prompts
         notes = [{"n": 1, "category": "조식·음식", "desc": "초밥", "text": "", "dish": "연어 초밥", "dish_confidence": "확실"},
