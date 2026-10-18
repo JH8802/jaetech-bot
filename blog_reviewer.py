@@ -69,6 +69,57 @@ def scan_structure(draft):
     return issues
 
 
+def _has_keyword(text, keyword):
+    """띄어쓰기 차이는 무시하고, 키워드의 단어가 모두 들어 있으면 포함으로 본다
+    (예: '유산균 보장균수' → '유산균의 보장균수'도 통과)."""
+    flat = text.replace(" ", "").lower()
+    return all(word.lower() in flat for word in keyword.split())
+
+
+def scan_seo(meta, platform, target_keyword=""):
+    """규칙 기반 SEO 점검 — 구글 기준(티스토리/워드프레스)은 더 엄격하게 본다.
+    meta는 parse_draft_metadata()의 반환값."""
+    issues = []
+    body = meta["body"]
+    is_google = platform in ("티스토리", "워드프레스")
+
+    subheadings = [l.strip()[len("[소제목]"):].strip()
+                   for l in body.split("\n") if l.strip().startswith("[소제목]")]
+    paragraphs = [p.strip() for p in body.split("\n\n") if p.strip() and not p.strip().startswith("[")]
+    first_paragraph = paragraphs[0] if paragraphs else ""
+
+    if target_keyword:
+        if not _has_keyword(meta["title"], target_keyword):
+            issues.append(f"제목에 타깃 키워드 '{target_keyword}'가 없음")
+        if not _has_keyword(first_paragraph, target_keyword):
+            issues.append(f"첫 문단에 타깃 키워드 '{target_keyword}'가 없음 (구글이 첫 문단으로 주제를 파악함)")
+        if is_google and subheadings and not any(_has_keyword(s, target_keyword) for s in subheadings):
+            issues.append("소제목 중 타깃 키워드가 들어간 게 하나도 없음")
+
+    title_len = len(meta["title"])
+    if title_len > 35:
+        issues.append(f"제목 {title_len}자 — 검색결과에서 뒷부분이 잘릴 수 있음 (30자 안팎 권장)")
+
+    if is_google:
+        if not 3 <= len(subheadings) <= 5:
+            issues.append(f"소제목 {len(subheadings)}개 — 구글용 글은 3~5개 권장")
+        desc_len = len(meta["meta_description"])
+        if desc_len == 0:
+            issues.append("메타설명이 없음")
+        elif not 100 <= desc_len <= 160:
+            issues.append(f"메타설명 {desc_len}자 — 120~155자 권장 (너무 짧거나 길면 구글이 본문에서 임의로 가져감)")
+
+    if platform == "워드프레스" and not meta.get("slug"):
+        issues.append("글 주소(슬러그)가 없음")
+
+    missing_sources = body.count("[출처 필요")
+    if missing_sources:
+        issues.append(f"[출처 필요] {missing_sources}곳 — 발행 전에 근거를 채우거나 문장을 고쳐야 함 "
+                      "(건강·돈 주제는 구글이 근거를 특히 엄격하게 봄)")
+
+    return issues
+
+
 def review_draft(draft):
     """AI 기반 점검 (문장 리듬 / 저자 의견 / 사실 구체성 / 차별화 / SEO 키워드) — Haiku로 저비용 호출."""
     prompt = f"""아래는 블로그 초안이야. 다음 5개 기준으로만 점검해줘.

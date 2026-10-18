@@ -7,8 +7,8 @@
 자동 점검까지 돌려서 drafts/ 폴더에 파일로 저장한다.
 """
 from blog_drafter import draft_post, suggest_questions
-from blog_reviewer import scan_cliches, scan_structure, review_draft, AI_REVIEW_LABELS
-from blog_utils import parse_draft_metadata
+from blog_reviewer import scan_cliches, scan_structure, scan_seo, review_draft, AI_REVIEW_LABELS
+from blog_utils import parse_draft_metadata, load_past_titles
 from datetime import datetime
 import os
 
@@ -21,10 +21,10 @@ def choose_platforms():
     print("  1) 네이버 블로그")
     print("  2) 티스토리")
     print("  3) 워드프레스")
-    raw = input("선택: ").strip()
+    raw = input("선택 (그냥 엔터 = 티스토리): ").strip()
     codes = [c.strip() for c in raw.split(",") if c.strip() in PLATFORM_OPTIONS]
     if not codes:
-        codes = ["1"]
+        codes = ["2"]
     return [PLATFORM_OPTIONS[c] for c in codes]
 
 
@@ -57,36 +57,44 @@ def print_platform_guide(platform, meta):
         print("     사진 삽입+ALT: [사진/그래프/지도 제안] 자리에서 사진 첨부 → 삽입한 사진")
         print("     클릭 → 뜨는 도구모음에서 대체 텍스트 아이콘 클릭 → 팝업에 ALT 문구")
         print("     입력 → 확인.")
+        print("  💡 글 주소(최초 1회만): 블로그 관리 → 블로그 설정에서 글 주소 형식을 숫자 대신")
+        print("     '문자'로 바꿀 수 있어 (메뉴 위치는 직접 확인). 기존 글 주소가 바뀔 수 있으니 초반에.")
 
     elif platform == "워드프레스":
         print(f"  - 제목란에 위 제목 그대로")
         print(f"  - 카테고리: {meta['category']}")
         print(f"  - 태그: {meta['tags']}")
         print(f"  - SEO 플러그인(Yoast 등)의 메타 설명 칸에: {meta['meta_description']}")
+        print(f"  - 오른쪽 설정 패널의 고유주소(URL/슬러그) 칸에: {meta['slug']}")
         print("  💡 본문 안 [소제목] 줄은 태그를 지우고 그 블록을 '제목(Heading, H2/H3)'으로 바꿔.")
         print("     사진 삽입+ALT: [사진/그래프/지도 제안] 자리에 이미지 블록 추가 → 사진")
         print("     업로드 → 화면 오른쪽 블록 설정 패널의 'Alt text(대체 텍스트)' 칸에")
         print("     ALT 문구 입력.")
 
+    print("  ⚠️ 공통: 사진 파일명은 [사진 제안]의 '파일명'대로 바꿔서 업로드.")
+    print("     [내부링크 제안]은 실제 발행된 글일 때만 링크, 아니면 줄째로 삭제.")
+    print("     [출처 필요]는 근거를 넣거나 그 주장을 빼고, 대괄호 태그는 전부 지웠는지 확인.")
 
-def get_key_points():
-    print("\n실제 경험/숫자/사례를 한 줄씩 입력해 (다 넣었으면 빈 줄에서 엔터):")
-    points = []
+
+def get_lines(prompt_text):
+    print(prompt_text)
+    lines = []
     while True:
-        line = input(f"  [{len(points) + 1}] ").strip()
+        line = input(f"  [{len(lines) + 1}] ").strip()
         if not line:
             break
-        points.append(line)
-    return points
+        lines.append(line)
+    return lines
 
 
-def print_review(draft):
+def print_review(draft, meta, platform, target_keyword):
     print("\n🔍 자동 점검 중...")
     cliche_issues = scan_cliches(draft)
     structure_issues = scan_structure(draft)
+    seo_issues = scan_seo(meta, platform, target_keyword)
     ai_result = review_draft(draft)
 
-    total = 2 + len(AI_REVIEW_LABELS)  # 클리셰 + 구조 + AI 5개
+    total = 3 + len(AI_REVIEW_LABELS)  # 클리셰 + 구조 + SEO + AI 5개
     passed = 0
 
     print("\n📋 점검 결과")
@@ -107,6 +115,14 @@ def print_review(draft):
         print("✅ 글 구조(가독성/이미지): 문제 없음")
         passed += 1
 
+    if seo_issues:
+        print("❌ 검색 최적화(키워드/소제목/메타설명/출처)")
+        for issue in seo_issues:
+            print(f"   - {issue}")
+    else:
+        print("✅ 검색 최적화(키워드/소제목/메타설명/출처): 문제 없음")
+        passed += 1
+
     for key, label in AI_REVIEW_LABELS.items():
         val = (ai_result.get(key) or "").strip()
         if val and val != "없음":
@@ -125,6 +141,7 @@ if __name__ == "__main__":
     platforms = choose_platforms()
 
     topic = input("\n주제: ").strip()
+    target_keyword = input("타깃 키워드 (잡고 싶은 검색어, 없으면 엔터 — AI가 고름): ").strip()
 
     print("\n💭 관련 질문 만드는 중...")
     questions = suggest_questions(topic)
@@ -133,11 +150,13 @@ if __name__ == "__main__":
         for q in questions:
             print(f"  - {q}")
 
-    key_points = get_key_points()
+    key_points = get_lines("\n실제 경험/숫자/사례를 한 줄씩 입력해 (다 넣었으면 빈 줄에서 엔터):")
 
     if not key_points:
         print("\n❌ 사실/경험을 최소 1개는 입력해야 해. 다시 실행해줘.")
         raise SystemExit(1)
+
+    sources = get_lines("\n참고 자료/출처를 한 줄씩 (예: 식약처 ○○ 고시 / 없으면 바로 엔터):")
 
     personal_take = input("\n본인 의견/입장 (없으면 그냥 엔터): ").strip()
 
@@ -150,7 +169,11 @@ if __name__ == "__main__":
 
         print(f"\n⏳ {platform}용 초안 생성 중...\n")
         try:
-            draft = draft_post(topic, key_points, personal_take, platform=platform)
+            draft = draft_post(
+                topic, key_points, personal_take, platform=platform,
+                target_keyword=target_keyword, sources=sources,
+                past_titles=load_past_titles(platform),
+            )
         except Exception as e:
             print(f"❌ {platform} 초안 생성 실패: {e}")
             print("   (네트워크 문제일 수 있어 — 다음 플랫폼으로 넘어감)")
@@ -164,7 +187,7 @@ if __name__ == "__main__":
         print("=" * 50)
         print(f"\n[본문 글자 수: {len(meta['body'])}자]")
 
-        print_review(draft)
+        print_review(draft, meta, platform, target_keyword)
 
         slug = platform.replace(" ", "")
         filename = f"drafts/{datetime.now().strftime('%Y%m%d_%H%M%S')}_{slug}.txt"
