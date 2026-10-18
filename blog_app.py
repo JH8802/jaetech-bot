@@ -8,7 +8,7 @@
 import streamlit as st
 from blog_drafter import draft_post, suggest_questions
 from blog_reviewer import scan_cliches, scan_structure, scan_seo, review_draft, AI_REVIEW_LABELS
-from blog_utils import parse_draft_metadata, load_past_titles
+from blog_utils import parse_draft_metadata, load_past_titles, find_keyword_overlap, body_to_html
 from datetime import datetime
 import os
 
@@ -22,6 +22,10 @@ if "filenames" not in st.session_state:
     st.session_state.filenames = {}  # {플랫폼명: 저장 경로}
 if "target_keyword" not in st.session_state:
     st.session_state.target_keyword = ""  # 생성 당시 키워드 (점검에 사용)
+if "reviews" not in st.session_state:
+    # {플랫폼명: 점검 결과} — Streamlit은 칸 하나만 고쳐도 코드 전체를 다시
+    # 실행하므로, 저장해두지 않으면 그때마다 AI 점검(유료)이 또 호출됨
+    st.session_state.reviews = {}
 
 st.title("✍️ 블로그 초안 생성기")
 st.caption("주제는 뭐든 상관없음 · 발행은 직접, 초안 생성 + 자동 점검까지만")
@@ -32,6 +36,7 @@ if st.button("🔄 새로 시작"):
     st.session_state.drafts = {}
     st.session_state.filenames = {}
     st.session_state.target_keyword = ""
+    st.session_state.reviews = {}
     st.rerun()
 
 st.divider()
@@ -102,12 +107,13 @@ if st.button("✍️ 초안 생성", type="primary"):
             slug = platform.replace(" ", "")
             filename = f"drafts/{datetime.now().strftime('%Y%m%d_%H%M%S')}_{slug}.txt"
             with open(filename, "w", encoding="utf-8") as f:
-                f.write(f"주제: {topic}\n플랫폼: {platform}\n\n{draft}")
+                f.write(f"주제: {topic}\n플랫폼: {platform}\n타깃 키워드: {target_keyword.strip()}\n\n{draft}")
             filenames[platform] = filename
 
         st.session_state.drafts = drafts
         st.session_state.filenames = filenames
         st.session_state.target_keyword = target_keyword.strip()
+        st.session_state.reviews = {}
 
 if st.session_state.drafts:
     st.divider()
@@ -118,11 +124,29 @@ if st.session_state.drafts:
         meta = parse_draft_metadata(draft)
 
         with tab:
-            with st.spinner("🔍 자동 점검 중..."):
-                cliche_issues = scan_cliches(draft)
-                structure_issues = scan_structure(draft)
-                seo_issues = scan_seo(meta, platform, st.session_state.target_keyword)
-                ai_result = review_draft(draft)
+            if platform not in st.session_state.reviews:
+                with st.spinner("🔍 자동 점검 중..."):
+                    st.session_state.reviews[platform] = {
+                        "cliche": scan_cliches(draft),
+                        "structure": scan_structure(draft),
+                        "seo": scan_seo(meta, platform, st.session_state.target_keyword),
+                        "ai": review_draft(draft),
+                        "overlap": find_keyword_overlap(
+                            platform, st.session_state.target_keyword,
+                            exclude=st.session_state.filenames.values(),
+                        ),
+                    }
+            review = st.session_state.reviews[platform]
+
+            if review["overlap"]:
+                st.warning(
+                    f"**키워드 중복 주의** — 이 {platform}에 타깃 키워드 "
+                    f"'{st.session_state.target_keyword}'로 쓴 글이 이미 있어:\n"
+                    + "\n".join(f"- {t}" for t in review["overlap"])
+                    + "\n\n같은 키워드 글이 여러 개면 내 글끼리 검색 순위를 나눠 먹어. "
+                    "이미 발행한 글이면 키워드를 바꾸거나(더 구체적으로), 새 글 대신 기존 글을 "
+                    "보강하는 걸 고려해봐. 같은 글의 이전 초안일 뿐이면 무시해도 돼."
+                )
 
             st.subheader("📝 발행 정보")
             st.text_input("제목", meta["title"], key=f"title_{platform}")
@@ -156,28 +180,47 @@ if st.session_state.drafts:
             )
             st.caption(f"본문 글자 수: {len(meta['body'])}자 · 저장됨: {st.session_state.filenames[platform]}")
 
+            if platform in ("티스토리", "워드프레스"):
+                where = ("티스토리 에디터를 HTML 모드로 바꾼 뒤" if platform == "티스토리"
+                         else "워드프레스 편집 화면 오른쪽 위 ⋮ 메뉴 → '코드 편집기'에서")
+                with st.expander("🧩 HTML 버전 — 소제목이 제목(H2) 서식으로 이미 들어가 있음"):
+                    st.caption(
+                        f"{where} 붙여넣기 (오른쪽 위 복사 아이콘 클릭). 노란 📌 줄은 그 자리에 "
+                        "사진/링크를 넣은 뒤 지워. 사진의 ALT는 사진을 넣을 때 따로 입력해야 해."
+                    )
+                    st.code(body_to_html(meta["body"]), language="html")
+
             st.subheader("📋 점검 결과")
-            if cliche_issues:
-                st.error("**클리셰/반복 표현**\n" + "\n".join(f"- {i}" for i in cliche_issues))
+            if review["cliche"]:
+                st.error("**클리셰/반복 표현**\n" + "\n".join(f"- {i}" for i in review["cliche"]))
             else:
                 st.success("클리셰/반복 표현: 없음")
 
-            if structure_issues:
-                st.error("**글 구조(가독성/이미지)**\n" + "\n".join(f"- {i}" for i in structure_issues))
+            if review["structure"]:
+                st.error("**글 구조(가독성/이미지)**\n" + "\n".join(f"- {i}" for i in review["structure"]))
             else:
                 st.success("글 구조(가독성/이미지): 문제 없음")
 
-            if seo_issues:
-                st.error("**검색 최적화(키워드/소제목/메타설명/출처)**\n" + "\n".join(f"- {i}" for i in seo_issues))
+            if review["seo"]:
+                st.error("**검색 최적화(키워드/소제목/메타설명/출처)**\n" + "\n".join(f"- {i}" for i in review["seo"]))
             else:
                 st.success("검색 최적화(키워드/소제목/메타설명/출처): 문제 없음")
 
+            if not review["ai"]:
+                st.warning("AI 점검(문장 리듬·의견·구체성·차별화·키워드)이 실패했어 — 네트워크 문제일 수 있어. "
+                           "아래 '다시 점검'을 눌러봐.")
             for key, label in AI_REVIEW_LABELS.items():
-                val = (ai_result.get(key) or "").strip()
+                if not review["ai"]:
+                    break
+                val = (review["ai"].get(key) or "").strip()
                 if val and val != "없음":
                     st.error(f"**{label}**\n{val}")
                 else:
                     st.success(f"{label}: 문제 없음")
+
+            if st.button("🔁 다시 점검", key=f"recheck_{platform}"):
+                del st.session_state.reviews[platform]
+                st.rerun()
 
             st.caption("참고: 이건 'AI 티/가독성' 체크일 뿐, 이 플랫폼 자체 검색 알고리즘 점수는 아니야.")
 

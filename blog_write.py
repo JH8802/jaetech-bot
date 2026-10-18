@@ -8,7 +8,7 @@
 """
 from blog_drafter import draft_post, suggest_questions
 from blog_reviewer import scan_cliches, scan_structure, scan_seo, review_draft, AI_REVIEW_LABELS
-from blog_utils import parse_draft_metadata, load_past_titles
+from blog_utils import parse_draft_metadata, load_past_titles, find_keyword_overlap, body_to_html
 from datetime import datetime
 import os
 
@@ -123,7 +123,11 @@ def print_review(draft, meta, platform, target_keyword):
         print("✅ 검색 최적화(키워드/소제목/메타설명/출처): 문제 없음")
         passed += 1
 
+    if not ai_result:
+        print("⚠️ AI 점검 실패 (네트워크 문제일 수 있음) — 아래 AI 항목은 점검 안 됨")
     for key, label in AI_REVIEW_LABELS.items():
+        if not ai_result:
+            break
         val = (ai_result.get(key) or "").strip()
         if val and val != "없음":
             print(f"❌ {label}: {val}")
@@ -192,8 +196,24 @@ if __name__ == "__main__":
         slug = platform.replace(" ", "")
         filename = f"drafts/{datetime.now().strftime('%Y%m%d_%H%M%S')}_{slug}.txt"
         with open(filename, "w", encoding="utf-8") as f:
-            f.write(f"주제: {topic}\n플랫폼: {platform}\n\n{draft}")
+            f.write(f"주제: {topic}\n플랫폼: {platform}\n타깃 키워드: {target_keyword}\n\n{draft}")
 
         print(f"\n💾 저장됨: {filename}")
+
+        if platform in ("티스토리", "워드프레스"):
+            html_filename = filename.replace(".txt", ".html")
+            with open(html_filename, "w", encoding="utf-8") as f:
+                f.write(body_to_html(meta["body"]))
+            print(f"🧩 HTML 버전: {html_filename}")
+            print("   (메모장으로 열어 전체 복사 → 티스토리 HTML 모드 / 워드프레스 코드 편집기에 붙여넣기."
+                  " 소제목이 제목(H2) 서식으로 들어가 있음)")
+
+        overlap = find_keyword_overlap(platform, target_keyword, exclude=[filename])
+        if overlap:
+            print(f"\n⚠️ 키워드 중복 주의 — '{target_keyword}'로 이미 쓴 {platform} 글:")
+            for t in overlap:
+                print(f"   - {t}")
+            print("   같은 키워드 글끼리 검색 순위를 나눠 먹음. 이미 발행한 글이면 키워드를 더 구체적으로")
+            print("   바꾸거나 기존 글 보강을 고려. 같은 글의 이전 초안일 뿐이면 무시해도 됨.")
         print(f"\n📌 발행 체크리스트 [{platform}]")
         print_platform_guide(platform, meta)

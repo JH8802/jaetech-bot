@@ -1,5 +1,5 @@
 import anthropic
-from blog_utils import extract_text
+from blog_utils import extract_text, has_keyword
 from dotenv import load_dotenv
 import os
 import json
@@ -69,13 +69,6 @@ def scan_structure(draft):
     return issues
 
 
-def _has_keyword(text, keyword):
-    """띄어쓰기 차이는 무시하고, 키워드의 단어가 모두 들어 있으면 포함으로 본다
-    (예: '유산균 보장균수' → '유산균의 보장균수'도 통과)."""
-    flat = text.replace(" ", "").lower()
-    return all(word.lower() in flat for word in keyword.split())
-
-
 def scan_seo(meta, platform, target_keyword=""):
     """규칙 기반 SEO 점검 — 구글 기준(티스토리/워드프레스)은 더 엄격하게 본다.
     meta는 parse_draft_metadata()의 반환값."""
@@ -89,11 +82,11 @@ def scan_seo(meta, platform, target_keyword=""):
     first_paragraph = paragraphs[0] if paragraphs else ""
 
     if target_keyword:
-        if not _has_keyword(meta["title"], target_keyword):
+        if not has_keyword(meta["title"], target_keyword):
             issues.append(f"제목에 타깃 키워드 '{target_keyword}'가 없음")
-        if not _has_keyword(first_paragraph, target_keyword):
+        if not has_keyword(first_paragraph, target_keyword):
             issues.append(f"첫 문단에 타깃 키워드 '{target_keyword}'가 없음 (구글이 첫 문단으로 주제를 파악함)")
-        if is_google and subheadings and not any(_has_keyword(s, target_keyword) for s in subheadings):
+        if is_google and subheadings and not any(has_keyword(s, target_keyword) for s in subheadings):
             issues.append("소제목 중 타깃 키워드가 들어간 게 하나도 없음")
 
     title_len = len(meta["title"])
