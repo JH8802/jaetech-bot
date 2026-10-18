@@ -6,12 +6,13 @@
 (네이버/티스토리/워드프레스는 문체·소제목 밀도·사진 개수가 실제로 다르게 나옴).
 """
 import streamlit as st
-from blog_drafter import draft_post, suggest_questions
+from blog_drafter import draft_post, suggest_questions, revise_draft
 from blog_reviewer import (scan_cliches, scan_structure, scan_seo, scan_health_claims,
-                           review_draft, AI_REVIEW_LABELS)
+                           review_draft, collect_issues, AI_REVIEW_LABELS)
 from blog_utils import parse_draft_metadata, load_past_titles, find_keyword_overlap, body_to_html
 from datetime import datetime
 import os
+import shutil
 
 st.set_page_config(page_title="블로그 초안 생성기", page_icon="✍️")
 
@@ -27,6 +28,9 @@ if "reviews" not in st.session_state:
     # {플랫폼명: 점검 결과} — Streamlit은 칸 하나만 고쳐도 코드 전체를 다시
     # 실행하므로, 저장해두지 않으면 그때마다 AI 점검(유료)이 또 호출됨
     st.session_state.reviews = {}
+if "inputs" not in st.session_state:
+    # 생성 당시 입력값 — 다듬기 때 "새 사실의 유일한 재료"로 다시 넘겨줌
+    st.session_state.inputs = {}
 
 st.title("✍️ 블로그 초안 생성기")
 st.caption("주제는 뭐든 상관없음 · 발행은 직접, 초안 생성 + 자동 점검까지만")
@@ -38,6 +42,7 @@ if st.button("🔄 새로 시작"):
     st.session_state.filenames = {}
     st.session_state.target_keyword = ""
     st.session_state.reviews = {}
+    st.session_state.inputs = {}
     st.rerun()
 
 st.divider()
@@ -117,6 +122,10 @@ if st.button("✍️ 초안 생성", type="primary"):
         st.session_state.filenames = filenames
         st.session_state.target_keyword = target_keyword.strip()
         st.session_state.reviews = {}
+        st.session_state.inputs = {
+            "topic": topic, "key_points": key_points, "sources": sources,
+            "personal_take": personal_take,
+        }
 
 if st.session_state.drafts:
     st.divider()
@@ -235,6 +244,54 @@ if st.session_state.drafts:
             if st.button("🔁 다시 점검", key=f"recheck_{platform}"):
                 del st.session_state.reviews[platform]
                 st.rerun()
+
+            st.divider()
+            st.subheader("✨ 점검 반영해서 다듬기")
+            issues = collect_issues(review)
+            st.caption(
+                f"지적된 {len(issues)}건을 반영해 수정본을 만들어. 문제 없는 부분은 그대로 두고, "
+                "새 사실은 처음 입력한 재료와 아래 메모에 있는 것만 써 (지어내지 않음). "
+                "누르면 Claude를 1번 더 호출해. 이전 버전은 drafts/history 폴더에 남아."
+            )
+            author_note = st.text_area(
+                "추가 메모 (선택) — 지적을 해결할 구체적인 사실·사례·의견이 있으면 적어줘",
+                height=90, key=f"note_{platform}",
+                placeholder="예) 구체성 부족 지적 → 지난달 점검한 A제품은 균주명 없이 '500억 보장'만 표기돼 있었음",
+            )
+            if st.button("✨ 점검 반영해서 다듬기", key=f"revise_{platform}", type="primary"):
+                if not issues and not author_note.strip():
+                    st.info("지적된 부분도 추가 메모도 없어서 다듬을 게 없어.")
+                else:
+                    inputs = st.session_state.inputs
+                    with st.spinner(f"⏳ {platform} 수정본 만드는 중..."):
+                        try:
+                            revised = revise_draft(
+                                draft, issues, inputs.get("key_points", []),
+                                sources=inputs.get("sources"),
+                                personal_take=inputs.get("personal_take", ""),
+                                author_note=author_note.strip(), platform=platform,
+                                target_keyword=st.session_state.target_keyword,
+                            )
+                        except Exception as e:
+                            revised = ""
+                            st.error(f"❌ 다듬기 실패: {e}\n(네트워크 문제일 수 있어 — 다시 눌러봐)")
+                    if revised:
+                        path = st.session_state.filenames[platform]
+                        os.makedirs("drafts/history", exist_ok=True)
+                        stamp = datetime.now().strftime("%H%M%S")
+                        old_name = os.path.basename(path)[:-len(".txt")]
+                        shutil.copy(path, f"drafts/history/{old_name}_이전_{stamp}.txt")
+                        with open(path, "w", encoding="utf-8") as f:
+                            f.write(
+                                f"주제: {inputs.get('topic', '')}\n플랫폼: {platform}\n"
+                                f"타깃 키워드: {st.session_state.target_keyword}\n\n{revised}"
+                            )
+                        st.session_state.drafts[platform] = revised
+                        del st.session_state.reviews[platform]
+                        # 키가 있는 입력칸은 이전 값을 기억하므로 지워야 새 내용으로 바뀜
+                        for prefix in ("title", "category", "tags", "meta", "slug", "body", "note"):
+                            st.session_state.pop(f"{prefix}_{platform}", None)
+                        st.rerun()
 
             st.caption("참고: 이건 'AI 티/가독성' 체크일 뿐, 이 플랫폼 자체 검색 알고리즘 점수는 아니야.")
 

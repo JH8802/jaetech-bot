@@ -176,6 +176,70 @@ def draft_post(topic, key_points, personal_take="", platform="네이버 블로�
     return extract_text(message).strip()
 
 
+def revise_draft(draft, issues, key_points, sources=None, personal_take="",
+                 author_note="", platform="네이버 블로그", target_keyword=""):
+    """점검에서 지적된 부분을 반영해 초안을 다듬는다 (초안 → 점검 → 수정본).
+
+    draft: 현재 초안 전체 (태그 포함)
+    issues: 고쳐야 할 지적 리스트 (collect_issues 결과)
+    key_points/sources/personal_take: 처음 입력한 원재료 — 새 사실의 유일한 출처
+    author_note: 이번에 추가로 알려주는 사실/의견 (선택) — 이것도 사실로 써도 됨
+    """
+    points_text = "\n".join(f"- {p}" for p in key_points)
+    sources_text = "\n".join(f"- {s}" for s in (sources or [])) or "(없음)"
+    issues_text = "\n".join(f"- {i}" for i in issues) or "(자동 점검 지적 없음 — 아래 저자 메모만 반영)"
+    style_hint = PLATFORM_STYLE_HINTS.get(platform, PLATFORM_STYLE_HINTS["네이버 블로그"])
+
+    prompt = f"""아래 블로그 초안을 점검 결과에 맞춰 다듬어줘.
+
+플랫폼: {style_hint}
+타깃 키워드: {target_keyword or "(지정 안 함)"}
+
+[현재 초안]
+{draft}
+
+[점검에서 지적된 부분]
+{issues_text}
+
+[저자가 이번에 추가로 알려준 내용]
+{author_note or "(없음)"}
+
+[처음에 제공된 사실/경험 — 새 내용을 쓸 때 쓸 수 있는 유일한 재료]
+{points_text}
+
+[제공된 참고 자료/출처]
+{sources_text}
+
+[저자의 의견/입장]
+{personal_take or "(별도 입력 없음)"}
+
+다듬기 규칙:
+- 지적된 부분만 고치고, 문제 없는 부분의 좋은 문장·구조·내용은 그대로 둬.
+  처음부터 새로 쓰지 마.
+- 새 내용(사실, 숫자, 사례, 출처)은 위 "저자가 추가로 알려준 내용",
+  "처음에 제공된 사실/경험", "제공된 참고 자료/출처"에 있는 것만 써.
+  재료가 없어서 못 고치는 지적(예: 구체성 부족인데 쓸 사례가 없음)은
+  지어내지 말고 그대로 두거나, 그 자리에 [추가 필요: 어떤 정보가 있으면
+  좋은지]라고 표시해.
+- [출처 필요]는 제공된 출처로 채울 수 있을 때만 채우고, 아니면 그대로 둬.
+- 표시광고 표현 지적은 "이런 표현은 쓰면 안 된다"는 설명 문맥이면 그대로 두고,
+  글쓴이가 직접 그런 효능을 주장하는 문장이면 사실 전달 표현으로 바꿔.
+- 처음 두 문장에 "요즘/최근"을 쓰거나 "~하세요/확인하세요" 식 뻔한 조언체로
+  채우는 등 이미 금지된 패턴이 새로 생기지 않게 해.
+- 형식은 현재 초안과 똑같이 유지해: [제목], [카테고리], [메타설명], [주소],
+  본문 안의 [소제목]/[사진 제안]/[그래프 제안]/[지도 제안]/[내부링크 제안],
+  마지막 [태그]. 마크다운 기호(#, * 등)는 쓰지 마. 분량도 비슷하게.
+- 수정본 전체만 출력해. 설명이나 변경 내역은 붙이지 마."""
+
+    message = client.messages.create(
+        model="claude-sonnet-5-5",
+        max_tokens=8192,
+        system=STYLE_GUIDE,
+        messages=[{"role": "user", "content": prompt}]
+    )
+    return extract_text(message).strip()
+
+
 def suggest_questions(topic):
     """주제에 맞는 브레인스토밍 질문을 만들어준다 (Haiku, 저비용)."""
     prompt = f"""블로그 주제: {topic}
