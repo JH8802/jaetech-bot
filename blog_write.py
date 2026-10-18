@@ -9,6 +9,7 @@
 from blog_drafter import draft_post, suggest_questions
 from blog_reviewer import (scan_cliches, scan_structure, scan_seo, scan_health_claims,
                            review_draft, AI_REVIEW_LABELS)
+from blog_sources import resolve_sources, is_bare_url
 from blog_utils import parse_draft_metadata, load_past_titles, find_keyword_overlap, body_to_html
 from datetime import datetime
 import os
@@ -170,7 +171,17 @@ if __name__ == "__main__":
         print("\n❌ 사실/경험을 최소 1개는 입력해야 해. 다시 실행해줘.")
         raise SystemExit(1)
 
-    sources = get_lines("\n참고 자료/출처를 한 줄씩 (예: 식약처 ○○ 고시 / 없으면 바로 엔터):")
+    sources = get_lines("\n참고 자료/출처를 한 줄씩 (링크만 붙여넣어도 자동 정리 / 없으면 바로 엔터):")
+    if any(is_bare_url(x) for x in sources):
+        print("\n🔗 출처 링크 내용 가져오는 중...")
+        sources, source_report = resolve_sources(sources)
+        for r in source_report:
+            if r["ok"]:
+                print(f"  ✅ {r['message']}")
+            else:
+                print(f"  ❌ {r['url']} — {r['message']}")
+        print("  (요약은 AI가 한 거라 원문과 대조해서 확인해줘. 읽지 못한 링크는 출처에서 뺐어)")
+        sources = [x for x in sources if not is_bare_url(x)]
 
     personal_take = input("\n본인 의견/입장 (없으면 그냥 엔터): ").strip()
 

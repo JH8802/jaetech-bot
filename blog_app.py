@@ -9,6 +9,7 @@ import streamlit as st
 from blog_drafter import draft_post, suggest_questions, revise_draft
 from blog_reviewer import (scan_cliches, scan_structure, scan_seo, scan_health_claims,
                            review_draft, collect_issues, AI_REVIEW_LABELS)
+from blog_sources import resolve_sources, is_bare_url
 from blog_utils import parse_draft_metadata, load_past_titles, find_keyword_overlap, body_to_html
 from datetime import datetime
 import os
@@ -79,18 +80,62 @@ key_points_text = st.text_area(
     height=150,
     placeholder="예)\n균주명 없이 보장균수만 강조하는 표시 사례를 실무에서 자주 봄\n식약처 기준상 효능 표시엔 건강기능식품 인증이 필요함",
 )
+
+
+def fetch_sources_callback():
+    """'링크 내용 가져오기' 버튼: 링크만 있는 줄을 '출처명 — 핵심 내용' 한 줄로 바꿔서
+    입력칸에 채워 넣는다 (버튼 콜백에서만 입력칸 값을 바꿀 수 있음)."""
+    lines = [l.strip() for l in st.session_state.get("sources_text", "").split("\n") if l.strip()]
+    if not any(is_bare_url(l) for l in lines):
+        st.session_state.sources_report = []
+        return
+    resolved, report = resolve_sources(lines)
+    st.session_state.sources_text = "\n".join(resolved)
+    st.session_state.sources_report = report
+
+
 sources_text = st.text_area(
-    "참고 자료/출처 (한 줄에 하나씩, 선택)",
-    height=90,
-    placeholder="예)\n식약처 「건강기능식품의 기준 및 규격」 고시 — NMN은 현재 건강기능식품 원료로 인정 안 됨\n(링크만 붙이면 AI가 못 읽어 — 문서명 + 핵심 내용을 적어줘)",
-    help="건강·돈 주제는 구글이 근거를 엄격하게 봐. 여기 적은 것만 본문에 인용하고, 근거가 필요한데 없으면 [출처 필요]로 표시돼. "
-         "⚠️ AI는 링크(URL)를 열어서 읽지 못해 — URL만 적지 말고 '기관/문서명 + 핵심 내용'을 글로 적어줘.",
+    "참고 자료/출처 (한 줄에 하나씩, 선택) — 링크만 붙여넣어도 돼",
+    key="sources_text",
+    height=110,
+    placeholder="예)\nhttps://www.mfds.go.kr/... (링크만 붙이고 아래 '링크 내용 가져오기'를 누르면 자동 정리)\n식약처 고시 — NMN은 현재 건강기능식품 원료로 인정 안 됨 (직접 적어도 됨)",
+    help="건강·돈 주제는 구글이 근거를 엄격하게 봐. 여기 적은 것만 본문에 인용하고, 근거가 필요한데 없으면 [출처 필요]로 표시돼.",
 )
+st.button(
+    "🔗 링크 내용 가져오기 (링크 줄을 '출처명 — 핵심 내용'으로 자동 정리)",
+    on_click=fetch_sources_callback,
+)
+st.caption(
+    "AI는 링크를 직접 못 열어서, 이 버튼이 페이지를 대신 읽고 요약해 줘 (비용 거의 없음). "
+    "로그인/구독이 필요한 글, PDF, 자바스크립트로 그려지는 페이지는 못 읽을 수 있어. "
+    "요약은 AI가 한 거라 **원문과 대조해서 확인**하고, 틀린 부분은 입력칸에서 직접 고쳐줘."
+)
+for item in st.session_state.get("sources_report", []):
+    if item["ok"]:
+        st.success(f"✅ {item['url']}\n\n{item['message']}")
+    else:
+        st.error(f"❌ {item['url']} — {item['message']}\n\n이 링크는 위 입력칸에 문서명 + 핵심 내용을 직접 적어줘.")
 personal_take = st.text_input("본인 의견/입장 (없으면 비워둬도 됨)")
 
 if st.button("✍️ 초안 생성", type="primary"):
     key_points = [line.strip() for line in key_points_text.split("\n") if line.strip()]
     sources = [line.strip() for line in sources_text.split("\n") if line.strip()]
+    if any(is_bare_url(s) for s in sources):
+        # 링크를 가져오기 전에 바로 초안 생성을 눌렀을 때 — 여기서 자동으로 가져옴
+        with st.spinner("🔗 출처 링크 내용 가져오는 중..."):
+            sources, source_report = resolve_sources(sources)
+        failed = [r for r in source_report if not r["ok"]]
+        if failed:
+            st.warning(
+                "읽지 못한 링크는 출처에서 뺐어 (AI가 못 읽는 링크를 그냥 넘기면 내용을 지어낼 수 있어):\n"
+                + "\n".join(f"- {r['url']} — {r['message']}" for r in failed)
+            )
+            sources = [s for s in sources if not is_bare_url(s)]
+        if source_report:
+            with st.expander("📎 자동으로 정리된 출처 (원문과 대조해서 확인)"):
+                for r in source_report:
+                    if r["ok"]:
+                        st.write(f"- {r['message']}")
     if not topic.strip():
         st.error("주제를 입력해줘.")
     elif not key_points:
