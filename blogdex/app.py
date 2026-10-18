@@ -136,6 +136,14 @@ def read_ratings(data: dict, kind: str) -> list[dict]:
     return out
 
 
+def read_photo_names(data: dict) -> list[str]:
+    """브라우저가 보낸 사진 파일명(사진 순서와 같음). 화면에서 '사진 3 (IMG_0123.jpg)'로 보여 주는 용도입니다."""
+    raw = data.get("photo_names") or []
+    if not isinstance(raw, list):
+        return []
+    return [str(x)[:120] for x in raw]
+
+
 def read_photos(data: dict, kind: str = "food") -> list[dict]:
     """브라우저가 줄여서 보낸 사진(data URL)을 읽어 [{'media_type','data'}] 로 돌려줍니다."""
     raw = data.get("photos") or []
@@ -235,7 +243,7 @@ def titles():
 
 # ---------- 원고 ----------
 def _generate_events(*, kind, title, keywords, memo, place, guardrail, evidence_mode, build_prompt,
-                     photos=None, photo_notes=None, parent_id=None, title_input=None, ratings=None):
+                     photos=None, photo_notes=None, parent_id=None, title_input=None, ratings=None, photo_names=None):
     """원고를 스트리밍으로 만들고, 후처리·점검·저장 후 SSE 이벤트를 흘려보냅니다.
     photos(사진 원본)가 있으면 먼저 사진을 살펴보고, photo_notes(이미 분석된 결과)가 있으면 그대로 씁니다."""
     parts, usage, photo_usage = [], {}, {}
@@ -250,6 +258,10 @@ def _generate_events(*, kind, title, keywords, memo, place, guardrail, evidence_
                                      chunk, usage=part_usage, start=start + 1)
                 photo_usage = llm.merge_usage(photo_usage, part_usage)
                 photo_notes += llm.parse_photo_notes(raw, len(chunk), start + 1)
+        for note in photo_notes or []:
+            idx = note.get("n", 0) - 1
+            if photo_names and 0 <= idx < len(photo_names) and photo_names[idx]:
+                note["name"] = photo_names[idx]
         if photo_notes:
             yield sse("photos", {"notes": photo_notes})
         system = prompts.build_system(kind, guardrail, evidence_mode, len(photo_notes or []),
@@ -313,6 +325,7 @@ def article_stream():
     return sse_response(_generate_events(
         kind=c["kind"], title=title, keywords=keywords, memo=c["memo"], place=c["place"],
         guardrail=c["guardrail"], evidence_mode=c["evidence_mode"], photos=photos, ratings=ratings,
+        photo_names=read_photo_names(data),
         build_prompt=lambda notes: prompts.build_article_prompt(c["kind"], title, keywords, c["memo"], c["place"], notes, ratings)))
 
 

@@ -277,7 +277,7 @@ fetch('/api/rating-labels').then((r) => r.json()).then((d) => {
 
 const KIND_LABEL = { info: '정보글', food: '맛집글', hotel: '호텔·여행 후기' };
 const PLACE_KINDS = ['food', 'hotel'];
-const state = { kind: 'info', titles: [], busy: false, article: null, photos: [], resultPhotos: [], adTerms: [] };  // photos: 입력칸의 사진 / resultPhotos: 결과에 보여 줄 사진(현재 세션에서 생성한 글만)
+const state = { kind: 'info', titles: [], busy: false, article: null, photos: [], resultPhotos: [], photoNames: [], adTerms: [] };  // photos: 입력칸의 사진 / resultPhotos: 결과에 보여 줄 사진(현재 세션에서 생성한 글만)
 
 /* ---------- 글 종류별 화면 ---------- */
 const KIND_UI = {
@@ -366,7 +366,9 @@ const stripTags = (t) => t.replace(TAG_RE, '');
 const paragraphs = (t) => t.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);
 
 // 복사본의 사진 자리: 번호 순서와 글 순서가 다를 수 있어 파일 이름을 함께 적어 준다(이 화면에서 올린 사진만)
-const photoCopyLabel = (n) => { const ph = state.resultPhotos[n - 1]; return ph && ph.name ? `사진 ${n} (${ph.name})` : `사진 ${n}`; };
+// 파일명: 방금 올린 사진이 있으면 그 이름, 저장된 원고를 다시 열었을 땐 서버에 저장된 이름
+const photoName = (n) => { const ph = state.resultPhotos[n - 1]; return (ph && ph.name) || state.photoNames[n - 1] || ''; };
+const photoCopyLabel = (n) => { const nm = photoName(n); return nm ? `사진 ${n} (${nm})` : `사진 ${n}`; };
 const PHOTO_PAR = /^<\s*사진\s*(\d+)\s*>$/;
 const photoNo = (p) => { const m = p.match(PHOTO_PAR); return m ? +m[1] : null; };
 
@@ -412,7 +414,7 @@ function renderBody(text) {
     const pn = photoNo(p);
     if (pn) {
       const ph = state.resultPhotos[pn - 1];
-      return `<div class="photoslot">${ph ? `<img src="${ph.url}" alt="사진 ${pn}">` : ''}사진 ${pn}</div>`;
+      return `<div class="photoslot">${ph ? `<img src="${ph.url}" alt="사진 ${pn}">` : ''}${esc(photoCopyLabel(pn))}</div>`;
     }
     if (p.includes('플레이스 지도 삽입')) return `<p class="mapline">${esc(p)}</p>`;
     if (isTags(p)) return `<p class="tags">${markAd(esc(p))}</p>`;
@@ -521,6 +523,8 @@ async function applyTodo() {
 
 function showArticle(art) {
   state.article = art;
+  state.photoNames = [];
+  for (const n of art.photos || (art.options && art.options.photos) || []) if (n && n.name) state.photoNames[n.n - 1] = n.name;
   renderResult(art.body, false, art.chars);
   setStatus(`저장됨 · ${KIND_LABEL[art.kind] || ''} · ${art.title}`);
   renderQuality(art.quality);
@@ -619,7 +623,7 @@ function renderPhotoNotes(notes) {
   if (!notes || !notes.length) { box.innerHTML = ''; return; }
   box.innerHTML = '<div class="photonotes"><h4>AI가 본 사진 (번호 확인용)</h4>' + notes.map((n) => {
     const ph = state.resultPhotos[n.n - 1];
-    return `<div class="pn-row">${ph ? `<img src="${ph.url}" alt="">` : ''}<div><b>사진 ${n.n}</b>${ph && ph.name ? ` <span style="color:var(--sub)">(${esc(ph.name)})</span>` : ''} · ${esc(n.category || '기타')} — ${esc(n.desc || '설명을 읽지 못했어요')}${n.text ? ` <span style="color:var(--sub)">(글자: ${esc(n.text)})</span>` : ''}</div></div>`;
+    return `<div class="pn-row">${ph ? `<img src="${ph.url}" alt="">` : ''}<div><b>사진 ${n.n}</b>${n.name || (ph && ph.name) ? ` <span style="color:var(--sub)">(${esc(n.name || ph.name)})</span>` : ''} · ${esc(n.category || '기타')} — ${esc(n.desc || '설명을 읽지 못했어요')}${n.text ? ` <span style="color:var(--sub)">(글자: ${esc(n.text)})</span>` : ''}</div></div>`;
   }).join('') + '</div>';
 }
 
@@ -648,7 +652,7 @@ $('btnWrite').onclick = () => {
   if (state.busy) return;
   if (state.photos.length > photoLimit()) { showError(`이 글 종류는 사진을 최대 ${photoLimit()}장까지 올릴 수 있어요. ${state.photos.length - photoLimit()}장을 빼거나 글 종류를 바꿔 주세요.`); return; }
   state.resultPhotos = [...state.photos];
-  runStream('/api/articles/stream', { ...commonBody(), title: $('title').value.trim(), keywords: keywordList(), photos: state.photos.map((p) => p.url) });
+  runStream('/api/articles/stream', { ...commonBody(), title: $('title').value.trim(), keywords: keywordList(), photos: state.photos.map((p) => p.url), photo_names: state.photos.map((p) => p.name || '') });
 };
 $('btnRewrite').onclick = () => { if (!state.busy && state.article) runStream(`/api/articles/${state.article.id}/rewrite`, { kind: state.article.kind }); };
 
