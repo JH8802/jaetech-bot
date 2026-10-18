@@ -39,6 +39,11 @@ class PromptRulesTest(unittest.TestCase):
         p = prompts.build_title_prompt("food", "익산 고스락", "", None, [], False)
         self.assertIn("검색형 3개와 궁금증형 2개", p)
 
+    def test_info_title_prompt_has_no_place_wording(self):
+        p = prompts.build_title_prompt("info", "루테인", "", None, [], False)
+        self.assertIn("검색형 3개와 궁금증형 2개", p)
+        self.assertNotIn("지역과 장소 이름", p)
+
     def test_broadcast_hook_rule_for_place_kinds_only(self):
         self.assertIn("방송 출연", prompts.build_system("food", False, "strict"))
         self.assertIn("방송 출연", prompts.build_system("hotel", False, "strict"))
