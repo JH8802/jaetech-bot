@@ -1,6 +1,6 @@
 import anthropic
 from blog_style_guide import STYLE_GUIDE
-from blog_utils import extract_text, create_text
+from blog_utils import extract_text, create_text, load_style_sample, STYLE_SAMPLE_MAX
 from datetime import datetime
 from dotenv import load_dotenv
 import os
@@ -57,8 +57,32 @@ PLATFORM_STYLE_HINTS = {
 }
 
 
+# AI 글에서 흔한 말버릇 — 초안을 쓸 때부터 피하게 한다 (점검은 blog_reviewer.AI_PATTERNS)
+AI_HABITS_RULE = """- AI 글에서 흔한 말버릇은 한 글에 1번 이하로만 써: "~라는 얘기다/이야기다",
+  "~인 셈이다", "~하는 이유다", "솔직히", "짚어야 한다/짚어볼", "핵심은/중요한 건",
+  "~는 점이다", "물론". 그리고 "~라고 할 수 있다", "~것이 중요하다", "살펴보자/알아보자",
+  "주목할 만한"은 쓰지 마. 같은 어미로 끝나는 문장을 3개 연달아 쓰지 말고
+  어미를 바꿔가며 리듬을 줘."""
+
+
+def _style_block(style_sample):
+    """저자 문체 샘플을 프롬프트에 넣을 블록으로 만든다 (없으면 빈 문자열)."""
+    sample = (style_sample or "").strip()[:STYLE_SAMPLE_MAX]
+    if not sample:
+        return ""
+    return f"""
+[저자 문체 샘플 — 저자가 직접 쓴 글]
+{sample}
+
+위 샘플의 말투(존댓말/반말, 어미), 문장 길이와 리듬, 자주 쓰는 표현과 말버릇,
+문단 호흡을 따라 써. 샘플의 내용·사실은 가져오지 마 (사실은 아래 재료만 써).
+샘플이 짧은 SNS 글이어도 문체 특징만 참고하고 블로그 글 구조는 유지해.
+시스템 지침의 말투 예시와 샘플의 말투가 다르면 샘플을 우선해.
+"""
+
+
 def draft_post(topic, key_points, personal_take="", platform="네이버 블로그",
-               target_keyword="", sources=None, past_titles=None):
+               target_keyword="", sources=None, past_titles=None, style_sample=None):
     """
     블로그 글 초안을 생성한다.
 
@@ -73,6 +97,7 @@ def draft_post(topic, key_points, personal_take="", platform="네이버 블로�
              통계 등. 건강·돈 주제는 구글이 근거(E-E-A-T)를 엄격히 보기 때문.
     past_titles: 같은 플랫폼에 전에 쓴 글 제목들 (list[str], 선택) — 내부 링크
                  추천용. 관련 있는 것만 [내부링크 제안]으로 넣는다.
+    style_sample: 저자 문체 샘플 (선택, None이면 my_style.txt에서 읽음)
     """
     if not key_points:
         raise ValueError("key_points가 비어 있습니다. 구체적 사실/숫자/경험을 최소 1개 이상 넣어주세요.")
@@ -104,8 +129,11 @@ def draft_post(topic, key_points, personal_take="", platform="네이버 블로�
     else:
         links_rule = ""
 
-    prompt = f"""아래 정보로 블로그 글 초안을 써줘.
+    if style_sample is None:
+        style_sample = load_style_sample()
 
+    prompt = f"""아래 정보로 블로그 글 초안을 써줘.
+{_style_block(style_sample)}
 주제: {topic}
 
 타깃 키워드: {keyword_text}
@@ -165,6 +193,7 @@ def draft_post(topic, key_points, personal_take="", platform="네이버 블로�
      목록 형식 말고 문장 안에서). 규제·효능·수치처럼 근거가 꼭 필요한
      주장인데 제공된 출처가 없으면, 출처를 지어내지 말고 그 문장 바로 뒤에
      [출처 필요: 어떤 근거가 필요한지] 라고 표시해줘.
+{AI_HABITS_RULE}
    - 기준일: 규제·기준·가격·통계처럼 시간이 지나면 바뀔 수 있는 정보를
      다룬다면, 그 정보가 처음 나오는 문단에 "{today} 기준"이라고 자연스럽게
      한 번 밝혀줘. 그런 정보가 없으면 넣지 마.
@@ -188,7 +217,7 @@ def draft_post(topic, key_points, personal_take="", platform="네이버 블로�
 
 
 def revise_draft(draft, issues, key_points, sources=None, personal_take="",
-                 author_note="", platform="네이버 블로그", target_keyword=""):
+                 author_note="", platform="네이버 블로그", target_keyword="", style_sample=None):
     """점검에서 지적된 부분을 반영해 초안을 다듬는다 (초안 → 점검 → 수정본).
 
     draft: 현재 초안 전체 (태그 포함)
@@ -201,8 +230,11 @@ def revise_draft(draft, issues, key_points, sources=None, personal_take="",
     issues_text = "\n".join(f"- {i}" for i in issues) or "(자동 점검 지적 없음 — 아래 저자 메모만 반영)"
     style_hint = PLATFORM_STYLE_HINTS.get(platform, PLATFORM_STYLE_HINTS["네이버 블로그"])
 
-    prompt = f"""아래 블로그 초안을 점검 결과에 맞춰 다듬어줘.
+    if style_sample is None:
+        style_sample = load_style_sample()
 
+    prompt = f"""아래 블로그 초안을 점검 결과에 맞춰 다듬어줘.
+{_style_block(style_sample)}
 플랫폼: {style_hint}
 타깃 키워드: {target_keyword or "(지정 안 함)"}
 
@@ -238,6 +270,11 @@ def revise_draft(draft, issues, key_points, sources=None, personal_take="",
   바꾸고, 뻔한 설명은 줄여서 저자의 판단과 구체 사례가 더 돋보이게 해.
   (새 사실을 더하는 게 아니라 빼거나 좁히는 방향이야.)
 - [출처 필요]는 제공된 출처로 채울 수 있을 때만 채우고, 아니면 그대로 둬.
+- [근거 없는 숫자] 지적은 재료에 있는 정확한 숫자로 바로잡고, 재료에서 확인할 수
+  없으면 그 숫자를 빼고 문장을 고쳐 (짐작으로 다른 숫자를 넣지 마).
+- [AI 말투] 지적은 같은 뜻을 다른 표현으로 바꿔서 반복을 없애고, 같은 어미가
+  이어지면 어미를 바꿔 리듬을 줘.
+{AI_HABITS_RULE}
 - 표시광고 표현 지적은 "이런 표현은 쓰면 안 된다"는 설명 문맥이면 그대로 두고,
   글쓴이가 직접 그런 효능을 주장하는 문장이면 사실 전달 표현으로 바꿔.
 - 처음 두 문장에 "요즘/최근"을 쓰거나 "~하세요/확인하세요" 식 뻔한 조언체로

@@ -21,3 +21,6 @@ drafts/
 # OS 자동 생성 파일
 .DS_Store
 Thumbs.db
+
+# 내 문체 샘플 (개인 글, 저장소에 올리지 않음)
+my_style.txt
