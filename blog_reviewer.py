@@ -31,6 +31,55 @@ HEALTH_CLAIM_WATCH = [
     "약 대신", "약을 끊", "의약품 대체", "100% 효과", "즉효",
 ]
 
+# AI 글에서 자주 반복되는 말버릇 — (화면 이름, 찾을 표현들, 한 글에서 허용 횟수)
+# 한두 번은 자연스럽지만 반복되면 AI 티가 남. 실제로 써보며 자유롭게 추가/조정하면 됨.
+AI_PATTERNS = [
+    ("'~얘기다/이야기다'로 맺기", ["는 얘기다", "라는 얘기다", "는 이야기다", "라는 이야기다", "란 얘기다"], 1),
+    ("'~셈이다'", ["셈이다"], 1),
+    ("'~하는 이유다'", ["이유다."], 1),
+    ("'솔직히'", ["솔직히"], 1),
+    ("'짚어야/짚어볼'", ["짚어야", "짚어볼", "짚어둘", "짚고 넘어"], 1),
+    ("'따져봐야/따져보면'", ["따져봐", "따져보", "따져야"], 2),
+    ("'핵심은/중요한 건'", ["핵심은", "중요한 건", "중요한 것은"], 1),
+    ("'결국'", ["결국"], 2),
+    ("'~라고 할 수 있다'", ["라고 할 수 있다", "다고 할 수 있다"], 0),
+    ("'~것이 중요하다'", ["것이 중요하다", "게 중요하다"], 0),
+    ("'살펴보자/알아보자'", ["살펴보자", "알아보자", "살펴보겠", "정리해보면", "정리해 보면"], 0),
+    ("'주목할 만한/눈여겨볼'", ["주목할 만한", "눈여겨볼", "주목할 만하다"], 0),
+    ("'~는 점이다'", ["는 점이다", "다는 점이다"], 1),
+    ("'다만'", ["다만"], 2),
+    ("'물론'", ["물론"], 1),
+]
+SAME_ENDING_RUN = 3  # 같은 어미로 끝나는 문장이 이만큼 연속되면 지적
+
+
+def scan_ai_patterns(body):
+    """AI 말투 점검 (규칙 기반, 무료) — 반복되는 말버릇 + 같은 어미 연속."""
+    issues = []
+    text = re.sub(r"\[[^\]]*\]", " ", body)
+    for label, phrases, allowed in AI_PATTERNS:
+        # 긴 표현부터 맞춰서 겹쳐 세지 않게 ('라는 얘기다' 안의 '는 얘기다'를 또 세지 않음)
+        pattern = "|".join(re.escape(p) for p in sorted(phrases, key=len, reverse=True))
+        count = len(re.findall(pattern, text))
+        if count > allowed:
+            limit = "쓰지 않는 게 좋음" if allowed == 0 else f"{allowed}번 이하 권장"
+            issues.append(f"{label} {count}번 — {limit}")
+
+    sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+|\n+", text) if len(s.strip()) > 5]
+    endings = [re.sub(r"[.!?\s]+$", "", s)[-2:] for s in sentences]
+    run_start, reported = 0, 0
+    for i in range(1, len(endings) + 1):
+        if i < len(endings) and endings[i] == endings[run_start]:
+            continue
+        run = i - run_start
+        if run >= SAME_ENDING_RUN and reported < 3:
+            sample = sentences[run_start][-25:]
+            issues.append(f"'~{endings[run_start]}'로 끝나는 문장 {run}개 연속 (예: …{sample}) — 어미를 바꿔 리듬 주기")
+            reported += 1
+        run_start = i
+    return issues
+
+
 # review_draft()가 반환하는 키 -> 화면에 보여줄 라벨 (blog_write.py, blog_app.py 공용)
 AI_REVIEW_LABELS = {
     "sentence_rhythm": "문장 길이 변주",
@@ -174,6 +223,11 @@ def collect_issues(review):
     issues += [f"[글 구조] {i}" for i in review.get("structure", [])]
     issues += [f"[검색 최적화] {i}" for i in review.get("seo", [])]
     issues += [f"[표시광고 표현 확인] {i}" for i in review.get("claims", [])]
+    issues += [f"[AI 말투] {i}" for i in review.get("ai_patterns", [])]
+    for row in review.get("facts", []):
+        if not row["found_in"]:
+            issues.append(f"[근거 없는 숫자] '{row['number']}' ({row['context']}) — 입력한 메모·출처에 없는 숫자. "
+                          "재료에 있는 숫자로 바로잡거나, 확인할 수 없으면 그 숫자를 빼야 함")
     for key, label in AI_REVIEW_LABELS.items():
         val = ai_issue((review.get("ai") or {}).get(key))
         if val:

@@ -1,5 +1,9 @@
 import html
+import json
 import os
+import re
+import shutil
+from datetime import datetime
 
 
 def extract_text(message):
@@ -136,14 +140,26 @@ def find_keyword_overlap(platform, keyword, exclude=(), drafts_dir="drafts"):
 
 VISUAL_TAGS = ("[사진 제안]", "[그래프 제안]", "[지도 제안]")
 
+# 본문 안에서 '내가 채워야 하는 자리' — 줄 전체(내부링크/사진류)이거나 문장 안(출처/추가 필요)
+PLACEHOLDER_RE = re.compile(
+    r"^[ \t]*\[(?:내부링크 제안|사진 제안|그래프 제안|지도 제안)\][^\n]*$"
+    r"|([.。!?])?[ \t]*\[출처 필요[^\]\n]*\]"
+    r"|\[추가 필요[^\]\n]*\]",
+    re.MULTILINE,
+)
+_INLINE_TAG_RE = re.compile(r"\[(?:출처 필요|추가 필요)[^\]\n]*\]")
+_LINK_LINE_RE = re.compile(r"^\[링크:\s*(.*?)\s*\|\s*(https?://\S+)\s*\]$")
+_IMAGE_LINE_RE = re.compile(r"^\[이미지:\s*(https?://\S+)\s*\|\s*(.*?)\s*\]$")
+
 
 def body_to_html(body):
     """본문(태그 포함 일반 텍스트)을 티스토리 HTML 모드 / 워드프레스 코드
     편집기에 바로 붙여넣을 HTML로 바꾼다.
     - [소제목] → <h2> (구글이 읽는 제목 구조가 확실하게 들어감)
     - 문단 → <p>
-    - [사진/그래프/지도 제안], [내부링크 제안], [추가 필요] → 눈에 띄는 안내 문단으로 남김
-      (실제 사진 업로드·링크 연결은 직접 해야 하므로 지우지 않고 표시)
+    - [링크: 제목 | 주소] → 관련 글 링크, [이미지: 주소 | ALT] → 이미지
+    - 아직 안 채운 [사진/그래프/지도 제안], [내부링크 제안], [추가 필요] → 노란 안내 문단
+    - 문장 안의 아직 안 채운 [출처 필요]/[추가 필요] → 노란 형광펜 표시
     """
     blocks = []
     paragraph = []
@@ -153,13 +169,26 @@ def body_to_html(body):
             blocks.append("<p>" + "<br>\n".join(paragraph) + "</p>")
             paragraph.clear()
 
+    def mark_inline(text):
+        return _INLINE_TAG_RE.sub(lambda m: f'<mark>{m.group(0)}</mark>', text)
+
     for line in body.split("\n"):
         stripped = line.strip()
+        link = _LINK_LINE_RE.match(stripped)
+        image = _IMAGE_LINE_RE.match(stripped)
         if not stripped:
             flush()
         elif stripped.startswith("[소제목]"):
             flush()
             blocks.append(f"<h2>{html.escape(stripped[len('[소제목]'):].strip())}</h2>")
+        elif link:
+            flush()
+            title, url = link.groups()
+            blocks.append(f'<p>👉 함께 보면 좋은 글: <a href="{html.escape(url)}">{html.escape(title)}</a></p>')
+        elif image:
+            flush()
+            url, alt = image.groups()
+            blocks.append(f'<p><img src="{html.escape(url)}" alt="{html.escape(alt)}"></p>')
         elif stripped.startswith(VISUAL_TAGS) or stripped.startswith(("[내부링크 제안]", "[추가 필요")):
             flush()
             blocks.append(
@@ -167,6 +196,203 @@ def body_to_html(body):
                 f"📌 {html.escape(stripped)}</p>"
             )
         else:
-            paragraph.append(html.escape(stripped))
+            paragraph.append(mark_inline(html.escape(stripped)))
     flush()
     return "\n\n".join(blocks)
+
+
+# ─────────────────────────────────────────────
+# 남은 항목 채우기: [출처 필요]/[추가 필요]/[내부링크 제안]/[사진 제안] 등을
+# 화면에서 직접 입력해 본문에 반영
+# ─────────────────────────────────────────────
+def find_placeholders(body):
+    """본문에서 채워야 할 자리를 순서대로 찾는다.
+    반환: [{"kind": source|add|link|visual, "label": 화면 표시용, "hint": 무엇이 필요한지,
+            "context": 주변 문장, "alt": 사진 ALT(사진류만)}]"""
+    items = []
+    for m in PLACEHOLDER_RE.finditer(body):
+        raw = m.group(0).strip()
+        start = m.start()
+        before = body[max(0, start - 120):start].replace("\n", " ").strip()
+        before = re.sub(r"\[[^\]]*\]", " ", before).strip()
+        context = re.split(r"(?<=[.!?])\s+", before)[-1] if before else ""
+
+        if raw.startswith("[내부링크 제안]"):
+            title = raw[len("[내부링크 제안]"):].strip()
+            items.append({"kind": "link", "label": "🔗 내부링크", "hint": title, "context": "", "alt": ""})
+        elif raw.startswith(VISUAL_TAGS):
+            tag = raw[:raw.index("]") + 1]
+            alt_m = re.search(r'ALT:\s*"([^"]*)"', raw)
+            items.append({"kind": "visual", "label": f"🖼️ {tag[1:-1]}", "hint": raw[len(tag):].strip(),
+                          "context": "", "alt": alt_m.group(1) if alt_m else ""})
+        elif "[출처 필요" in raw:
+            hint = re.search(r"\[출처 필요\s*[:：]?\s*([^\]]*)\]", raw)
+            items.append({"kind": "source", "label": "📚 출처 필요", "hint": hint.group(1).strip() if hint else "",
+                          "context": context, "alt": ""})
+        else:
+            hint = re.search(r"\[추가 필요\s*[:：]?\s*([^\]]*)\]", raw)
+            items.append({"kind": "add", "label": "➕ 추가 필요", "hint": hint.group(1).strip() if hint else "",
+                          "context": context, "alt": ""})
+    return items
+
+
+def apply_placeholders(body, fills):
+    """find_placeholders() 순서대로 fills[i] = {"text": 입력값, "delete": bool}를 반영한다.
+    - 입력값이 없고 삭제도 아니면 그 자리는 그대로 남긴다.
+    - 출처: 입력이 '('로 시작하면 문장 끝 마침표 앞에 붙이고(예: '…있다 (Cell, 2016).'),
+      아니면 그 문장 뒤에 새 문장으로 붙인다.
+    - 내부링크: 주소(URL)를 넣으면 [링크: 제목 | 주소]로 바뀌어 HTML에서 링크가 된다.
+    - 사진류: 이미지 주소(URL)를 넣으면 [이미지: 주소 | ALT]로 바뀌어 HTML에서 이미지가 된다.
+    반환: (새 본문, 사용자가 입력한 텍스트 목록)"""
+    items = find_placeholders(body)
+    counter = {"i": 0}
+    added_texts = []
+
+    def repl(m):
+        i = counter["i"]
+        counter["i"] += 1
+        item = items[i] if i < len(items) else None
+        fill = fills.get(i, {}) if item else {}
+        text = (fill.get("text") or "").strip()
+        raw = m.group(0)
+        punct = m.group(1) or ""
+
+        if not item or (not text and not fill.get("delete")):
+            return raw
+        if fill.get("delete"):
+            return punct
+        added_texts.append(text)
+
+        if item["kind"] == "source":
+            if text.startswith("("):
+                return f" {text}{punct}" if punct else f" {text}"
+            return f"{punct} {text}" if punct else f" {text}"
+        if item["kind"] == "add":
+            return text
+        if item["kind"] == "link":
+            if not re.match(r"https?://", text):
+                return raw
+            return f"[링크: {item['hint']} | {text}]"
+        if item["kind"] == "visual":
+            if not re.match(r"https?://", text):
+                return raw
+            return f"[이미지: {text} | {item['alt'] or item['hint'][:60]}]"
+        return raw
+
+    new_body = PLACEHOLDER_RE.sub(repl, body)
+    new_body = re.sub(r"[ \t]{2,}", " ", new_body)
+    new_body = re.sub(r"\n{3,}", "\n\n", new_body).strip()
+    return new_body, added_texts
+
+
+def compose_draft(meta):
+    """parse_draft_metadata() 형태의 dict를 다시 원고 텍스트로 합친다 (화면에서 고친 내용 저장용)."""
+    return "\n".join([
+        f"[제목] {meta.get('title', '')}",
+        f"[카테고리] {meta.get('category', '')}",
+        f"[메타설명] {meta.get('meta_description', '')}",
+        f"[주소] {meta.get('slug', '')}",
+        "",
+        meta.get("body", "").strip(),
+        "",
+        f"[태그] {meta.get('tags', '')}",
+    ])
+
+
+# ─────────────────────────────────────────────
+# 원고 파일 저장/불러오기 (drafts/ 폴더)
+# ─────────────────────────────────────────────
+def write_draft_file(path, topic, platform, keyword, draft, inputs=None, backup=False):
+    """원고를 .txt로 저장하고, 입력값(사실·출처·의견·메모)은 같은 이름의 .json에 함께 저장한다.
+    backup=True면 덮어쓰기 전 이전 버전을 drafts/history/에 남긴다."""
+    folder = os.path.dirname(path) or "."
+    os.makedirs(folder, exist_ok=True)
+    if backup and os.path.exists(path):
+        os.makedirs(os.path.join(folder, "history"), exist_ok=True)
+        stem = os.path.basename(path)[:-len(".txt")]
+        shutil.copy(path, os.path.join(folder, "history", f"{stem}_이전_{datetime.now():%H%M%S}.txt"))
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(f"주제: {topic}\n플랫폼: {platform}\n타깃 키워드: {keyword}\n\n{draft}")
+    if inputs is not None:
+        with open(path[:-len(".txt")] + ".json", "w", encoding="utf-8") as f:
+            json.dump(inputs, f, ensure_ascii=False, indent=2)
+
+
+def read_draft_file(path):
+    """write_draft_file()로 저장한 원고를 읽는다.
+    반환: {"topic", "platform", "keyword", "draft", "inputs"}"""
+    with open(path, encoding="utf-8") as f:
+        text = f.read()
+    header, _, draft = text.partition("\n\n")
+    info = {"topic": "", "platform": "", "keyword": ""}
+    for line in header.split("\n"):
+        for label, key in (("주제:", "topic"), ("플랫폼:", "platform"), ("타깃 키워드:", "keyword")):
+            if line.startswith(label):
+                info[key] = line[len(label):].strip()
+    inputs = {}
+    sidecar = path[:-len(".txt")] + ".json"
+    if os.path.exists(sidecar):
+        try:
+            with open(sidecar, encoding="utf-8") as f:
+                inputs = json.load(f)
+        except (OSError, ValueError):
+            inputs = {}
+    return {**info, "draft": draft.strip(), "inputs": inputs}
+
+
+def list_saved_drafts(drafts_dir="drafts", limit=100):
+    """저장된 원고 목록 (최신순). 반환: [{"path", "label"}]"""
+    if not os.path.isdir(drafts_dir):
+        return []
+    result = []
+    for name in sorted((f for f in os.listdir(drafts_dir) if f.endswith(".txt")), reverse=True):
+        path = os.path.join(drafts_dir, name)
+        try:
+            info = read_draft_file(path)
+        except (OSError, UnicodeDecodeError):
+            continue
+        title = parse_draft_metadata(info["draft"]).get("title") or info["topic"] or "(제목 없음)"
+        m = re.match(r"(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})", name)
+        when = f"{m.group(2)}/{m.group(3)} {m.group(4)}:{m.group(5)}" if m else ""
+        result.append({"path": path, "label": f"{when} · {info['platform'] or '?'} · {title}"})
+        if len(result) >= limit:
+            break
+    return result
+
+
+# ─────────────────────────────────────────────
+# 내 문체 샘플 / 입력 자동 저장
+# ─────────────────────────────────────────────
+STYLE_SAMPLE_PATH = "my_style.txt"
+STYLE_SAMPLE_MAX = 3000
+AUTOSAVE_PATH = os.path.join("drafts", "_autosave.json")
+
+
+def load_style_sample():
+    try:
+        with open(STYLE_SAMPLE_PATH, encoding="utf-8") as f:
+            return f.read().strip()
+    except OSError:
+        return ""
+
+
+def save_style_sample(text):
+    with open(STYLE_SAMPLE_PATH, "w", encoding="utf-8") as f:
+        f.write((text or "").strip()[:STYLE_SAMPLE_MAX])
+
+
+def load_autosave():
+    try:
+        with open(AUTOSAVE_PATH, encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def save_autosave(data):
+    os.makedirs(os.path.dirname(AUTOSAVE_PATH), exist_ok=True)
+    tmp = AUTOSAVE_PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, AUTOSAVE_PATH)

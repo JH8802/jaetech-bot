@@ -7,10 +7,11 @@
 자동 점검까지 돌려서 drafts/ 폴더에 파일로 저장한다.
 """
 from blog_drafter import draft_post, suggest_questions
-from blog_reviewer import (scan_cliches, scan_structure, scan_seo, scan_health_claims,
+from blog_factcheck import check_numbers, build_references, unverified
+from blog_reviewer import (scan_cliches, scan_structure, scan_seo, scan_health_claims, scan_ai_patterns,
                            review_draft, ai_issue, AI_REVIEW_LABELS)
 from blog_sources import resolve_sources, is_bare_url
-from blog_utils import parse_draft_metadata, load_past_titles, find_keyword_overlap, body_to_html
+from blog_utils import parse_draft_metadata, load_past_titles, find_keyword_overlap, body_to_html, write_draft_file
 from datetime import datetime
 import os
 
@@ -89,7 +90,7 @@ def get_lines(prompt_text):
     return lines
 
 
-def print_review(draft, meta, platform, target_keyword):
+def print_review(draft, meta, platform, target_keyword, inputs=None):
     print("\n🔍 자동 점검 중...")
     cliche_issues = scan_cliches(draft)
     structure_issues = scan_structure(draft)
@@ -124,6 +125,21 @@ def print_review(draft, meta, platform, target_keyword):
     else:
         print("✅ 검색 최적화(키워드/소제목/메타설명/출처): 문제 없음")
         passed += 1
+
+    ai_patterns = scan_ai_patterns(meta["body"])
+    if ai_patterns:
+        print("⚠️ AI 말투(반복되는 말버릇·같은 어미) — 통과/실패 집계엔 안 들어감")
+        for issue in ai_patterns:
+            print(f"   - {issue}")
+
+    if inputs:
+        missing = unverified(check_numbers(meta["body"], build_references(inputs)))
+        if missing:
+            print("⚠️ 숫자 대조: 메모·출처 어디에도 없는 숫자 (원문과 확인 필요)")
+            for row in missing:
+                print(f"   - {row['number']} — {row['context']}")
+        else:
+            print("✅ 숫자 대조: 본문 숫자가 모두 입력한 재료에서 확인됨")
 
     claims = scan_health_claims(meta["body"])
     if claims:
@@ -176,7 +192,7 @@ if __name__ == "__main__":
     sources = get_lines("\n참고 자료/출처를 한 줄씩 (링크만 붙여넣어도 자동 정리 / 없으면 바로 엔터):")
     if any(is_bare_url(x) for x in sources):
         print("\n🔗 출처 링크 내용 가져오는 중...")
-        sources, source_report = resolve_sources(sources)
+        sources, source_report = resolve_sources(sources, topic=topic)
         for r in source_report:
             if r["ok"]:
                 print(f"  ✅ {r['message']}")
@@ -217,12 +233,15 @@ if __name__ == "__main__":
         print("=" * 50)
         print(f"\n[본문 글자 수: {len(meta['body'])}자]")
 
-        print_review(draft, meta, platform, target_keyword)
+        inputs = {
+            "topic": topic, "target_keyword": target_keyword, "key_points": key_points,
+            "sources": sources, "personal_take": personal_take, "notes": [], "user_additions": [],
+        }
+        print_review(draft, meta, platform, target_keyword, inputs)
 
         slug = platform.replace(" ", "")
         filename = f"drafts/{datetime.now().strftime('%Y%m%d_%H%M%S')}_{slug}.txt"
-        with open(filename, "w", encoding="utf-8") as f:
-            f.write(f"주제: {topic}\n플랫폼: {platform}\n타깃 키워드: {target_keyword}\n\n{draft}")
+        write_draft_file(filename, topic, platform, target_keyword, draft, inputs)
 
         print(f"\n💾 저장됨: {filename}")
 
