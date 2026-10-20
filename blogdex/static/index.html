@@ -197,11 +197,12 @@
     <label class="cap" for="memo" id="memoCap">메모</label>
     <div id="memoTplRow" class="hidden" style="margin-bottom:6px"><button class="btn ghost" id="btnMemoTpl" type="button" style="height:32px;font-size:12px">📝 메모 양식 넣기</button> <button class="btn ghost" id="btnMarket" type="button" style="height:32px;font-size:12px">📈 오늘 시황 불러오기</button> <span class="hint" style="margin:0" id="marketMsg">항목만 채우면 돼요. 비운 항목은 글에서 빠져요.</span></div>
     <textarea id="memo" maxlength="4000"></textarea>
+    <p class="hint" id="memoCount" style="text-align:right;margin:2px 0 0"></p>
     <p class="hint" id="memoHint"></p>
     <p class="hint warnhint hidden" id="memoShort"></p>
 
     <div id="newsBox" class="hidden">
-      <label class="cap" for="newsUrl">참고 기사 <small>(선택 · 최대 3개 · 기사 주소를 넣고 [불러오기] → 핵심만 요약해 글에 넣고 출처를 글 끝에 붙여요)</small></label>
+      <label class="cap" for="newsUrl">참고 기사 <small>(선택 · 최대 7개 · 기사 주소를 넣고 [불러오기] → 핵심만 요약해 글에 넣고 출처를 글 끝에 붙여요)</small></label>
       <div class="row"><input type="text" id="newsUrl" placeholder="https://n.news.naver.com/article/..." autocomplete="off" style="flex:1"><button class="btn ghost" id="btnNews" type="button" style="height:40px">불러오기</button></div>
       <div id="newsList"></div>
       <p class="hint" id="newsMsg">유료·로그인 기사처럼 본문을 못 읽는 기사는 내용을 메모에 붙여 넣어 주세요. 기사에 있는 사실·수치는 글에 쓸 수 있어요.</p>
@@ -306,6 +307,9 @@ fetch('/api/rating-labels').then((r) => r.json()).then((d) => {
 const KIND_LABEL = { info: '정보글', food: '맛집글', hotel: '호텔·여행 후기', invest: '투자 생각' };
 const PLACE_KINDS = ['food', 'hotel'];
 const NEWS_KINDS = ['invest'];  // 참고 기사 칸은 투자 생각 글 전용
+const MAX_NEWS = 7;  // 서버 news.MAX_NEWS 와 같게
+const MEMO_LIMITS = { invest: 20000 };  // 서버 MAX_MEMO_BY_KIND 와 같게, 나머지는 4,000자
+const memoLimit = () => MEMO_LIMITS[state.kind] || 4000;
 const state = { kind: 'info', titles: [], busy: false, article: null, photos: [], resultPhotos: [], photoNames: [], photoNotes: [], news: [], adTerms: [] };  // photos: 입력칸의 사진 / resultPhotos: 결과에 보여 줄 사진(현재 세션에서 생성한 글만)
 
 /* ---------- 글 종류별 화면 ---------- */
@@ -378,6 +382,8 @@ function setKind(kind) {
   updateHints();
 }
 function updateHints() {
+  $('memo').maxLength = memoLimit();
+  $('memoCount').textContent = `${$('memo').value.length.toLocaleString()} / ${memoLimit().toLocaleString()}자`;
   const n = $('memo').value.replace(/\s/g, '').length;
   const short = PLACE_KINDS.includes(state.kind) && n < 150;
   const el = $('memoShort');
@@ -397,7 +403,7 @@ function renderNews() {
 $('btnNews').onclick = async () => {
   const url = $('newsUrl').value.trim();
   if (!url) return;
-  if (state.news.length >= 3) { $('newsMsg').textContent = '참고 기사는 최대 3개까지예요. 하나를 빼고 다시 넣어 주세요.'; return; }
+  if (state.news.length >= MAX_NEWS) { $('newsMsg').textContent = `참고 기사는 최대 ${MAX_NEWS}개까지예요. 하나를 빼고 다시 넣어 주세요.`; return; }
   if (state.news.some((n) => n.url === url)) { $('newsMsg').textContent = '이미 불러온 기사예요.'; return; }
   $('btnNews').disabled = true; $('newsMsg').textContent = '기사를 읽고 있어요...';
   try {

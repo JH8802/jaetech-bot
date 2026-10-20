@@ -16,7 +16,8 @@ from urllib.parse import urlparse
 TIMEOUT = 10
 MAX_BYTES = 3 * 1024 * 1024
 MAX_TEXT = 6000  # AI에게 넘길 본문 최대 글자 수
-MAX_NEWS = 3     # 한 글에 붙일 수 있는 기사 수
+MAX_NEWS = 7     # 한 글에 붙일 수 있는 기사 수
+MAX_NEWS_TOTAL = 24000  # 기사 본문을 모두 합친 최대 글자 수(많이 붙이면 기사당 길이를 나눠 줄임: 비용·속도)
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"
 
 BODY_IDS = ("dic_area", "newsct_article", "articleBodyContents", "articeBody", "article-view-content-div", "article_body", "articleBody")
@@ -218,9 +219,12 @@ def read_news_list(raw) -> list[dict]:
     for it in raw:
         if not isinstance(it, dict):
             continue
-        text = str(it.get("text", "")).strip()[:MAX_TEXT]
+        text = str(it.get("text", "")).strip()
         if not text:
             continue
         out.append({"url": str(it.get("url", ""))[:500], "title": str(it.get("title", ""))[:200],
                     "source": str(it.get("source", ""))[:60], "published": str(it.get("published", ""))[:20], "text": text})
+    per = min(MAX_TEXT, MAX_NEWS_TOTAL // max(len(out), 1))  # 4개 이하는 기사당 6,000자, 7개면 기사당 약 3,400자
+    for it in out:
+        it["text"] = it["text"][:per]
     return out

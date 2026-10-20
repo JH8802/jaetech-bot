@@ -23,6 +23,7 @@ import storage
 
 MAX_TITLE = 200
 MAX_MEMO = 4000
+MAX_MEMO_BY_KIND = {"invest": 20000}  # 투자 생각: 못 읽은 기사 원문을 메모에 붙여 넣을 수 있게 넉넉히
 MAX_KEYWORDS = 8
 MAX_BODY = 60000
 EXPAND_MIN = {"food": 2100, "hotel": 2400}  # 맛집글이 이 글자수에 못 미치면 사진·메모 안에서 한 번 더 풀어 씁니다(목표 기준 2,100자)
@@ -101,8 +102,9 @@ def read_common(data: dict) -> dict:
     if kind not in prompts.KINDS:
         raise ValueError("알 수 없는 글 종류입니다.")
     memo = str(data.get("memo", "")).strip()
-    if len(memo) > MAX_MEMO:
-        raise ValueError(f"메모는 {MAX_MEMO:,}자 이내로 입력해 주세요.")
+    limit = MAX_MEMO_BY_KIND.get(kind, MAX_MEMO)
+    if len(memo) > limit:
+        raise ValueError(f"메모는 {limit:,}자 이내로 입력해 주세요.")
     evidence = data.get("evidence_mode", "strict")
     if evidence not in EVIDENCE_MODES:
         raise ValueError("경험 서술 모드가 올바르지 않아요.")
