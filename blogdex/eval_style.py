@@ -82,15 +82,18 @@ def evaluate(kind: str, body: str, keywords: list[str], memo: str = "", title: s
     sents = [s for p in paras for s in _sentences(p)]
     checks = []
 
+    seo = kind != "invest"  # 투자 생각 글은 검색 최적화를 하지 않으므로 키워드 점검을 건너뜀
+
     # 1) 첫 문단에 핵심 키워드
     first = paras[0] if paras else ""
     kw_in_first = any(k and k in first for k in keywords)
-    checks.append(_check("first_para", "첫 문단에 핵심 키워드", "있음" if kw_in_first else "없음", "있음", kw_in_first or not keywords,
-                         "핵심 키워드(%s)를 첫 문단 안에 넣을 것" % ", ".join(keywords[:3])))
+    if seo:
+        checks.append(_check("first_para", "첫 문단에 핵심 키워드", "있음" if kw_in_first else "없음", "있음", kw_in_first or not keywords,
+                             "핵심 키워드(%s)를 첫 문단 안에 넣을 것" % ", ".join(keywords[:3])))
 
     # 2) 키워드 밀도(단어 단위, 1,000자당)
     tokens = []
-    for k in keywords[:2]:
+    for k in (keywords[:2] if seo else []):
         for t in k.split():
             if len(t) >= 2 and t not in tokens:
                 tokens.append(t)
@@ -119,7 +122,7 @@ def evaluate(kind: str, body: str, keywords: list[str], memo: str = "", title: s
         formal = ends.count("formal") / len(ends)
         casual = (ends.count("polite") + ends.count("colloquial")) / len(ends)
         first_p = sum(bool(FIRST_PERSON_RE.match(s)) for s in sents) / len(sents)
-        if kind in ("food", "hotel"):
+        if kind in ("food", "hotel", "invest"):
             checks.append(_check("endings", "말투 섞임(합니다체 / 해요·구어)", f"{formal:.0%} / {casual:.0%}", "합니다체 30~70%", 0.30 <= formal <= 0.70 and casual >= 0.20,
                                  "합니다체를 약 50%, 해요체와 구어 어미(~더라고요, ~거든요, ~잖아요)를 약 50% 섞을 것"))
             checks.append(_check("first_person", "'저는'으로 시작하는 문장", f"{first_p:.0%}", "35% 이하", first_p <= 0.35,
@@ -147,7 +150,7 @@ def evaluate(kind: str, body: str, keywords: list[str], memo: str = "", title: s
                          "해시태그를 핵심 키워드 중심으로 5~10개, 중복 없이 맞출 것"))
 
     # 8) 분량
-    lo, hi = {"food": (1900, 2700), "hotel": (2400, 3400)}.get(kind, (2000, 3200))
+    lo, hi = {"food": (1900, 2700), "hotel": (2400, 3400), "invest": (1500, 3000)}.get(kind, (2000, 3200))
     n = count_chars(body)
     checks.append(_check("length", "분량(공백 제외)", f"{n:,}자", f"{lo:,}~{hi:,}자", lo <= n <= hi,
                          "분량을 %s~%s자로 맞출 것(현재 %s자)" % (f"{lo:,}", f"{hi:,}", f"{n:,}")))
@@ -160,12 +163,16 @@ def evaluate(kind: str, body: str, keywords: list[str], memo: str = "", title: s
 
     # 10) 표시·광고 표현(가드레일을 켠 글만): 목록 기반 점검이라 법률 판단이 아니라 사람이 다시 보라는 표시
     if ad_check:
-        hits = adcheck.scan(title, body)
+        hits = adcheck.scan(title, body, kind)
         sm = adcheck.summarize(hits)
         value = "해당 없음" if not hits else f"높음 {sm['high']} · 주의 {sm['warn']} · 참고 {sm['soft']}"
         terms = ", ".join(f"'{t}'" for t in sm["hard_terms"][:4])
-        ad = _check("ad", "표시·광고 표현 점검", value, "높음·주의 0건 (참고는 제외)", not (sm["high"] or sm["warn"]),
-                    f"표시·광고 주의 표현({terms})을 단정·암시 없이 근거 수준을 밝히는 중립적 설명으로 바꿀 것")
+        if kind == "invest":
+            ad = _check("ad", "투자 표현 점검(권유·보장·단정)", value, "높음·주의 0건 (참고는 제외)", not (sm["high"] or sm["warn"]),
+                        f"투자 권유·보장·전망 단정 표현({terms})을 '제 생각에는 ~로 보고 있어요'처럼 개인 의견으로 바꾸고 틀릴 수 있다는 점을 밝힐 것")
+        else:
+            ad = _check("ad", "표시·광고 표현 점검", value, "높음·주의 0건 (참고는 제외)", not (sm["high"] or sm["warn"]),
+                        f"표시·광고 주의 표현({terms})을 단정·암시 없이 근거 수준을 밝히는 중립적 설명으로 바꿀 것")
         ad["hits"] = hits[:40]
         checks.append(ad)
 
