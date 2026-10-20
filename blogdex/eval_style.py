@@ -8,7 +8,7 @@ import re
 import statistics as st
 
 import adcheck
-from postprocess import HEADING_RE, MAP_LINE_MARK, RATING_HEAD, count_chars, find_hashtag_index, split_paragraphs, strip_tags
+from postprocess import HEADING_RE, MAP_LINE_MARK, RATING_HEAD, SOURCE_HEAD, count_chars, find_hashtag_index, split_paragraphs, strip_tags
 
 GENERIC_WORDS = ["편안", "무난", "자연스럽", "부담", "좋았", "좋겠", "차분", "다양한", "효과적", "전반적으로"]
 FIRST_PERSON_RE = re.compile(r"^(저는|저도|제가|저의)")
@@ -31,7 +31,7 @@ def _body_parts(body: str):
     tags = paras.pop(tag_i) if tag_i is not None else ""
     heads = [p for p in paras if HEADING_RE.match(p)]
     text_paras = [p for p in paras if not HEADING_RE.match(p) and MAP_LINE_MARK not in p
-                  and not p.startswith(RATING_HEAD) and not re.fullmatch(r"(<)?사진 ?\d+(>)?", p)]
+                  and not p.startswith((RATING_HEAD, SOURCE_HEAD)) and not re.fullmatch(r"(<)?사진 ?\d+(>)?", p)]
     return text_paras, heads, tags
 
 
@@ -110,11 +110,17 @@ def evaluate(kind: str, body: str, keywords: list[str], memo: str = "", title: s
         lens = [len(s) for s in sents]
         mean, sd = st.mean(lens), st.pstdev(lens)
         short = sum(l < 25 for l in lens) / len(lens)
-        # 원본 3건: 평균 46~53자, 편차 12~15, 짧은 문장 0~4%. 원본 수준은 통과하고 그보다 단조로우면 주의.
-        ok = 28 <= mean <= 60 and sd >= 12
-        checks.append(_check("sent_len", "문장 길이 변화", f"평균 {mean:.0f}자 · 편차 {sd:.1f} · 짧은 문장 {short:.0%}",
-                             "평균 28~60 · 편차 12 이상", ok,
-                             "문장 길이가 균일함. 20자 안팎의 짧은 문장을 20%쯤 섞고 긴 문장은 줄일 것"))
+        if kind == "invest":  # 투자 생각 글은 읽기 쉽게 짧은 문장이 기준
+            long_ = sum(l > 50 for l in lens) / len(lens)
+            checks.append(_check("sent_len", "문장 길이(짧게)", f"평균 {mean:.0f}자 · 50자 넘는 문장 {long_:.0%}",
+                                 "평균 40자 이하 · 50자 넘는 문장 10% 이하", mean <= 40 and long_ <= 0.10,
+                                 "한 문장을 15~35자 안팎으로 짧게 나누고, 45자를 넘는 문장은 두 문장으로 쪼갤 것"))
+        else:
+            # 원본 3건: 평균 46~53자, 편차 12~15, 짧은 문장 0~4%. 원본 수준은 통과하고 그보다 단조로우면 주의.
+            ok = 28 <= mean <= 60 and sd >= 12
+            checks.append(_check("sent_len", "문장 길이 변화", f"평균 {mean:.0f}자 · 편차 {sd:.1f} · 짧은 문장 {short:.0%}",
+                                 "평균 28~60 · 편차 12 이상", ok,
+                                 "문장 길이가 균일함. 20자 안팎의 짧은 문장을 20%쯤 섞고 긴 문장은 줄일 것"))
 
     # 4) 종결어미 / 1인칭
     if sents:

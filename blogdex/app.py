@@ -13,7 +13,10 @@ from flask import Flask, Response, jsonify, request, send_from_directory, stream
 from werkzeug.exceptions import HTTPException
 
 import eval_style
+import invest_guard
 import llm
+import market
+import news
 import postprocess
 import prompts
 import storage
@@ -107,7 +110,7 @@ def read_common(data: dict) -> dict:
         "kind": kind,
         "memo": memo,
         "place": read_place(data.get("place")) if kind in prompts.PLACE_KINDS else {},
-        "guardrail": bool(data.get("guardrail", False)),
+        "guardrail": True if kind == "invest" else bool(data.get("guardrail", False)),  # 투자 글 가드레일은 끌 수 없음
         "evidence_mode": evidence,
     }
 
@@ -175,20 +178,67 @@ def version():
     return jsonify(version=APP_VERSION)
 
 
+STYLE_SCOPES = ["common", *prompts.KINDS]  # common: 모든 글 공통, 그 밖: 글 종류별(비어 있으면 공통을 씀)
+
+
+def _style_key(scope: str) -> str:
+    return "style_sample" if scope == "common" else f"style_sample:{scope}"
+
+
+def style_for(kind: str) -> str:
+    """글 종류별 말투 샘플이 있으면 그것을, 없으면 공통 샘플을 씁니다."""
+    own = storage.get_setting(_style_key(kind))[0]
+    return own if own.strip() else storage.get_setting("style_sample")[0]
+
+
 @app.get("/api/style")
 def style_get():
-    text, updated = storage.get_setting("style_sample")
-    return jsonify(style_sample=text, updated_at=updated, max_chars=prompts.MAX_STYLE_SAMPLE)
+    samples = {}
+    for scope in STYLE_SCOPES:
+        text, updated = storage.get_setting(_style_key(scope))
+        samples[scope] = {"text": text, "updated_at": updated}
+    return jsonify(samples=samples, style_sample=samples["common"]["text"], updated_at=samples["common"]["updated_at"],
+                   max_chars=prompts.MAX_STYLE_SAMPLE)
 
 
 @app.put("/api/style")
 def style_put():
-    """내 말투 샘플을 저장합니다. 모든 글 종류의 생성·보강·다시 쓰기에 적용되고 언제든 고칠 수 있습니다."""
-    text = str((request.get_json(silent=True) or {}).get("style_sample", "")).replace("\r\n", "\n").strip()
+    """말투 샘플을 저장합니다. scope 가 common 이면 모든 글 공통, 글 종류면 그 종류에만 쓰입니다(비우면 공통으로 돌아감)."""
+    data = request.get_json(silent=True) or {}
+    scope = data.get("scope") or "common"
+    if scope not in STYLE_SCOPES:
+        raise ValueError("말투를 저장할 글 종류가 올바르지 않아요.")
+    text = str(data.get("style_sample", "")).replace("\r\n", "\n").strip()
     if len(text) > prompts.MAX_STYLE_SAMPLE:
         raise ValueError(f"말투 샘플은 {prompts.MAX_STYLE_SAMPLE:,}자 이내로 적어 주세요.")
-    updated = storage.set_setting("style_sample", text)
-    return jsonify(style_sample=text, updated_at=updated)
+    updated = storage.set_setting(_style_key(scope), text)
+    return jsonify(scope=scope, style_sample=text, updated_at=updated)
+
+
+@app.post("/api/news/preview")
+def news_preview():
+    """기사 주소를 읽어 제목·언론사·날짜·본문 앞부분을 돌려줍니다. 화면에서 확인한 뒤 원고 생성에 함께 보냅니다."""
+    url = str((request.get_json(silent=True) or {}).get("url", "")).strip()[:1000]
+    if llm.is_mock():
+        return jsonify(article={"url": url, "title": "샘플 기사 제목", "source": "샘플일보", "published": "2026-10-20",
+                                "text": "샘플 기사 본문입니다. 지수가 1% 올랐다고 보도했습니다."})
+    try:
+        return jsonify(article=news.fetch_article(url))
+    except news.FetchError as e:
+        raise ValueError(str(e))
+
+
+@app.get("/api/market")
+def market_snapshot():
+    """오늘 시황(주요 지수·환율·원자재·비트코인)을 불러와 메모에 넣을 글로 돌려줍니다."""
+    if llm.is_mock():
+        snap = {"items": [{"name": "코스피", "close": 2600.0, "pct": 0.5, "date": "10/20", "digits": 2, "unit": ""}],
+                "failed": [], "fetched_at": "2026-10-20 09:00", "source": "샘플"}
+    else:
+        snap = market.fetch_snapshot()
+    if not snap["items"]:
+        raise ValueError("시황을 불러오지 못했어요(인터넷 연결이나 데이터 제공 사이트 사정일 수 있어요). 잠시 뒤 다시 시도하거나 직접 적어 주세요.")
+    return jsonify(memo=market.to_memo(snap), **snap)
 
 
 @app.get("/api/rating-labels")
@@ -234,16 +284,47 @@ def titles():
     if len(keyword) > MAX_TITLE:
         raise ValueError(f"주제는 {MAX_TITLE}자 이내로 입력해 주세요.")
     exclude = [str(x)[:MAX_TITLE] for x in (data.get("exclude") or [])][:15]
-    system = prompts.BASE_ROLE
+    system = prompts.INVEST_ROLE + "\n\n" + prompts.INVEST_PRINCIPLES if c["kind"] == "invest" else prompts.BASE_ROLE
     user = prompts.build_title_prompt(c["kind"], keyword, c["memo"], c["place"], exclude, c["guardrail"])
     text = llm.ask_text(system, user, max_tokens=1024, effort="low")
-    result = [t for t in (clean_title(l) for l in text.splitlines()) if t][:5]
+    result = [t for t in (clean_title(l) for l in text.splitlines()) if t]
+    if c["kind"] == "invest":  # 권유·보장·단정 표현이 든 제목 후보는 버림
+        result = [t for t in result if not invest_guard.violations("", t)]
+    result = result[:5]
     return jsonify(titles=result, keywords=prompts.derive_keywords(c["kind"], keyword, c["place"]))
 
 
 # ---------- 원고 ----------
+def _enforce_invest_guard(fin, system, usage, kind, place, keywords, title, ratings, news_list):
+    """투자 글 가드레일 강제(invest_guard.py 참고): AI 수정 1번 → 남은 위반 문장 삭제 → 안내 문장 보장. fin 을 고쳐 씁니다."""
+    hits = invest_guard.violations(fin["body"])
+    if hits:
+        yield sse("status", {"text": f"투자 글 원칙에 어긋난 표현 {len(hits)}곳을 고치고 있어요."})
+        try:
+            g_usage = {}
+            raw = llm.ask_text(system, prompts.build_guard_fix_prompt(fin["body"], hits), max_tokens=9000, effort=llm.EFFORT, usage=g_usage)
+            fixed = postprocess.finalize(kind, raw, place, keywords, title, 0, ratings, news_list)
+            usage = llm.merge_usage(usage, g_usage)
+            # 고친 글이 원래 글의 70% 이상 분량이고 위반이 줄었을 때만 받음(엉뚱한 응답 방지)
+            if fixed["chars"] >= fin["chars"] * 0.7 and len(invest_guard.violations(fixed["body"])) < len(hits):
+                fin["body"], fin["chars"] = fixed["body"], fixed["chars"]
+                fin["notes"].append(f"투자 글 원칙에 어긋난 표현 {len(hits)}곳을 AI가 고쳤어요.")
+        except Exception:
+            app.logger.exception("guard fix failed")
+    body, removed = invest_guard.remove_violations(fin["body"])
+    if removed:
+        fin["notes"].append(f"원칙에 어긋난 문장 {len(removed)}개를 지웠어요: " + " / ".join(r[:40] for r in removed[:3]))
+    body, added = invest_guard.ensure_disclaimer(body)
+    if added:
+        fin["notes"].append("개인 의견 안내 문장(투자 판단과 책임은 각자에게 있어요)을 넣었어요.")
+    if body != fin["body"]:
+        fin["body"], fin["chars"] = body, postprocess.count_chars(body)
+        yield sse("replace", {"text": body})
+    fin["_usage"] = usage
+
+
 def _generate_events(*, kind, title, keywords, memo, place, guardrail, evidence_mode, build_prompt,
-                     photos=None, photo_notes=None, parent_id=None, title_input=None, ratings=None, photo_names=None):
+                     photos=None, photo_notes=None, parent_id=None, title_input=None, ratings=None, photo_names=None, news_list=None):
     """원고를 스트리밍으로 만들고, 후처리·점검·저장 후 SSE 이벤트를 흘려보냅니다.
     photos(사진 원본)가 있으면 먼저 사진을 살펴보고, photo_notes(이미 분석된 결과)가 있으면 그대로 씁니다."""
     parts, usage, photo_usage = [], {}, {}
@@ -265,7 +346,7 @@ def _generate_events(*, kind, title, keywords, memo, place, guardrail, evidence_
         if photo_notes:
             yield sse("photos", {"notes": photo_notes})
         system = prompts.build_system(kind, guardrail, evidence_mode, len(photo_notes or []),
-                                      style_sample=storage.get_setting("style_sample")[0])
+                                      style_sample=style_for(kind), has_news=bool(news_list))
         user_prompt = build_prompt(photo_notes)
         yield sse("status", {"text": "원고를 쓰고 있어요."})
         for chunk in llm.stream_text(system, user_prompt, max_tokens=16000, usage=usage):
@@ -273,7 +354,7 @@ def _generate_events(*, kind, title, keywords, memo, place, guardrail, evidence_
             yield sse("chunk", {"text": chunk})
         usage = llm.merge_usage(photo_usage, usage)
         yield sse("status", {"text": "태그와 해시태그를 정리하고 품질을 점검하고 있어요."})
-        fin = postprocess.finalize(kind, "".join(parts), place, keywords, title, len(photo_notes or []), ratings)
+        fin = postprocess.finalize(kind, "".join(parts), place, keywords, title, len(photo_notes or []), ratings, news_list)
         floor = EXPAND_MIN.get(kind)
         enough_material = len(re.sub(r"\s", "", memo or "")) >= 150 or bool(photo_notes)
         if floor and fin["chars"] < floor and enough_material:
@@ -282,7 +363,7 @@ def _generate_events(*, kind, title, keywords, memo, place, guardrail, evidence_
                 ex_usage = {}
                 raw2 = llm.ask_text(system, prompts.build_expand_prompt(kind, fin["body"], fin["chars"], floor + EXPAND_TARGET_EXTRA, memo, photo_notes, keywords, ratings),
                                     max_tokens=9000, effort=llm.EFFORT, usage=ex_usage)
-                fin2 = postprocess.finalize(kind, raw2, place, keywords, title, len(photo_notes or []), ratings)
+                fin2 = postprocess.finalize(kind, raw2, place, keywords, title, len(photo_notes or []), ratings, news_list)
                 usage = llm.merge_usage(usage, ex_usage)
                 if fin2["chars"] > fin["chars"]:
                     fin2["notes"].append(f"분량이 짧아 한 번 보강했어요({fin['chars']:,}자 → {fin2['chars']:,}자).")
@@ -292,11 +373,16 @@ def _generate_events(*, kind, title, keywords, memo, place, guardrail, evidence_
             except Exception:  # 보강 실패가 원고 생성 전체를 막으면 안 됩니다
                 app.logger.exception("expand failed")
                 fin["notes"].append("분량 보강에 실패해 처음 글을 그대로 썼어요.")
+        if kind == "invest":
+            for ev in _enforce_invest_guard(fin, system, usage, kind, place, keywords, title, ratings, news_list):
+                yield ev
+            usage = fin.pop("_usage", usage)
         quality = eval_style.evaluate(kind, fin["body"], keywords, memo, title=title, ad_check=guardrail)
         yield sse("replace", {"text": fin["body"]})
         article_id = storage.save_article(
             kind=kind, title_input=title_input or title, title_final=title, memo=memo, place=place, keywords=keywords,
-            options={"guardrail": guardrail, "evidence_mode": evidence_mode, "usage": usage, "photos": photo_notes or [], "ratings": ratings or []},
+            options={"guardrail": guardrail, "evidence_mode": evidence_mode, "usage": usage, "photos": photo_notes or [], "ratings": ratings or [],
+                     "news": news_list or []},
             body=fin["body"], chars=fin["chars"],
             quality=quality, model=usage.get("model") or llm.MODEL, parent_id=parent_id)
         yield sse("done", {"article_id": article_id, "title": title, "body": fin["body"], "chars": fin["chars"],
@@ -322,11 +408,16 @@ def article_stream():
         keywords = prompts.derive_keywords(c["kind"], title, c["place"])
     photos = read_photos(data, c["kind"])
     ratings = read_ratings(data, c["kind"])
+    news_list = news.read_news_list(data.get("news"))
+    if c["kind"] == "invest":
+        bad = invest_guard.violations("", title)
+        if bad:
+            raise ValueError(f"제목에 투자 권유·보장·단정 표현({', '.join(dict.fromkeys(h['match'] for h in bad))})이 있어요. 제목을 바꿔 주세요.")
     return sse_response(_generate_events(
         kind=c["kind"], title=title, keywords=keywords, memo=c["memo"], place=c["place"],
         guardrail=c["guardrail"], evidence_mode=c["evidence_mode"], photos=photos, ratings=ratings,
-        photo_names=read_photo_names(data),
-        build_prompt=lambda notes: prompts.build_article_prompt(c["kind"], title, keywords, c["memo"], c["place"], notes, ratings)))
+        photo_names=read_photo_names(data), news_list=news_list,
+        build_prompt=lambda notes: prompts.build_article_prompt(c["kind"], title, keywords, c["memo"], c["place"], notes, ratings, news_list)))
 
 
 @app.post("/api/articles/<int:article_id>/rewrite")
@@ -343,7 +434,9 @@ def article_rewrite(article_id: int):
         kind=art["kind"], title=art["title"], keywords=art["keywords"], memo=art["memo"], place=art["place"],
         guardrail=bool(opts.get("guardrail")), evidence_mode=opts.get("evidence_mode", "strict"),
         photo_notes=notes, parent_id=article_id, title_input=art["title_input"], ratings=opts.get("ratings") or [],
-        build_prompt=lambda n: prompts.build_rewrite_prompt(art["kind"], art["body"], issues, art["keywords"], n, opts.get("ratings") or [])))
+        news_list=opts.get("news") or [],
+        build_prompt=lambda n: prompts.build_rewrite_prompt(art["kind"], art["body"], issues, art["keywords"], n, opts.get("ratings") or [],
+                                                            opts.get("news") or [])))
 
 
 @app.get("/api/articles")

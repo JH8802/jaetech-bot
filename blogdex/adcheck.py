@@ -11,7 +11,7 @@
 """
 import re
 
-from postprocess import HEADING_RE, MAP_LINE_MARK, find_hashtag_index, split_paragraphs, strip_tags
+from postprocess import HEADING_RE, MAP_LINE_MARK, SOURCE_HEAD, find_hashtag_index, split_paragraphs, strip_tags
 
 # (수준, 분류, [정규식...])
 RULES = [
@@ -55,6 +55,7 @@ def _compile(rules):
 _COMPILED = _compile(RULES)
 _COMPILED_INVEST = _compile(INVEST_RULES)
 _SENT_SPLIT = re.compile(r"(?<=[.?!])\s+")
+IMPERATIVE_RE = re.compile(r"(?:세요|십시오|하자|합시다|해야\s*(?:합|해))")
 
 
 def _units(title: str, body: str):
@@ -64,7 +65,7 @@ def _units(title: str, body: str):
     paras = split_paragraphs(strip_tags(body))
     tag_i = find_hashtag_index(paras)
     for i, par in enumerate(paras):
-        if re.fullmatch(r"<\s*사진\s*\d+\s*>", par) or MAP_LINE_MARK in par:
+        if re.fullmatch(r"<\s*사진\s*\d+\s*>", par) or MAP_LINE_MARK in par or par.startswith(SOURCE_HEAD):  # 참고 기사 목록(기사 제목)은 내 표현이 아님
             continue
         if i == tag_i:
             for t in re.findall(r"#[^\s#]+", par):
@@ -83,6 +84,8 @@ def scan(title: str, body: str, kind: str = "info") -> list[dict]:
     for where, sent in _units(title, body):
         taken: list[tuple[int, int]] = []  # 앞선(더 위험한) 규칙과 겹치는 위치는 건너뜀
         soft = where != "해시태그" and bool(SOFT_RE.search(sent))
+        if kind == "invest" and soft and IMPERATIVE_RE.search(sent):  # '놓치지 않으려면 사세요'처럼 부정어가 있어도 권유는 그대로 셈
+            soft = False
         for level, cat, rx in compiled:
             for m in rx.finditer(sent):
                 span = m.span()
