@@ -50,8 +50,13 @@ class NewsTest(unittest.TestCase):
 
     def test_read_news_list_limits(self):
         self.assertEqual(news.read_news_list(None), [])
+        self.assertEqual(len(news.read_news_list([{"text": "a"}] * 7)), 7)  # 최대 7개
         with self.assertRaises(ValueError):
-            news.read_news_list([{"text": "a"}] * 4)
+            news.read_news_list([{"text": "a"}] * 8)
+        # 기사가 많으면 본문 합계가 MAX_NEWS_TOTAL 을 넘지 않게 기사당 길이를 나눠 줄임
+        many = news.read_news_list([{"text": "가" * 9000}] * 7)
+        self.assertLessEqual(sum(len(n["text"]) for n in many), news.MAX_NEWS_TOTAL)
+        self.assertEqual(len(news.read_news_list([{"text": "가" * 9000}])[0]["text"]), news.MAX_TEXT)
         self.assertEqual(len(news.read_news_list([{"text": "본문", "title": "t"}, {"text": ""}])), 1)
 
 
@@ -236,6 +241,12 @@ class ApiFlowTest(unittest.TestCase):
         self.assertIn("[자동 시황", d["memo"])
         a = self.c.post("/api/news/preview", json={"url": "https://example.com"}).get_json()["article"]
         self.assertTrue(a["text"])
+
+    def test_memo_limit_is_larger_for_invest_only(self):
+        ok = self.c.post("/api/articles/stream", json={"kind": "invest", "title": "요즘 시장 생각", "memo": "가" * 15000})
+        self.assertEqual(ok.status_code, 200)
+        self.assertEqual(self.c.post("/api/articles/stream", json={"kind": "invest", "title": "요즘 시장 생각", "memo": "가" * 20001}).status_code, 400)
+        self.assertEqual(self.c.post("/api/articles/stream", json={"kind": "info", "title": "정보글", "memo": "가" * 4001}).status_code, 400)
 
     def test_news_ignored_for_other_kinds(self):
         art = {"url": "https://x", "title": "금리 동결", "source": "연합뉴스", "published": "2026-10-19", "text": "기사 본문"}
