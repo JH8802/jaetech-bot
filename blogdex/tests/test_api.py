@@ -138,7 +138,9 @@ class ApiTests(unittest.TestCase):
         self.assertNotIn("kw_density", keys)
         art = self.c.get(f"/api/articles/{done['article_id']}").get_json()["article"]
         self.assertEqual(art["kind"], "invest")
-        self.assertEqual(self._stream(kind="invest", place={}, photos=[self.PIXEL])[0].status_code, 400)
+        # 투자 생각 글도 이미지 자료(그래프·리포트·캡처)를 최대 10장까지 올릴 수 있음
+        self.assertEqual(self._stream(kind="invest", place={}, photos=[self.PIXEL] * 10)[0].status_code, 200)
+        self.assertEqual(self._stream(kind="invest", place={}, photos=[self.PIXEL] * 11)[0].status_code, 400)
 
     def test_no_photos_means_no_photo_markers(self):
         _, events = self._stream()

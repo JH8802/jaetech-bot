@@ -217,7 +217,7 @@
     </div>
 
     <div id="photoBox">
-    <label class="cap" for="fileInput">사진 <small>(선택 · 최대 <span id="photoLimit">20</span>장 · 올린 순서가 사진 번호예요)</small></label>
+    <label class="cap" for="fileInput"><span id="photoCap">사진</span> <small>(선택 · 최대 <span id="photoLimit">20</span>장 · 올린 순서가 사진 번호예요)</small></label>
     <div class="photo-actions">
       <button class="btn ghost" id="btnPhotos" type="button">사진 선택</button>
       <button class="btn ghost" id="btnFolder" type="button">폴더 선택</button>
@@ -226,7 +226,7 @@
     <input type="file" id="fileInput" accept="image/*" multiple hidden>
     <input type="file" id="folderInput" webkitdirectory multiple hidden>
     <div class="photo-grid" id="photoGrid"></div>
-    <p class="hint">AI가 사진에 보이는 것을 글에 반영하고, 글 속 <b>'사진 N'</b> 줄 자리에 같은 번호 사진을 놓으라고 표시해요. 복사할 때 사진은 포함되지 않으니, 네이버 에디터에서 그 자리에 직접 올리세요. 사진은 서버에 저장하지 않아요.</p>
+    <p class="hint" id="photoHint">AI가 사진에 보이는 것을 글에 반영하고, 글 속 <b>'사진 N'</b> 줄 자리에 같은 번호 사진을 놓으라고 표시해요. 복사할 때 사진은 포함되지 않으니, 네이버 에디터에서 그 자리에 직접 올리세요. 사진은 서버에 저장하지 않아요.</p>
     </div>
 
     <p class="hint warnhint hidden" id="evidenceHint">'메모 + 일반 표현'은 메모에 없는 체험(맛·분위기 묘사 등)이 후기에 섞일 수 있어요. 실제 방문 후기에는 '메모에 있는 것만'을 권해요.</p>
@@ -305,7 +305,7 @@ fetch('/api/rating-labels').then((r) => r.json()).then((d) => {
 
 const KIND_LABEL = { info: '정보글', food: '맛집글', hotel: '호텔·여행 후기', invest: '투자 생각' };
 const PLACE_KINDS = ['food', 'hotel'];
-const NEWS_KINDS = ['info', 'invest'];  // 참고 기사 칸을 보여 줄 글 종류
+const NEWS_KINDS = ['invest'];  // 참고 기사 칸은 투자 생각 글 전용
 const state = { kind: 'info', titles: [], busy: false, article: null, photos: [], resultPhotos: [], photoNames: [], photoNotes: [], news: [], adTerms: [] };  // photos: 입력칸의 사진 / resultPhotos: 결과에 보여 줄 사진(현재 세션에서 생성한 글만)
 
 /* ---------- 글 종류별 화면 ---------- */
@@ -335,6 +335,8 @@ const KIND_UI = {
   },
 };
 KIND_UI.food.placeCap = '매장 이름';
+const PHOTO_HINT = $('photoHint').innerHTML;  // 맛집·호텔·정보글의 기본 사진 안내
+const PHOTO_HINT_INVEST = '그래프·차트, 증권사 리포트 일부, 메시지·화면 캡처를 올리면 AI가 <b>또렷하게 읽히는 글자·숫자와 큰 흐름</b>만 읽어 글에 반영하고, 글 속 <b>\'사진 N\'</b> 자리에 놓으라고 표시해요. 메시지 속 이름·연락처 같은 개인 정보와 리포트의 목표주가·투자의견은 글에 쓰지 않아요. 이미지는 서버에 저장하지 않아요.';
 const INVEST_MEMO_TEMPLATE = `[요즘 시장 분위기]
 - 
 
@@ -365,7 +367,8 @@ function setKind(kind) {
   const invest = kind === 'invest';
   $('guardrailName').textContent = invest ? '투자 표현 가드레일' : '표시·광고 가드레일';
   $('guardrailSmall').textContent = invest ? '(매수·매도 권유·수익 보장·전망 단정 표현 제한, 개인 의견 안내 문장 포함)' : '(효능 단정·암시 표현 제한)';
-  $('kwBox').classList.toggle('hidden', invest); $('photoBox').classList.toggle('hidden', invest); $('memoTplRow').classList.toggle('hidden', !invest);
+  $('kwBox').classList.toggle('hidden', invest);
+  $('photoCap').textContent = invest ? '이미지 자료' : '사진'; $('photoHint').innerHTML = invest ? PHOTO_HINT_INVEST : PHOTO_HINT; $('memoTplRow').classList.toggle('hidden', !invest);
   $('newsBox').classList.toggle('hidden', !NEWS_KINDS.includes(kind));
   $('guardrail').disabled = invest;  // 투자 글 가드레일은 끌 수 없음(서버도 항상 켬)
   if (invest) $('guardrailSmall').textContent = '(항상 켜짐 · 매수·매도 권유·수익 보장·전망 단정 금지, 어긴 문장은 고치거나 지우고 개인 의견 안내 문장을 넣어요)';
@@ -669,7 +672,7 @@ $('btnTitles').onclick = () => makeTitles(false);
 $('btnRegen').onclick = () => makeTitles(true);
 
 /* ---------- 사진 ---------- */
-const PHOTO_LIMITS = { info: 20, food: 20, hotel: 30, invest: 0 };  // 글 종류별 사진 한도(서버와 같게)
+const PHOTO_LIMITS = { info: 20, food: 20, hotel: 30, invest: 10 };  // 글 종류별 사진 한도(서버와 같게)
 const photoLimit = () => PHOTO_LIMITS[state.kind] ?? 20;
 function loadResized(file, maxEdge = 1280) {
   return new Promise((resolve, reject) => {
@@ -721,7 +724,7 @@ function renderPhotoNotes(notes) {
   state.photoNotes = notes || [];
   if (!notes || !notes.length) { box.innerHTML = ''; return; }
   // 대표 사진 추천: 대표 적합도(thumb)가 가장 높은 사진, 같으면 번호가 앞선 사진. 메뉴판·글자 위주 사진은 뺀다
-  const cands = notes.filter((n) => n.thumb > 0 && !/메뉴판|라벨|화면|자료/.test(n.category || ''));
+  const cands = notes.filter((n) => n.thumb > 0 && !/메뉴판|라벨|화면|자료|메시지|문서/.test(n.category || ''));
   const best = cands.reduce((a, b) => (!a || b.thumb > a.thumb ? b : a), null);
   const thumbHtml = best ? `<div class="thumbpick">⭐ 대표 사진 추천: <b>사진 ${best.n}</b>${photoName(best.n) ? ` (${esc(photoName(best.n))})` : ''}${best.caption ? ` · ${esc(best.caption)}` : ''}<br><span style="color:var(--sub)">네이버 에디터에서 이 사진을 대표 사진으로 지정하면 홈·검색 목록에 가장 먼저 보여요.</span></div>` : '';
   box.innerHTML = '<div class="photonotes"><h4>AI가 본 사진 (번호 확인용)</h4>' + thumbHtml + notes.map((n) => {
@@ -753,8 +756,8 @@ async function runStream(url, body) {
 
 $('btnWrite').onclick = () => {
   if (state.busy) return;
-  const invest = state.kind === 'invest';  // 투자 생각 글은 사진·검색 키워드를 쓰지 않는다
-  const photos = invest ? [] : state.photos;
+  const invest = state.kind === 'invest';  // 투자 생각 글은 검색 키워드를 쓰지 않는다
+  const photos = state.photos;
   if (photos.length > photoLimit()) { showError(`이 글 종류는 사진을 최대 ${photoLimit()}장까지 올릴 수 있어요. ${photos.length - photoLimit()}장을 빼거나 글 종류를 바꿔 주세요.`); return; }
   state.resultPhotos = [...photos];
   runStream('/api/articles/stream', { ...commonBody(), title: $('title').value.trim(), keywords: invest ? [] : keywordList(), news: NEWS_KINDS.includes(state.kind) ? state.news : [], photos: photos.map((p) => p.url), photo_names: photos.map((p) => p.name || '') });

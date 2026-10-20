@@ -169,6 +169,40 @@ class InvestFormatAndGuardTest(unittest.TestCase):
         self.assertEqual(invest_guard.violations("무조건 오른다고 단정하지 않습니다."), [])
 
 
+class InvestOnlyFeaturesTest(unittest.TestCase):
+    def test_hashtags_capped_at_five_for_invest_only(self):
+        raw = "본문입니다.\n\n#a1 #a2 #a3 #a4 #a5 #a6 #a7 #a8"
+        self.assertEqual(pp.finalize("invest", raw, None, [])["body"].split("\n\n")[-1].count("#"), 5)
+        self.assertEqual(pp.finalize("info", raw, None, [])["body"].split("\n\n")[-1].count("#"), 8)
+        import eval_style
+        ev = eval_style.evaluate("invest", "본문입니다.\n\n#a1 #a2 #a3 #a4", [])
+        tag = next(c for c in ev["checks"] if c["key"] == "hashtags")
+        self.assertTrue(tag["ok"])
+        self.assertEqual(tag["target"], "3~5개(중복 없음)")
+
+    def test_generic_words_relaxed_only_in_invest(self):
+        inv = prompts.build_system("invest", True, "strict")
+        self.assertIn("일부러 없앨 필요는 없습니다", inv)
+        self.assertNotIn("(1,000자당 3회 이하)", inv)
+        self.assertIn("(1,000자당 3회 이하)", prompts.build_system("food", False, "strict"))
+
+    def test_invest_images_use_their_own_rules(self):
+        inv = prompts.build_system("invest", True, "strict", photo_count=2)
+        self.assertIn("[이미지 자료 사용 규칙 - 투자 글]", inv)
+        self.assertNotIn("[사진 사용 규칙]", inv)
+        self.assertIs(prompts.vision_system("invest"), prompts.INVEST_VISION_SYSTEM)
+        self.assertIs(prompts.vision_system("food"), prompts.VISION_SYSTEM)
+        p = prompts.build_photo_analysis_prompt("invest", "제목", None, 2)
+        self.assertIn("차트·그래프", p)
+        self.assertNotIn("dish", p)
+        self.assertIn("[이미지 자료", prompts.photo_block([{"n": 1, "category": "차트·그래프", "desc": "코스피 일봉"}], "invest"))
+        import llm
+        long_text = "가" * 500
+        raw = '[{"n": 1, "category": "리포트·문서", "desc": "d", "text": "%s"}]' % long_text
+        self.assertEqual(len(llm.parse_photo_notes(raw, 1, 1, text_max=400)[0]["text"]), 400)
+        self.assertEqual(len(llm.parse_photo_notes(raw, 1)[0]["text"]), 100)
+
+
 class ApiFlowTest(unittest.TestCase):
     def setUp(self):
         from unittest import mock
@@ -202,6 +236,13 @@ class ApiFlowTest(unittest.TestCase):
         self.assertIn("[자동 시황", d["memo"])
         a = self.c.post("/api/news/preview", json={"url": "https://example.com"}).get_json()["article"]
         self.assertTrue(a["text"])
+
+    def test_news_ignored_for_other_kinds(self):
+        art = {"url": "https://x", "title": "금리 동결", "source": "연합뉴스", "published": "2026-10-19", "text": "기사 본문"}
+        r = self.c.post("/api/articles/stream", json={"kind": "info", "title": "정보글 제목", "memo": "메모", "news": [art]})
+        events = [b for b in r.get_data(as_text=True).strip().split("\n\n") if b.startswith("event: done")]
+        done = json.loads(events[0].split("data: ", 1)[1])
+        self.assertNotIn("참고한 기사", done["body"])
 
     def test_news_saved_with_article(self):
         art = {"url": "https://x", "title": "금리 동결", "source": "연합뉴스", "published": "2026-10-19", "text": "기사 본문"}

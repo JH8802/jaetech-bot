@@ -63,7 +63,7 @@ class InvestKindTest(unittest.TestCase):
             self.assertIn("[투자 글 쓰기 원칙 - 절대 규칙", sysmsg)
             self.assertLess(sysmsg.index("[투자 글 쓰기 원칙"), sysmsg.index("[글쓴이 말투"))  # 말투보다 앞
             self.assertIn("[출력 전 마지막 점검 - 투자 글]", sysmsg)
-            self.assertIn("'작성자 메모'(메모 속 [자동 시황] 블록 포함)와 '참고 기사'에 있는 것만", sysmsg)
+            self.assertIn("'작성자 메모'(메모 속 [자동 시황] 블록 포함), '참고 기사', '이미지 자료'에 있는 것만", sysmsg)
             self.assertIn("한 문장이 끝나면 줄을 바꿔", sysmsg)
             self.assertNotIn("60자를 넘는 긴 문장", sysmsg)
             self.assertNotIn("[검색 최적화 규칙]", sysmsg)

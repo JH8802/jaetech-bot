@@ -32,7 +32,7 @@ EVIDENCE_MODES = {"strict", "template"}
 app = Flask(__name__, static_folder="static", static_url_path="/static")
 app.config["MAX_CONTENT_LENGTH"] = 40 * 1024 * 1024  # 사진 최대 30장(브라우저에서 줄인 JPEG) + 본문
 MAX_PHOTOS = 30  # 가장 큰 한도(요청 크기 계산용)
-PHOTO_LIMITS = {"info": 20, "food": 20, "hotel": 30, "invest": 0}  # 글 종류별 사진 한도
+PHOTO_LIMITS = {"info": 20, "food": 20, "hotel": 30, "invest": 10}  # 투자 생각: 그래프·리포트·캡처 같은 이미지 자료  # 글 종류별 사진 한도
 VISION_BATCH = 10  # 사진 분석은 10장씩 나누어 호출(출력이 잘리거나 오래 걸리는 것을 막음)
 MAX_PHOTO_BYTES = 3 * 1024 * 1024
 PHOTO_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
@@ -335,10 +335,10 @@ def _generate_events(*, kind, title, keywords, memo, place, guardrail, evidence_
                 chunk = photos[start:start + VISION_BATCH]
                 yield sse("status", {"text": f"사진 {start + 1}~{start + len(chunk)}번째를 살펴보고 있어요(총 {len(photos)}장)."})
                 part_usage = {}
-                raw = llm.ask_vision(prompts.VISION_SYSTEM, prompts.build_photo_analysis_prompt(kind, title, place, len(chunk), start + 1),
+                raw = llm.ask_vision(prompts.vision_system(kind), prompts.build_photo_analysis_prompt(kind, title, place, len(chunk), start + 1),
                                      chunk, usage=part_usage, start=start + 1)
                 photo_usage = llm.merge_usage(photo_usage, part_usage)
-                photo_notes += llm.parse_photo_notes(raw, len(chunk), start + 1)
+                photo_notes += llm.parse_photo_notes(raw, len(chunk), start + 1, text_max=400 if kind == "invest" else 100)
         for note in photo_notes or []:
             idx = note.get("n", 0) - 1
             if photo_names and 0 <= idx < len(photo_names) and photo_names[idx]:
@@ -404,11 +404,13 @@ def article_stream():
     if len(title) > MAX_TITLE:
         raise ValueError(f"제목은 {MAX_TITLE}자 이내로 입력해 주세요.")
     keywords = [str(k).strip()[:40] for k in (data.get("keywords") or []) if str(k).strip()][:MAX_KEYWORDS]
-    if not keywords:
+    if c["kind"] == "invest":
+        keywords = []  # 투자 생각 글은 검색 키워드를 쓰지 않음(제목을 해시태그로 억지로 넣지 않게)
+    elif not keywords:
         keywords = prompts.derive_keywords(c["kind"], title, c["place"])
     photos = read_photos(data, c["kind"])
     ratings = read_ratings(data, c["kind"])
-    news_list = news.read_news_list(data.get("news"))
+    news_list = news.read_news_list(data.get("news")) if c["kind"] == "invest" else []  # 참고 기사는 투자 생각 글 전용
     if c["kind"] == "invest":
         bad = invest_guard.violations("", title)
         if bad:

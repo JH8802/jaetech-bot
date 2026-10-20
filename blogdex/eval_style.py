@@ -8,7 +8,7 @@ import re
 import statistics as st
 
 import adcheck
-from postprocess import HEADING_RE, MAP_LINE_MARK, RATING_HEAD, SOURCE_HEAD, count_chars, find_hashtag_index, split_paragraphs, strip_tags
+from postprocess import HASHTAG_RANGE, HEADING_RE, MAP_LINE_MARK, MAX_HASHTAGS, MIN_HASHTAGS, RATING_HEAD, SOURCE_HEAD, count_chars, find_hashtag_index, split_paragraphs, strip_tags
 
 GENERIC_WORDS = ["편안", "무난", "자연스럽", "부담", "좋았", "좋겠", "차분", "다양한", "효과적", "전반적으로"]
 FIRST_PERSON_RE = re.compile(r"^(저는|저도|제가|저의)")
@@ -152,8 +152,9 @@ def evaluate(kind: str, body: str, keywords: list[str], memo: str = "", title: s
     # 7) 해시태그
     n_tags = len(re.findall(r"#[^\s#]+", tags))
     uniq = len(set(re.findall(r"#[^\s#]+", tags)))
-    checks.append(_check("hashtags", "해시태그 개수", f"{n_tags}개", "5~10개(중복 없음)", 5 <= n_tags <= 10 and uniq == n_tags,
-                         "해시태그를 핵심 키워드 중심으로 5~10개, 중복 없이 맞출 것"))
+    t_lo, t_hi = HASHTAG_RANGE.get(kind, (MIN_HASHTAGS, MAX_HASHTAGS))
+    checks.append(_check("hashtags", "해시태그 개수", f"{n_tags}개", f"{t_lo}~{t_hi}개(중복 없음)", t_lo <= n_tags <= t_hi and uniq == n_tags,
+                         f"해시태그를 핵심 키워드 중심으로 {t_lo}~{t_hi}개, 중복 없이 맞출 것"))
 
     # 8) 분량
     lo, hi = {"food": (1900, 2700), "hotel": (2400, 3400), "invest": (1500, 3000)}.get(kind, (2000, 3200))

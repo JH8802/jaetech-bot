@@ -171,7 +171,7 @@ def ask_vision(system: str, text: str, images: list[dict], max_tokens: int = 600
     return out
 
 
-def parse_photo_notes(raw: str, count: int, first: int = 1) -> list[dict]:
+def parse_photo_notes(raw: str, count: int, first: int = 1, text_max: int = 100) -> list[dict]:
     """사진 분석 JSON 을 읽어 first..first+count-1 번호별 항목으로 맞춥니다. 읽지 못한 사진은 설명 없는 항목으로 채웁니다."""
     import json
     m = re.search(r"\[.*\]", raw, re.S)
@@ -187,7 +187,7 @@ def parse_photo_notes(raw: str, count: int, first: int = 1) -> list[dict]:
             continue
         if first <= n < first + count and n not in by_n:
             by_n[n] = {"n": n, "category": str(it.get("category") or "기타")[:12], "desc": str(it.get("desc") or "")[:200],
-                       "text": str(it.get("text") or "")[:100],
+                       "text": str(it.get("text") or "")[:text_max],
                        "dish": str(it.get("dish") or "")[:60],
                        "dish_confidence": str(it.get("dish_confidence") or "")[:4],
                        "caption": re.sub(r"[.!?…]+$", "", str(it.get("caption") or "").strip())[:40],
