@@ -29,7 +29,7 @@ EVIDENCE_MODES = {"strict", "template"}
 app = Flask(__name__, static_folder="static", static_url_path="/static")
 app.config["MAX_CONTENT_LENGTH"] = 40 * 1024 * 1024  # 사진 최대 30장(브라우저에서 줄인 JPEG) + 본문
 MAX_PHOTOS = 30  # 가장 큰 한도(요청 크기 계산용)
-PHOTO_LIMITS = {"info": 20, "food": 20, "hotel": 30}  # 글 종류별 사진 한도
+PHOTO_LIMITS = {"info": 20, "food": 20, "hotel": 30, "invest": 0}  # 글 종류별 사진 한도
 VISION_BATCH = 10  # 사진 분석은 10장씩 나누어 호출(출력이 잘리거나 오래 걸리는 것을 막음)
 MAX_PHOTO_BYTES = 3 * 1024 * 1024
 PHOTO_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}

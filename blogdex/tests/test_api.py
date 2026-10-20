@@ -130,6 +130,16 @@ class ApiTests(unittest.TestCase):
         saved = self.c.get(f"/api/articles/{done['article_id']}").get_json()["article"]["options"]["photos"]
         self.assertEqual([n["name"] for n in saved], ["IMG_0101.jpg", "IMG_0102.jpg"])
 
+    def test_invest_kind_generates_without_keywords_and_rejects_photos(self):
+        r, events = self._stream(kind="invest", place={}, keywords=[], memo="[요즘 시장 분위기]\n- 불안했다", guardrail=True)
+        self.assertEqual(r.status_code, 200)
+        done = dict(events)["done"]
+        keys = [c["key"] for c in done["quality"]["checks"]]
+        self.assertNotIn("kw_density", keys)
+        art = self.c.get(f"/api/articles/{done['article_id']}").get_json()["article"]
+        self.assertEqual(art["kind"], "invest")
+        self.assertEqual(self._stream(kind="invest", place={}, photos=[self.PIXEL])[0].status_code, 400)
+
     def test_no_photos_means_no_photo_markers(self):
         _, events = self._stream()
         self.assertNotIn("photos", [e for e, _ in events])

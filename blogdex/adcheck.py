@@ -30,10 +30,30 @@ RULES = [
     ]),
 ]
 
+# 투자 생각 글용 점검 목록: 매수·매도 권유, 수익 보장, 전망 단정(법률 판단이 아니라 사람이 다시 보라는 표시)
+INVEST_RULES = [
+    ("high", "수익 보장·단정", [
+        r"무조건", r"원금\s*보장", r"수익\s*보장", r"손실\s*(?:이\s*)?없", r"100\s*%", r"대박", r"확실(?:히|하게)\s*(?:오른|오를|상승|수익)",
+        r"반드시\s*(?:오른|오를|상승|수익|돈)", r"틀림없", r"절대\s*(?:안\s*)?(?:잃|손해|떨어)",
+    ]),
+    ("warn", "매수·매도 권유", [
+        r"(?:사세요|파세요|담으세요|매수하세요|매도하세요)", r"매수\s*(?:추천|타이밍|적기)", r"매도\s*(?:추천|타이밍)", r"종목\s*추천", r"추천\s*종목",
+        r"지금이\s*(?:기회|바닥|저점|매수)", r"목표\s*(?:주)?가", r"(?:사야|팔아야|담아야)\s*(?:합|한|해)",
+    ]),
+    ("warn", "전망 단정", [
+        r"(?:오를|떨어질|폭락할|폭등할|무너질)\s*(?:것입니다|겁니다|거예요|수밖에)", r"곧\s*(?:폭락|폭등|반등)", r"(?:바닥|천장)(?:입니다|이에요|이다)", r"수밖에\s*없",
+    ]),
+]
+
 # 이 말이 같은 문장에 있으면 '표현을 소개·부정하는 문장'으로 보고 참고로 내립니다.
 SOFT_RE = re.compile(r"(않|아닙|아니|어렵|단정|금지|제한|내세우|표방|주장|광고|문구|표현|불분명|충분하지|부족)")
 
-_COMPILED = [(lv, cat, re.compile("|".join(f"(?:{p})" for p in pats))) for lv, cat, pats in RULES]
+def _compile(rules):
+    return [(lv, cat, re.compile("|".join(f"(?:{p})" for p in pats))) for lv, cat, pats in rules]
+
+
+_COMPILED = _compile(RULES)
+_COMPILED_INVEST = _compile(INVEST_RULES)
 _SENT_SPLIT = re.compile(r"(?<=[.?!])\s+")
 
 
@@ -56,13 +76,14 @@ def _units(title: str, body: str):
                 yield where, s.strip()
 
 
-def scan(title: str, body: str) -> list[dict]:
-    """표시·광고 주의 표현을 찾아 [{level, category, match, where, sentence, soft}] 로 돌려줍니다."""
+def scan(title: str, body: str, kind: str = "info") -> list[dict]:
+    """주의 표현을 찾아 [{level, category, match, where, sentence, soft}] 로 돌려줍니다. 투자 생각 글은 투자 표현 목록을 씁니다."""
+    compiled = _COMPILED_INVEST if kind == "invest" else _COMPILED
     hits, seen = [], set()
     for where, sent in _units(title, body):
         taken: list[tuple[int, int]] = []  # 앞선(더 위험한) 규칙과 겹치는 위치는 건너뜀
         soft = where != "해시태그" and bool(SOFT_RE.search(sent))
-        for level, cat, rx in _COMPILED:
+        for level, cat, rx in compiled:
             for m in rx.finditer(sent):
                 span = m.span()
                 if any(span[0] < e and s < span[1] for s, e in taken):

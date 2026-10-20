@@ -154,6 +154,7 @@
       <button class="chip active" data-kind="info">정보글</button>
       <button class="chip" data-kind="food">맛집글</button>
       <button class="chip" data-kind="hotel">호텔·여행 후기</button>
+      <button class="chip" data-kind="invest">투자 생각</button>
     </div>
 
     <div id="foodBox" class="hidden">
@@ -174,10 +175,13 @@
     </div>
     <div id="candidates" class="hidden" style="margin-top:12px"><div id="candList"></div></div>
 
+    <div id="kwBox">
     <label class="cap" for="kw">핵심 키워드 <small>— 검색 노출용. 제목에서 자동으로 채워지고 수정할 수 있어요 (쉼표로 구분)</small></label>
     <input type="text" id="kw" placeholder="예) 락희옥 마포본점, 마포, 공덕역">
+    </div>
 
     <label class="cap" for="memo" id="memoCap">메모</label>
+    <div id="memoTplRow" class="hidden" style="margin-bottom:6px"><button class="btn ghost" id="btnMemoTpl" type="button" style="height:32px;font-size:12px">📝 메모 양식 넣기</button> <span class="hint" style="margin:0">항목만 채우면 돼요. 비운 항목은 글에서 빠져요.</span></div>
     <textarea id="memo" maxlength="4000"></textarea>
     <p class="hint" id="memoHint"></p>
     <p class="hint warnhint hidden" id="memoShort"></p>
@@ -191,6 +195,7 @@
       </div>
     </div>
 
+    <div id="photoBox">
     <label class="cap" for="fileInput">사진 <small>(선택 · 최대 <span id="photoLimit">20</span>장 · 올린 순서가 사진 번호예요)</small></label>
     <div class="photo-actions">
       <button class="btn ghost" id="btnPhotos" type="button">사진 선택</button>
@@ -201,10 +206,11 @@
     <input type="file" id="folderInput" webkitdirectory multiple hidden>
     <div class="photo-grid" id="photoGrid"></div>
     <p class="hint">AI가 사진에 보이는 것을 글에 반영하고, 글 속 <b>'사진 N'</b> 줄 자리에 같은 번호 사진을 놓으라고 표시해요. 복사할 때 사진은 포함되지 않으니, 네이버 에디터에서 그 자리에 직접 올리세요. 사진은 서버에 저장하지 않아요.</p>
+    </div>
 
     <p class="hint warnhint hidden" id="evidenceHint">'메모 + 일반 표현'은 메모에 없는 체험(맛·분위기 묘사 등)이 후기에 섞일 수 있어요. 실제 방문 후기에는 '메모에 있는 것만'을 권해요.</p>
     <div class="opts">
-      <label><input type="checkbox" id="guardrail"> 표시·광고 가드레일 <small style="color:var(--sub)">(효능 단정·암시 표현 제한)</small></label>
+      <label><input type="checkbox" id="guardrail"> <span id="guardrailName">표시·광고 가드레일</span> <small id="guardrailSmall" style="color:var(--sub)">(효능 단정·암시 표현 제한)</small></label>
       <label>경험 서술
         <select id="evidence">
           <option value="strict">메모에 있는 것만</option>
@@ -276,7 +282,7 @@ fetch('/api/rating-labels').then((r) => r.json()).then((d) => {
   renderRatings();
 }).catch(() => {});
 
-const KIND_LABEL = { info: '정보글', food: '맛집글', hotel: '호텔·여행 후기' };
+const KIND_LABEL = { info: '정보글', food: '맛집글', hotel: '호텔·여행 후기', invest: '투자 생각' };
 const PLACE_KINDS = ['food', 'hotel'];
 const state = { kind: 'info', titles: [], busy: false, article: null, photos: [], resultPhotos: [], photoNames: [], photoNotes: [], adTerms: [] };  // photos: 입력칸의 사진 / resultPhotos: 결과에 보여 줄 사진(현재 세션에서 생성한 글만)
 
@@ -293,6 +299,12 @@ const KIND_UI = {
     memoHint: '메뉴·가격·분위기·기분·아쉬운 점을 편하게 적어 주세요. 여기 적은 내용만 후기 경험으로 쓰여요.', guardrail: false,
     placeCap: '매장 이름', placePh: '예) 마포 락희옥', catPh: '업종 (예: 돼지고기구이)',
   },
+  invest: {
+    titleCap: '제목 또는 주제', memoCap: '오늘의 생각 메모 (조각으로 던져도 돼요)',
+    memoPh: '예) 요즘 시장 분위기가 어떤지, 본 뉴스(날짜·수치 포함), 그때 든 감정, 지키려는 원칙, 내 View를 짧게 적어 주세요.\n위의 [메모 양식 넣기] 버튼을 쓰면 항목이 채워져요.',
+    memoHint: '시황·수치·뉴스는 여기 적은 것만 글에 쓰여요(적지 않은 사실은 지어내지 않아요). 기사 원문을 붙여 넣어도 돼요. 검색 최적화 없이 이웃에게 남기는 일기·에세이로 써져요.', guardrail: true,
+    noSeo: true,
+  },
   hotel: {
     titleCap: '제목 또는 키워드', memoCap: '투숙·여행 소감·느낀 점 (권장)',
     memoPh: '예) (숙소) 4월 주말 1박, 부부와 아이 1명. 오션뷰 디럭스 객실, 침구가 푹신했고 욕실이 넓었음.\n조식 뷔페는 종류가 많았지만 주말이라 붐빔. 수영장은 아이가 좋아함. 아쉬운 점: 주차 대기, 엘리베이터가 느림.',
@@ -301,6 +313,23 @@ const KIND_UI = {
   },
 };
 KIND_UI.food.placeCap = '매장 이름';
+const INVEST_MEMO_TEMPLATE = `[요즘 시장 분위기]
+- 
+
+[내가 본 뉴스·이슈 (사실만: 날짜·수치·누가 말했는지)]
+- 
+
+[그걸 보고 든 내 감정]
+- 
+
+[내 원칙 (지키려는 것)]
+- 
+
+[내 투자 View (전망·시나리오, 확신 정도, 틀릴 수 있는 경우)]
+- 
+
+[이웃에게 하고 싶은 말]
+- `;
 
 function setKind(kind) {
   state.kind = kind;
@@ -311,6 +340,10 @@ function setKind(kind) {
   $('titleCap').textContent = ui.titleCap; $('memoCap').textContent = ui.memoCap;
   $('memo').placeholder = ui.memoPh; $('memoHint').textContent = ui.memoHint;
   $('guardrail').checked = ui.guardrail;
+  const invest = kind === 'invest';
+  $('guardrailName').textContent = invest ? '투자 표현 가드레일' : '표시·광고 가드레일';
+  $('guardrailSmall').textContent = invest ? '(매수·매도 권유·수익 보장·전망 단정 표현 제한, 개인 의견 안내 문장 포함)' : '(효능 단정·암시 표현 제한)';
+  $('kwBox').classList.toggle('hidden', invest); $('photoBox').classList.toggle('hidden', invest); $('memoTplRow').classList.toggle('hidden', !invest);
   if (PLACE_KINDS.includes(kind)) $('evidence').value = 'strict';
   $('photoLimit').textContent = photoLimit();
   renderRatings();
@@ -324,6 +357,10 @@ function updateHints() {
   el.classList.toggle('hidden', !short);
   $('evidenceHint').classList.toggle('hidden', !(PLACE_KINDS.includes(state.kind) && $('evidence').value === 'template'));
 }
+$('btnMemoTpl').onclick = () => {
+  const m = $('memo'); m.value = m.value.trim() ? m.value.replace(/\s+$/, '') + '\n\n' + INVEST_MEMO_TEMPLATE : INVEST_MEMO_TEMPLATE;
+  m.focus(); updateHints();
+};
 $('memo').addEventListener('input', updateHints);
 $('evidence').addEventListener('change', updateHints);
 document.querySelectorAll('#chips .chip').forEach((b) => (b.onclick = () => setKind(b.dataset.kind)));
@@ -575,8 +612,8 @@ $('btnTitles').onclick = () => makeTitles(false);
 $('btnRegen').onclick = () => makeTitles(true);
 
 /* ---------- 사진 ---------- */
-const PHOTO_LIMITS = { info: 20, food: 20, hotel: 30 };  // 글 종류별 사진 한도(서버와 같게)
-const photoLimit = () => PHOTO_LIMITS[state.kind] || 20;
+const PHOTO_LIMITS = { info: 20, food: 20, hotel: 30, invest: 0 };  // 글 종류별 사진 한도(서버와 같게)
+const photoLimit = () => PHOTO_LIMITS[state.kind] ?? 20;
 function loadResized(file, maxEdge = 1280) {
   return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(file); const img = new Image();
@@ -659,9 +696,11 @@ async function runStream(url, body) {
 
 $('btnWrite').onclick = () => {
   if (state.busy) return;
-  if (state.photos.length > photoLimit()) { showError(`이 글 종류는 사진을 최대 ${photoLimit()}장까지 올릴 수 있어요. ${state.photos.length - photoLimit()}장을 빼거나 글 종류를 바꿔 주세요.`); return; }
-  state.resultPhotos = [...state.photos];
-  runStream('/api/articles/stream', { ...commonBody(), title: $('title').value.trim(), keywords: keywordList(), photos: state.photos.map((p) => p.url), photo_names: state.photos.map((p) => p.name || '') });
+  const invest = state.kind === 'invest';  // 투자 생각 글은 사진·검색 키워드를 쓰지 않는다
+  const photos = invest ? [] : state.photos;
+  if (photos.length > photoLimit()) { showError(`이 글 종류는 사진을 최대 ${photoLimit()}장까지 올릴 수 있어요. ${photos.length - photoLimit()}장을 빼거나 글 종류를 바꿔 주세요.`); return; }
+  state.resultPhotos = [...photos];
+  runStream('/api/articles/stream', { ...commonBody(), title: $('title').value.trim(), keywords: invest ? [] : keywordList(), photos: photos.map((p) => p.url), photo_names: photos.map((p) => p.name || '') });
 };
 $('btnRewrite').onclick = () => { if (!state.busy && state.article) runStream(`/api/articles/${state.article.id}/rewrite`, { kind: state.article.kind }); };
 
