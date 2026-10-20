@@ -58,18 +58,21 @@ class InvestKindTest(unittest.TestCase):
         self.assertNotIn("invest", prompts.PLACE_KINDS)
 
     def test_system_prompt_is_essay_without_seo(self):
-        sysmsg = prompts.build_system("invest", True, "strict")
-        self.assertIn("투자 생각", sysmsg)
-        self.assertIn("'작성자 메모'에 적힌 것만", sysmsg)  # 시황·수치는 메모에 있는 것만
-        self.assertIn("매수·매도를 권하지 않습니다", sysmsg)
-        self.assertIn("투자 표현 가드레일", sysmsg)
-        self.assertNotIn("[검색 최적화 규칙]", sysmsg)
-        self.assertNotIn("핵심 키워드는 줄이거나", sysmsg)
-        self.assertNotIn("[표시·광고 가드레일", sysmsg)
-        self.assertIn("{{bold}} 는 4~8번", sysmsg)
-        off = prompts.build_system("invest", False, "strict")
-        self.assertNotIn("투자 표현 가드레일", off)
-        self.assertIn("사진이 없습니다", off)
+        for guard in (True, False):  # 투자 글 원칙은 가드레일 설정과 상관없이 항상 들어감
+            sysmsg = prompts.build_system("invest", guard, "strict")
+            self.assertIn("[투자 글 쓰기 원칙 - 절대 규칙", sysmsg)
+            self.assertLess(sysmsg.index("[투자 글 쓰기 원칙"), sysmsg.index("[글쓴이 말투"))  # 말투보다 앞
+            self.assertIn("[출력 전 마지막 점검 - 투자 글]", sysmsg)
+            self.assertIn("'작성자 메모'(메모 속 [자동 시황] 블록 포함)와 '참고 기사'에 있는 것만", sysmsg)
+            self.assertIn("한 문장이 끝나면 줄을 바꿔", sysmsg)
+            self.assertNotIn("60자를 넘는 긴 문장", sysmsg)
+            self.assertNotIn("[검색 최적화 규칙]", sysmsg)
+            self.assertNotIn("[표시·광고 가드레일", sysmsg)
+            self.assertIn("{{bold}} 는 4~8번", sysmsg)
+            self.assertIn("사진이 없습니다", sysmsg)
+        self.assertNotIn("[참고 기사 사용 규칙]", prompts.build_system("invest", True, "strict"))
+        self.assertIn("[참고 기사 사용 규칙]", prompts.build_system("invest", True, "strict", has_news=True))
+        self.assertIn("[참고 기사 사용 규칙]", prompts.build_system("info", False, "strict", has_news=True))
 
     def test_article_prompt_without_keywords_and_title_prompt(self):
         up = prompts.build_article_prompt("invest", "요즘 마음", [], "[요즘 시장 분위기]\n- 불안", None, None, None)

@@ -69,6 +69,9 @@
   .photonotes h4 { margin: 0; padding: 10px 16px; font-size: 13px; background: #f9fafb; border-bottom: 1px solid var(--line); }
   .photonotes .pn-row { display: flex; gap: 10px; padding: 8px 16px; border-bottom: 1px solid #f1f3f5; align-items: center; }
   .photonotes .pn-row:last-child { border-bottom: 0; }
+  .newsitem { border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; margin-top: 8px; font-size: 12px; display: flex; gap: 8px; align-items: flex-start; }
+  .newsitem div { flex: 1; } .newsitem b { font-size: 13px; }
+  .sourcebox { font-size: 13px; color: var(--sub); line-height: 1.7; word-break: break-all; }
   .photonotes .thumbpick { padding: 10px 16px; background: #fff9db; border-bottom: 1px solid var(--line); font-size: 13px; line-height: 1.6; }
   .photonotes img { width: 44px; height: 44px; object-fit: cover; border-radius: 6px; }
   .todopanel { margin-top: 14px; border: 1px solid #ffd8a8; border-radius: 10px; overflow: hidden; background: #fffaf2; }
@@ -137,8 +140,19 @@
 <main>
 <section id="viewWrite">
   <details class="card stylecard" id="styleCard">
-    <summary><b>내 말투 샘플</b> <span class="hint" style="margin:0 0 0 8px" id="styleSummary">모든 글(정보글·맛집글·호텔 후기)에 적용돼요</span></summary>
-    <p class="hint">내가 평소 쓰는 말투·어투를 적어 두면 모든 글에 반영돼요. 실제로 쓴 문장 몇 개, 말버릇, 컨셉 설명(예: "30대 직장인 부부, 담백하고 솔직하게, 가끔 가벼운 농담")을 자유롭게 적으세요. 언제든 고쳐서 [저장]하면 다음 글부터 바로 적용돼요. 샘플 속 내용(사건·장소)은 글에 가져오지 않고 말투만 따라 해요.</p>
+    <summary><b>내 말투 샘플</b> <span class="hint" style="margin:0 0 0 8px" id="styleSummary">공통 + 글 종류별로 따로 정할 수 있어요</span></summary>
+    <p class="hint">내가 평소 쓰는 말투·어투를 적어 두면 글에 반영돼요. <b>공통</b> 샘플은 모든 글에, <b>글 종류별</b> 샘플은 그 종류에만 쓰여요(종류별이 비어 있으면 공통을 써요). 실제로 쓴 문장 몇 개, 말버릇, 컨셉 설명(예: "30대 직장인 부부, 담백하고 솔직하게, 가끔 가벼운 농담")을 자유롭게 적으세요. 언제든 고쳐서 [저장]하면 다음 글부터 바로 적용돼요. 샘플 속 내용(사건·장소)은 글에 가져오지 않고 말투만 따라 해요.</p>
+    <div class="row" style="align-items:center;margin-bottom:8px">
+      <label class="cap" for="styleScope" style="margin:0">적용 대상</label>
+      <select id="styleScope" style="max-width:260px">
+        <option value="common">공통 (종류별 샘플이 없을 때)</option>
+        <option value="info">정보글</option>
+        <option value="food">맛집글</option>
+        <option value="hotel">호텔·여행 후기</option>
+        <option value="invest">투자 생각</option>
+      </select>
+    </div>
+    <p class="hint" id="styleScopeHint" style="margin-top:0"></p>
     <textarea id="styleSample" maxlength="3000" style="min-height:130px" placeholder="예) 솔직히 처음엔 반신반의했는데, 막상 먹어 보니 이게 은근히 괜찮더라고요.&#10;가격은 살짝 아쉽지만 그래도 기분 좋게 먹었습니다. 다음엔 아내랑 딸 데리고 와 보려고요.&#10;(말버릇: '솔직히', '은근히', 문장 끝은 ~더라고요 / ~입니다를 섞어요)"></textarea>
     <div class="row" style="margin-top:8px;align-items:center">
       <button class="btn" id="btnStyleSave" type="button" style="height:36px">저장</button>
@@ -181,10 +195,17 @@
     </div>
 
     <label class="cap" for="memo" id="memoCap">메모</label>
-    <div id="memoTplRow" class="hidden" style="margin-bottom:6px"><button class="btn ghost" id="btnMemoTpl" type="button" style="height:32px;font-size:12px">📝 메모 양식 넣기</button> <span class="hint" style="margin:0">항목만 채우면 돼요. 비운 항목은 글에서 빠져요.</span></div>
+    <div id="memoTplRow" class="hidden" style="margin-bottom:6px"><button class="btn ghost" id="btnMemoTpl" type="button" style="height:32px;font-size:12px">📝 메모 양식 넣기</button> <button class="btn ghost" id="btnMarket" type="button" style="height:32px;font-size:12px">📈 오늘 시황 불러오기</button> <span class="hint" style="margin:0" id="marketMsg">항목만 채우면 돼요. 비운 항목은 글에서 빠져요.</span></div>
     <textarea id="memo" maxlength="4000"></textarea>
     <p class="hint" id="memoHint"></p>
     <p class="hint warnhint hidden" id="memoShort"></p>
+
+    <div id="newsBox" class="hidden">
+      <label class="cap" for="newsUrl">참고 기사 <small>(선택 · 최대 3개 · 기사 주소를 넣고 [불러오기] → 핵심만 요약해 글에 넣고 출처를 글 끝에 붙여요)</small></label>
+      <div class="row"><input type="text" id="newsUrl" placeholder="https://n.news.naver.com/article/..." autocomplete="off" style="flex:1"><button class="btn ghost" id="btnNews" type="button" style="height:40px">불러오기</button></div>
+      <div id="newsList"></div>
+      <p class="hint" id="newsMsg">유료·로그인 기사처럼 본문을 못 읽는 기사는 내용을 메모에 붙여 넣어 주세요. 기사에 있는 사실·수치는 글에 쓸 수 있어요.</p>
+    </div>
 
     <div id="ratingBox" class="hidden">
       <label class="cap">별점 <small>(선택 · 5점 만점, 1~5점 정수 · 점수를 고른 항목만 글 끝에 들어가요 · 항목 이름은 고쳐 쓸 수 있어요)</small></label>
@@ -284,7 +305,8 @@ fetch('/api/rating-labels').then((r) => r.json()).then((d) => {
 
 const KIND_LABEL = { info: '정보글', food: '맛집글', hotel: '호텔·여행 후기', invest: '투자 생각' };
 const PLACE_KINDS = ['food', 'hotel'];
-const state = { kind: 'info', titles: [], busy: false, article: null, photos: [], resultPhotos: [], photoNames: [], photoNotes: [], adTerms: [] };  // photos: 입력칸의 사진 / resultPhotos: 결과에 보여 줄 사진(현재 세션에서 생성한 글만)
+const NEWS_KINDS = ['info', 'invest'];  // 참고 기사 칸을 보여 줄 글 종류
+const state = { kind: 'info', titles: [], busy: false, article: null, photos: [], resultPhotos: [], photoNames: [], photoNotes: [], news: [], adTerms: [] };  // photos: 입력칸의 사진 / resultPhotos: 결과에 보여 줄 사진(현재 세션에서 생성한 글만)
 
 /* ---------- 글 종류별 화면 ---------- */
 const KIND_UI = {
@@ -344,6 +366,9 @@ function setKind(kind) {
   $('guardrailName').textContent = invest ? '투자 표현 가드레일' : '표시·광고 가드레일';
   $('guardrailSmall').textContent = invest ? '(매수·매도 권유·수익 보장·전망 단정 표현 제한, 개인 의견 안내 문장 포함)' : '(효능 단정·암시 표현 제한)';
   $('kwBox').classList.toggle('hidden', invest); $('photoBox').classList.toggle('hidden', invest); $('memoTplRow').classList.toggle('hidden', !invest);
+  $('newsBox').classList.toggle('hidden', !NEWS_KINDS.includes(kind));
+  $('guardrail').disabled = invest;  // 투자 글 가드레일은 끌 수 없음(서버도 항상 켬)
+  if (invest) $('guardrailSmall').textContent = '(항상 켜짐 · 매수·매도 권유·수익 보장·전망 단정 금지, 어긴 문장은 고치거나 지우고 개인 의견 안내 문장을 넣어요)';
   if (PLACE_KINDS.includes(kind)) $('evidence').value = 'strict';
   $('photoLimit').textContent = photoLimit();
   renderRatings();
@@ -360,6 +385,34 @@ function updateHints() {
 $('btnMemoTpl').onclick = () => {
   const m = $('memo'); m.value = m.value.trim() ? m.value.replace(/\s+$/, '') + '\n\n' + INVEST_MEMO_TEMPLATE : INVEST_MEMO_TEMPLATE;
   m.focus(); updateHints();
+};
+/* ---------- 참고 기사 / 오늘 시황 ---------- */
+function renderNews() {
+  $('newsList').innerHTML = state.news.map((n, i) => `<div class="newsitem"><div><b>${esc(n.title || '(제목 없음)')}</b><br><span style="color:var(--sub)">${esc([n.source, n.published].filter(Boolean).join(' · '))} · 본문 ${n.text.length.toLocaleString()}자</span><br>${esc(n.text.slice(0, 120))}…</div><button class="x" type="button" data-i="${i}" title="빼기">✕</button></div>`).join('');
+  $('newsList').querySelectorAll('.x').forEach((b) => (b.onclick = () => { state.news.splice(+b.dataset.i, 1); renderNews(); }));
+}
+$('btnNews').onclick = async () => {
+  const url = $('newsUrl').value.trim();
+  if (!url) return;
+  if (state.news.length >= 3) { $('newsMsg').textContent = '참고 기사는 최대 3개까지예요. 하나를 빼고 다시 넣어 주세요.'; return; }
+  if (state.news.some((n) => n.url === url)) { $('newsMsg').textContent = '이미 불러온 기사예요.'; return; }
+  $('btnNews').disabled = true; $('newsMsg').textContent = '기사를 읽고 있어요...';
+  try {
+    const d = await postJSON('/api/news/preview', { url });
+    state.news.push(d.article); renderNews(); $('newsUrl').value = '';
+    $('newsMsg').textContent = '불러왔어요. 제목과 앞부분이 기사와 맞는지 확인해 주세요.';
+  } catch (e) { $('newsMsg').textContent = e.message; }
+  $('btnNews').disabled = false;
+};
+$('newsUrl').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); $('btnNews').click(); } });
+$('btnMarket').onclick = async () => {
+  $('btnMarket').disabled = true; $('marketMsg').textContent = '시황을 불러오고 있어요...';
+  try {
+    const d = await api('/api/market');
+    const m = $('memo'); m.value = d.memo + (m.value.trim() ? '\n\n' + m.value : '');
+    $('marketMsg').textContent = `메모 맨 위에 넣었어요(${d.fetched_at} 조회). 필요 없는 줄은 지워도 돼요.`; updateHints();
+  } catch (e) { $('marketMsg').textContent = e.message; }
+  $('btnMarket').disabled = false;
 };
 $('memo').addEventListener('input', updateHints);
 $('evidence').addEventListener('change', updateHints);
@@ -402,6 +455,8 @@ const isHead = (p) => /^\d+\.\s/.test(p.replace(TAG_RE, ''));
 const isTags = (p) => p.startsWith('#') && (p.match(/#/g) || []).length >= 3;
 const stripTags = (t) => t.replace(TAG_RE, '');
 const paragraphs = (t) => t.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);
+const SOURCE_HEAD = '📰 참고한 기사';
+const br = (html) => html.replace(/\n/g, '<br>');  // 문단 안 줄바꿈(투자 글: 한 문장 한 줄)을 그대로 보여 주고 붙여넣기
 
 // 복사본의 사진 자리: 번호 순서와 글 순서가 다를 수 있어 파일 이름을 함께 적어 준다(이 화면에서 올린 사진만)
 // 파일명: 방금 올린 사진이 있으면 그 이름, 저장된 원고를 다시 열었을 땐 서버에 저장된 이름
@@ -458,10 +513,11 @@ function renderBody(text) {
       return `<div class="photoslot">${ph ? `<img src="${ph.url}" alt="사진 ${pn}">` : ''}${esc(photoCopyLabel(pn))}${photoCaption(pn) ? `<br><span style="color:var(--sub)">캡션: ${esc(photoCaption(pn))}</span>` : ''}</div>`;
     }
     if (p.includes('플레이스 지도 삽입')) return `<p class="mapline">${esc(p)}</p>`;
+    if (p.startsWith(SOURCE_HEAD)) return `<p class="sourcebox">${esc(p).replace(/\n/g, '<br>')}</p>`;
     if (isTags(p)) return `<p class="tags">${markAd(esc(p))}</p>`;
     const mark = (h) => h.replace(/\[확인 필요[^\]]*\]/g, '<span class="todo">$&</span>');  // 발행 전 직접 확인할 자리
     if (isHead(p)) return `<h3>${mark(markAd(inline(p, counter, 'view')))}</h3>`;
-    return `<p>${mark(markAd(inline(p, counter, 'view')))}</p>`;
+    return `<p>${br(mark(markAd(inline(p, counter, 'view'))))}</p>`;
   }).join('');
 }
 
@@ -476,8 +532,9 @@ function toCopyHTML(text) {
     const pn = photoNo(p);
     if (pn) return `<p>${photoCopyLabel(pn)}${photoCaption(pn) ? `<br>캡션: ${esc(photoCaption(pn))}` : ''}</p>`;
     if (isTags(p)) return `<p>${esc(p)}</p>`;
+    if (p.startsWith(SOURCE_HEAD)) return `<p>${esc(p).replace(/\n/g, '<br>')}</p>`;
     if (isHead(p)) return `<p><b>${todoCopy(inline(p, counter, 'copy'))}</b></p>`;
-    return `<p>${todoCopy(inline(p, counter, 'copy'))}</p>`;
+    return `<p>${br(todoCopy(inline(p, counter, 'copy')))}</p>`;
   }).join('<p><br></p>');
 }
 
@@ -700,7 +757,7 @@ $('btnWrite').onclick = () => {
   const photos = invest ? [] : state.photos;
   if (photos.length > photoLimit()) { showError(`이 글 종류는 사진을 최대 ${photoLimit()}장까지 올릴 수 있어요. ${photos.length - photoLimit()}장을 빼거나 글 종류를 바꿔 주세요.`); return; }
   state.resultPhotos = [...photos];
-  runStream('/api/articles/stream', { ...commonBody(), title: $('title').value.trim(), keywords: invest ? [] : keywordList(), photos: photos.map((p) => p.url), photo_names: photos.map((p) => p.name || '') });
+  runStream('/api/articles/stream', { ...commonBody(), title: $('title').value.trim(), keywords: invest ? [] : keywordList(), news: NEWS_KINDS.includes(state.kind) ? state.news : [], photos: photos.map((p) => p.url), photo_names: photos.map((p) => p.name || '') });
 };
 $('btnRewrite').onclick = () => { if (!state.busy && state.article) runStream(`/api/articles/${state.article.id}/rewrite`, { kind: state.article.kind }); };
 
@@ -724,7 +781,7 @@ async function copyArticle() {
 }
 $('btnCopy').onclick = copyArticle;
 function newArticle() {
-  state.article = null; $('title').value = ''; $('memo').value = ''; $('kw').value = ''; $('candidates').classList.add('hidden');
+  state.article = null; $('title').value = ''; $('memo').value = ''; $('kw').value = ''; state.news = []; renderNews(); $('candidates').classList.add('hidden');
   $('placeQuery').value = ''; $('mCategory').value = ''; $('mAddress').value = ''; updateHints(); Object.values(ratingRows).forEach((rows) => rows.forEach((r) => { r.score = ''; })); renderRatings(); state.photos = []; state.resultPhotos = []; renderPhotos(); $('photoNotes').innerHTML = ''; $('todoPanel').innerHTML = ''; state.adTerms = [];
   $('resultBox').innerHTML = '<div class="empty">원고 제목을 입력하세요.<br>원고를 생성하면 결과가 여기에 표시됩니다.</div>';
   $('actions').classList.add('hidden'); $('quality').innerHTML = ''; $('notes').textContent = ''; $('btnWrite').disabled = true; showError('');
@@ -769,26 +826,37 @@ document.addEventListener('keydown', (e) => {
 });
 
 setKind('info');
-/* ---------- 내 말투 샘플 ---------- */
+/* ---------- 내 말투 샘플(공통 + 글 종류별) ---------- */
+const STYLE_LABEL = { common: '공통', info: '정보글', food: '맛집글', hotel: '호텔·여행 후기', invest: '투자 생각' };
+state.styles = {};
 async function loadStyle() {
   try {
     const d = await api('/api/style');
-    $('styleSample').value = d.style_sample || '';
-    renderStyleStatus(d.style_sample, d.updated_at);
+    state.styles = d.samples || { common: { text: d.style_sample || '', updated_at: d.updated_at } };
+    showStyle();
   } catch (e) { /* 서버가 아직 준비 안 됐거나 옛 서버면 조용히 무시 */ }
 }
-function renderStyleStatus(text, updated) {
-  const n = (text || '').length;
-  $('styleStatus').textContent = n ? `저장됨 · ${n.toLocaleString()}자${updated ? ' · ' + updated : ''}` : '아직 비어 있어요(기본 말투 컨셉만 적용)';
-  $('styleSummary').textContent = n ? `적용 중 (${n.toLocaleString()}자) — 모든 글에 반영돼요` : '모든 글(정보글·맛집글·호텔 후기)에 적용돼요';
+function showStyle() {
+  const scope = $('styleScope').value; const cur = state.styles[scope] || { text: '' };
+  $('styleSample').value = cur.text || '';
+  const n = (cur.text || '').length;
+  $('styleStatus').textContent = n ? `저장됨 · ${n.toLocaleString()}자${cur.updated_at ? ' · ' + cur.updated_at : ''}` : '아직 비어 있어요';
+  $('styleScopeHint').textContent = scope === 'common'
+    ? '종류별 샘플을 따로 적지 않은 글 종류는 이 공통 샘플을 써요.'
+    : `${STYLE_LABEL[scope]}에만 쓰여요. 비워 두면 공통 샘플을 써요.`;
+  const own = Object.keys(STYLE_LABEL).filter((k) => k !== 'common' && (state.styles[k] || {}).text);
+  const common = ((state.styles.common || {}).text || '').length;
+  $('styleSummary').textContent = [common ? `공통 ${common.toLocaleString()}자` : '공통 없음', own.length ? `종류별: ${own.map((k) => STYLE_LABEL[k]).join(', ')}` : '종류별 없음'].join(' · ');
 }
+$('styleScope').onchange = showStyle;
 $('btnStyleSave').onclick = async () => {
   $('btnStyleSave').disabled = true;
+  const scope = $('styleScope').value;
   try {
-    const res = await fetch('/api/style', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ style_sample: $('styleSample').value }) });
+    const res = await fetch('/api/style', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scope, style_sample: $('styleSample').value }) });
     const d = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(d.error || '저장하지 못했어요.');
-    $('styleSample').value = d.style_sample; renderStyleStatus(d.style_sample, d.updated_at);
+    state.styles[scope] = { text: d.style_sample, updated_at: d.updated_at }; showStyle();
   } catch (e) { $('styleStatus').textContent = e.message; }
   $('btnStyleSave').disabled = false;
 };

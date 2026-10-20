@@ -15,6 +15,9 @@ MAX_HASHTAGS = 10
 MIN_HASHTAGS = 5
 RATING_HEAD = "★ 별점 한눈에 보기"
 ONE_LINER_RE = re.compile(r"^(한\s*줄\s*(평|정리))\s*[:：]")
+SOURCE_HEAD = "📰 참고한 기사"
+# 문장 끝(. ? !) 뒤 공백. 닫는 태그·따옴표·괄호가 붙어 있어도 문장 끝으로 본다(lookbehind 는 갈래마다 길이가 고정이어야 해서 나눠 씀)
+SENT_END_RE = re.compile(r"(?<=[.?!])\s+|(?<=[.?!][\"”’')\]])\s+|(?<=[.?!]\{\{/bold\}\})\s+|(?<=[.?!]\{\{/color\}\})\s+|(?<=[.?!]\{\{/highlight\}\})\s+")
 
 
 def _norm(s: str) -> str:
@@ -233,8 +236,41 @@ def _put_rating_block(paras: list[str], ratings: list[dict]) -> tuple[list[str],
     return paras, notes
 
 
+def build_source_block(news: list[dict]) -> str:
+    """참고 기사 목록(코드가 만듦): 언론사 「제목」 (날짜) 주소"""
+    lines = [SOURCE_HEAD]
+    for n in news:
+        head = " ".join(x for x in [n.get("source", ""), f"「{n['title']}」" if n.get("title") else "", f"({n['published'][:10]})" if n.get("published") else ""] if x)
+        lines.append(f"- {head or '기사'}" + (f" {n['url']}" if n.get("url") else ""))
+    return "\n".join(lines)
+
+
+def _put_source_block(paras: list[str], news: list[dict]) -> list[str]:
+    """이미 있던 참고 기사 문단은 지우고, 기사가 있으면 해시태그 바로 앞에 다시 넣습니다."""
+    paras = [p for p in paras if not strip_tags(p).startswith(SOURCE_HEAD)]
+    if news:
+        idx = find_hashtag_index(paras)
+        paras.insert(idx if idx is not None else len(paras), build_source_block(news))
+    return paras
+
+
+def is_special_paragraph(par: str) -> bool:
+    """소제목·해시태그·별점·참고 기사·사진·지도 줄처럼 문장 단위로 다루지 않는 문단"""
+    plain = strip_tags(par).strip()
+    return bool(HEADING_RE.match(plain) or plain.startswith(("#", RATING_HEAD, SOURCE_HEAD)) or PHOTO_RE.fullmatch(plain) or MAP_LINE_MARK in plain)
+
+
+def split_sentences(par: str) -> list[str]:
+    return [x.strip() for x in SENT_END_RE.split(par.replace("\n", " ")) if x.strip()]
+
+
+def one_sentence_per_line(paras: list[str]) -> list[str]:
+    """투자 생각 글: 문단 안에서 문장이 끝나면 줄을 바꿉니다(네이버에 붙이면 문장마다 엔터)."""
+    return [p if is_special_paragraph(p) else "\n".join(split_sentences(p)) for p in paras]
+
+
 def finalize(kind: str, raw: str, place: dict | None, keywords: list[str], title: str = "", photo_count: int = 0,
-             ratings: list[dict] | None = None) -> dict:
+             ratings: list[dict] | None = None, news: list[dict] | None = None) -> dict:
     """원고를 정리해 {body, chars, notes} 를 돌려줍니다."""
     body, notes = clean_markdown(raw.replace("\r\n", "\n"), title)
     body = normalize_tags(body)
@@ -272,6 +308,9 @@ def finalize(kind: str, raw: str, place: dict | None, keywords: list[str], title
         end = find_hashtag_index(paras)
         if not any(ONE_LINER_RE.match(strip_tags(p)) for p in paras[: end if end is not None else len(paras)]):
             notes.append("글 끝의 '한 줄 평'이 없어요. 직접 한 줄 평을 써 넣어 주세요.")
+    paras = _put_source_block(paras, news or [])
+    if kind == "invest":
+        paras = one_sentence_per_line(paras)
     body = "\n\n".join(paras)
 
     if kind in ("food", "hotel"):

@@ -110,6 +110,8 @@ def ask_text(system: str, user: str, max_tokens: int = 1024, effort: str = "low"
     if is_mock():
         if "[기존 원고]" in user and "모자랍니다" in user:
             return _mock_expand(user)
+        if "[가드레일 위반 문장]" in user:  # 샘플: 고치지 않고 그대로 돌려줌(코드 삭제 단계가 처리)
+            return user.split("[기존 원고]\n", 1)[1].rsplit("\n\n설명 없이", 1)[0]
         return "\n".join(_mock_titles(user))
     kwargs = _kwargs(system, user, max_tokens, effort)
     client = get_client()
