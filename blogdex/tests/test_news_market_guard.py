@@ -76,6 +76,63 @@ class MarketTest(unittest.TestCase):
         self.assertEqual(len(snap["failed"]), len(market.SYMBOLS))
 
 
+def _ts(y, mo, d, h, mi=0):
+    from datetime import datetime, timezone
+    return int(datetime(y, mo, d, h, mi, tzinfo=timezone.utc).timestamp())
+
+
+class MarketLatestTest(unittest.TestCase):
+    """2026-10-21 07:15(한국) 조회 상황: 한국 장은 10/20 종가, 미국은 현지 10/20 종가, 비트코인은 조회 시점 현재 값"""
+    from datetime import datetime as _dt, timezone as _tz
+    NOW = _dt(2026, 10, 20, 22, 15, tzinfo=_tz.utc)
+
+    def chart(self, offset, bars, price=None, ptime=None):
+        meta = {"gmtoffset": offset}
+        if price is not None:
+            meta.update(regularMarketPrice=price, regularMarketTime=ptime)
+        return {"chart": {"result": [{"meta": meta, "timestamp": [t for t, _ in bars],
+                                       "indicators": {"quote": [{"close": [c for _, c in bars]}]}}]}}
+
+    def test_kospi_uses_latest_close_even_if_daily_bar_is_empty(self):
+        # 일봉의 10/20 종가가 비어 있어도(None) 메타의 최신 값(10/20 15:30 KST)을 쓰고, 등락률은 10/19 종가 대비
+        bars = [(_ts(2026, 10, 16, 0), 5600.0), (_ts(2026, 10, 19, 0), 5768.01), (_ts(2026, 10, 20, 0), None)]
+        q = market.parse_chart(self.chart(32400, bars, 5800.0, _ts(2026, 10, 20, 6, 30)), self.NOW)
+        self.assertEqual(q["close"], 5800.0)
+        self.assertEqual(q["prev"], 5768.01)
+        self.assertEqual(q["label"], "10/20 종가")
+
+    def test_us_index_is_local_close(self):
+        bars = [(_ts(2026, 10, 19, 13, 30), 7690.0), (_ts(2026, 10, 20, 13, 30), 7712.57)]
+        q = market.parse_chart(self.chart(-14400, bars, 7712.57, _ts(2026, 10, 20, 20, 0)), self.NOW)
+        self.assertEqual(q["label"], "현지 10/20 종가")
+        self.assertEqual(q["prev"], 7690.0)
+
+    def test_crypto_is_current_value(self):
+        bars = [(_ts(2026, 10, 19, 0), 81000.0), (_ts(2026, 10, 20, 0), 82500.0)]
+        q = market.parse_chart(self.chart(0, bars, 82920.0, _ts(2026, 10, 20, 22, 14)), self.NOW)
+        self.assertEqual(q["label"], "10/21 07:14 현재")
+        self.assertEqual(q["prev"], 81000.0)  # 오늘(UTC 10/20) 봉이 아니라 전날 종가 대비
+        self.assertTrue(q["live"])
+
+    def test_naver_wins_when_newer(self):
+        stale = self.chart(32400, [(_ts(2026, 10, 16, 0), 5600.0), (_ts(2026, 10, 19, 0), 5768.01)], 5768.01, _ts(2026, 10, 19, 6, 30))
+        naver = {"closePrice": "5,850.10", "fluctuationsRatio": "1.42", "localTradedAt": "2026-10-20T15:30:00+09:00", "marketStatus": "CLOSE"}
+
+        def get(url):
+            if "naver" in url:
+                return naver
+            if "%5EKS11" in url or "^KS11" in url:
+                return stale
+            raise OSError("skip")
+        snap = market.fetch_snapshot(get_json=get, now=self.NOW)
+        kospi = next(it for it in snap["items"] if it["name"] == "코스피")
+        self.assertEqual(kospi["source"], "네이버 증권")
+        self.assertEqual(kospi["label"], "10/20 종가")
+        self.assertIn("코스피 5,850.10 (+1.42%, 10/20 종가)", market.to_memo(snap))
+        self.assertIn("조회(한국 시간)", market.to_memo(snap))
+        self.assertTrue(snap["fetched_at"].startswith("2026-10-21 07:15"))
+
+
 class InvestFormatAndGuardTest(unittest.TestCase):
     RAW = ("요즘 시장이 불안해요. 그래도 원칙은 지킵니다! 나스닥이 1.2% 올랐다는 기사를 봤어요.\n\n1. 요즘 시장\n\n"
            "이 종목은 무조건 오릅니다. 지금이 기회라서 매수하세요. 저는 천천히 나눠 사려고 해요.\n\n"

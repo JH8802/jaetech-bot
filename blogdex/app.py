@@ -232,7 +232,7 @@ def news_preview():
 def market_snapshot():
     """오늘 시황(주요 지수·환율·원자재·비트코인)을 불러와 메모에 넣을 글로 돌려줍니다."""
     if llm.is_mock():
-        snap = {"items": [{"name": "코스피", "close": 2600.0, "pct": 0.5, "date": "10/20", "digits": 2, "unit": ""}],
+        snap = {"items": [{"name": "코스피", "close": 2600.0, "pct": 0.5, "label": "10/20 종가", "digits": 2, "unit": "", "source": "샘플"}],
                 "failed": [], "fetched_at": "2026-10-20 09:00", "source": "샘플"}
     else:
         snap = market.fetch_snapshot()
