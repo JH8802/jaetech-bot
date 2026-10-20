@@ -13,6 +13,7 @@ MAP_LINE_MARK = "플레이스 지도 삽입"
 PHOTO_RE = re.compile(r"<\s*사진\s*(\d+)\s*>")
 MAX_HASHTAGS = 10
 MIN_HASHTAGS = 5
+HASHTAG_RANGE = {"invest": (3, 5)}  # 글 종류별 (최소, 최대). 없으면 (MIN_HASHTAGS, MAX_HASHTAGS)
 RATING_HEAD = "★ 별점 한눈에 보기"
 ONE_LINER_RE = re.compile(r"^(한\s*줄\s*(평|정리))\s*[:：]")
 SOURCE_HEAD = "📰 참고한 기사"
@@ -291,17 +292,18 @@ def finalize(kind: str, raw: str, place: dict | None, keywords: list[str], title
         if region:
             must.append(f"{region}{'호텔' if kind == 'hotel' else '맛집'}")  # 상호 + 지역 태그는 빠지면 코드가 넣음(설계서 §4.6)
         must += [k.replace(" ", "") for k in keywords[:2]]
-    elif keywords:
+    elif keywords and kind != "invest":  # 투자 생각 글의 해시태그는 AI가 고른 핵심 키워드만
         must = [k.replace(" ", "") for k in keywords[:3]]
+    tag_min, tag_max = HASHTAG_RANGE.get(kind, (MIN_HASHTAGS, MAX_HASHTAGS))
     idx = find_hashtag_index(paras)
     if idx is None:
         notes.append("해시태그 문단이 없어 핵심 키워드로 만들었어요.")
-        paras.append(normalize_hashtags("", must))
+        paras.append(normalize_hashtags("", must, tag_max))
     else:
-        paras[idx] = normalize_hashtags(paras[idx], must)
+        paras[idx] = normalize_hashtags(paras[idx], must, tag_max)
         n_tags = paras[idx].count("#")
-        if n_tags < MIN_HASHTAGS:
-            notes.append(f"해시태그가 {n_tags}개예요(권장 {MIN_HASHTAGS}~{MAX_HASHTAGS}개).")
+        if n_tags < tag_min:
+            notes.append(f"해시태그가 {n_tags}개예요(권장 {tag_min}~{tag_max}개).")
     if kind in ("food", "hotel"):
         paras, rn = _put_rating_block(paras, ratings or [])
         notes += rn
