@@ -442,12 +442,25 @@ $('btnNews').onclick = async () => {
   $('btnNews').disabled = false;
 };
 $('newsUrl').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); $('btnNews').click(); } });
+// 메모 속 자동 시황 블록(다시 불러오면 새 블록으로 바꿈)
+const MARKET_BLOCK_RE = /\[자동 시황[^\n]*\](?:\n- [^\n]*)*/g;
+// 양식 칸 중 아무것도 적지 않은 칸만 지움(내용을 적은 칸, 직접 쓴 글은 그대로)
+function dropEmptyTemplateSections(text) {
+  const heads = new Set((INVEST_MEMO_TEMPLATE + '\n\n' + INVEST_MEMO_SHORT).split('\n').filter((l) => /^\[.+\]$/.test(l.trim())).map((l) => l.trim()));
+  return text.split(/\n\s*\n/).filter((sec) => {
+    const lines = sec.trim().split('\n');
+    if (!heads.has(lines[0].trim())) return true;
+    return lines.slice(1).some((l) => l.replace(/^\s*-\s*/, '').trim());
+  }).join('\n\n');
+}
 $('btnMarket').onclick = async () => {
   $('btnMarket').disabled = true; $('marketMsg').textContent = '시황을 불러오고 있어요...';
   try {
     const d = await api('/api/market');
-    const m = $('memo'); m.value = d.memo + (m.value.trim() ? '\n\n' + m.value : '');
-    $('marketMsg').textContent = `메모 맨 위에 넣었어요(${d.fetched_at} 조회). 필요 없는 줄은 지워도 돼요.`; updateHints();
+    const m = $('memo');
+    const rest = dropEmptyTemplateSections(m.value.replace(MARKET_BLOCK_RE, '')).trim();  // 예전 시황 블록·빈 양식 칸은 지움
+    m.value = d.memo + (rest ? '\n\n' + rest : '');
+    $('marketMsg').textContent = `메모 맨 위에 시황만 넣었어요(${d.fetched_at} 조회). 필요 없는 줄은 지워도 돼요.`; updateHints();
   } catch (e) { $('marketMsg').textContent = e.message; }
   $('btnMarket').disabled = false;
 };
