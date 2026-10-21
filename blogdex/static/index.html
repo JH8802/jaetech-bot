@@ -663,6 +663,7 @@ async function makeTitles(regen) {
   try {
     const data = await postJSON('/api/titles', { ...commonBody(), keyword: $('title').value.trim() || (currentPlace() || {}).name || '', exclude: regen ? state.titles : [] });
     state.titles = data.titles;
+    if (!data.titles.length) throw new Error('제목 후보를 만들지 못했어요. 제목 다시 생성(⟳)을 눌러 주세요.');
     $('candList').innerHTML = '';
     data.titles.forEach((t) => {
       const b = document.createElement('button'); b.className = 'list-item'; b.textContent = t;

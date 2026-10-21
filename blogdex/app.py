@@ -287,8 +287,8 @@ def titles():
     data = request.get_json(silent=True) or {}
     c = read_common(data)
     keyword = str(data.get("keyword", "")).strip()
-    if not keyword:
-        raise ValueError("주제나 키워드를 먼저 입력해 주세요.")
+    if not keyword and not (c["kind"] == "invest" and c["memo"]):  # 투자 생각은 제목 칸이 비어도 메모로 제목을 지음
+        raise ValueError("제목 칸에 주제를 쓰거나 메모를 먼저 적어 주세요." if c["kind"] == "invest" else "주제나 키워드를 먼저 입력해 주세요.")
     if len(keyword) > MAX_TITLE:
         raise ValueError(f"주제는 {MAX_TITLE}자 이내로 입력해 주세요.")
     exclude = [str(x)[:MAX_TITLE] for x in (data.get("exclude") or [])][:15]
@@ -296,8 +296,10 @@ def titles():
     user = prompts.build_title_prompt(c["kind"], keyword, c["memo"], c["place"], exclude, c["guardrail"])
     text = llm.ask_text(system, user, max_tokens=1024, effort="low")
     result = [t for t in (clean_title(l) for l in text.splitlines()) if t]
-    if c["kind"] == "invest":  # 권유·보장·단정 표현이 든 제목 후보는 버림
+    if c["kind"] == "invest":  # 권유·보장·단정 표현이 든 제목 후보는 버림(7개를 받아 5개까지 남김)
         result = [t for t in result if not invest_guard.violations("", t)]
+        if not result:
+            raise ValueError("투자 글 원칙(권유·보장·단정 금지)에 맞는 제목 후보를 만들지 못했어요. 제목 다시 생성(⟳)을 눌러 주세요.")
     result = result[:5]
     return jsonify(titles=result, keywords=prompts.derive_keywords(c["kind"], keyword, c["place"]))
 
