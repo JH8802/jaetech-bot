@@ -315,6 +315,22 @@ class ApiFlowTest(unittest.TestCase):
         self.assertEqual(r.status_code, 400)
         self.assertIn("다시 생성", r.get_json()["error"])
 
+    def test_draft_save_load_delete(self):
+        self.c.delete("/api/draft")
+        self.assertIsNone(self.c.get("/api/draft").get_json()["draft"])
+        d = {"kind": "invest", "title": "요즘 시장", "memo": "불안했다", "news": [{"title": "t", "text": "본문"}],
+             "photos": [{"url": "data:image/png;base64,AAAA", "name": "a.png"}]}
+        r = self.c.put("/api/draft", json={"draft": d})
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(r.get_json()["saved_at"])
+        got = self.c.get("/api/draft").get_json()
+        self.assertEqual(got["draft"]["memo"], "불안했다")
+        self.assertEqual(got["draft"]["photos"][0]["name"], "a.png")
+        self.assertEqual(self.c.put("/api/draft", json={"draft": {"kind": "bad"}}).status_code, 400)
+        self.assertEqual(self.c.put("/api/draft", json={"draft": "x"}).status_code, 400)
+        self.c.delete("/api/draft")
+        self.assertIsNone(self.c.get("/api/draft").get_json()["draft"])
+
     def test_memo_limit_is_larger_for_invest_only(self):
         ok = self.c.post("/api/articles/stream", json={"kind": "invest", "title": "요즘 시장 생각", "memo": "가" * 15000})
         self.assertEqual(ok.status_code, 200)
