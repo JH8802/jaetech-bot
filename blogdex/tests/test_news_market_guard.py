@@ -234,12 +234,31 @@ class InvestFlowTest(unittest.TestCase):
         for d in invest_guard.DISCLAIMERS:  # 어떤 안내 문장이든 다시 넣지 않음
             self.assertTrue(invest_guard.DISCLAIMER_RE.search(d))
 
-    def test_auto_flow_differs_from_last(self):
+    def test_random_flow_differs_from_last(self):
         for _ in range(10):
-            a = A.pick_invest_flow("auto")
-            b = A.pick_invest_flow("auto")
+            a = A.pick_invest_flow("random")
+            b = A.pick_invest_flow("random")
             self.assertNotEqual(a, b)
         self.assertEqual(A.pick_invest_flow("diary"), "diary")
+        self.assertEqual(A.pick_invest_flow("auto"), "ai")  # 자동: 원고 쓰기 직전에 AI가 메모를 읽고 고름
+
+    def test_ai_picks_flow_from_memo(self):
+        p = prompts.build_flow_pick_prompt("출근길에 계좌를 보다가 불안했다", [{"title": "금리 동결"}], None, last="feeling")
+        self.assertIn("[글 흐름 고르기]", p)
+        self.assertIn("금리 동결", p)
+        self.assertIn("직전 글의 흐름은 feeling", p)
+        for k in prompts.INVEST_FLOWS:
+            self.assertIn(f"- {k}:", p)
+        self.assertEqual(prompts.parse_flow_pick("question"), "question")
+        self.assertEqual(prompts.parse_flow_pick("흐름: news 입니다"), "news")
+        self.assertEqual(prompts.parse_flow_pick("모르겠어요"), "")
+        from unittest import mock
+        with mock.patch.object(A.llm, "ask_text", return_value="scene"):
+            self.assertEqual(A.choose_flow_by_memo("출근길에", [], [], {}), ("scene", True))
+        with mock.patch.object(A.llm, "ask_text", side_effect=RuntimeError("x")):  # 실패하면 무작위로
+            flow, by_ai = A.choose_flow_by_memo("메모", [], [], {})
+        self.assertIn(flow, prompts.INVEST_FLOWS)
+        self.assertFalse(by_ai)
 
 
 class ApiFlowTest(unittest.TestCase):
@@ -319,7 +338,8 @@ class ApiFlowTest(unittest.TestCase):
         full = self.c.get(f"/api/articles/{done['article_id']}").get_json()["article"]
         self.assertEqual(full["options"]["news"][0]["source"], "연합뉴스")
         self.assertIn("투자 판단과 책임", full["body"])  # 안내 문장 보장
-        self.assertIn(full["options"]["flow"], prompts.INVEST_FLOWS)
+        self.assertEqual(full["options"]["flow"], "feeling")  # 메모 '불안했다' → 샘플 AI가 감정 고백형을 고름
+        self.assertIn("메모를 보고 AI가 고름", done["notes"][0])
 
 
 if __name__ == "__main__":
