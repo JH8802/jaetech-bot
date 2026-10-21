@@ -5,6 +5,7 @@ API 키는 서버(.env)에만 두고, 브라우저에는 내려보내지 않습�
 """
 import json
 import os
+import random
 import re
 import subprocess
 
@@ -305,6 +306,17 @@ def titles():
 
 
 # ---------- 원고 ----------
+def pick_invest_flow(requested: str) -> str:
+    """투자 생각 글의 흐름. 직접 고르면 그것을, '자동'이면 직전 글과 다른 흐름을 무작위로 고릅니다."""
+    if requested in prompts.INVEST_FLOWS:
+        flow = requested
+    else:
+        last = storage.get_setting("invest_last_flow")[0]
+        flow = random.choice([f for f in prompts.INVEST_FLOWS if f != last])
+    storage.set_setting("invest_last_flow", flow)
+    return flow
+
+
 def _enforce_invest_guard(fin, system, usage, kind, place, keywords, title, ratings, news_list):
     """투자 글 가드레일 강제(invest_guard.py 참고): AI 수정 1번 → 남은 위반 문장 삭제 → 안내 문장 보장. fin 을 고쳐 씁니다."""
     hits = invest_guard.violations(fin["body"])
@@ -334,7 +346,8 @@ def _enforce_invest_guard(fin, system, usage, kind, place, keywords, title, rati
 
 
 def _generate_events(*, kind, title, keywords, memo, place, guardrail, evidence_mode, build_prompt,
-                     photos=None, photo_notes=None, parent_id=None, title_input=None, ratings=None, photo_names=None, news_list=None):
+                     photos=None, photo_notes=None, parent_id=None, title_input=None, ratings=None, photo_names=None, news_list=None,
+                     flow=""):
     """원고를 스트리밍으로 만들고, 후처리·점검·저장 후 SSE 이벤트를 흘려보냅니다.
     photos(사진 원본)가 있으면 먼저 사진을 살펴보고, photo_notes(이미 분석된 결과)가 있으면 그대로 씁니다."""
     parts, usage, photo_usage = [], {}, {}
@@ -387,12 +400,14 @@ def _generate_events(*, kind, title, keywords, memo, place, guardrail, evidence_
             for ev in _enforce_invest_guard(fin, system, usage, kind, place, keywords, title, ratings, news_list):
                 yield ev
             usage = fin.pop("_usage", usage)
+            if flow in prompts.INVEST_FLOWS:
+                fin["notes"].insert(0, f"이번 글 흐름: {prompts.INVEST_FLOWS[flow][0]}")
         quality = eval_style.evaluate(kind, fin["body"], keywords, memo, title=title, ad_check=guardrail)
         yield sse("replace", {"text": fin["body"]})
         article_id = storage.save_article(
             kind=kind, title_input=title_input or title, title_final=title, memo=memo, place=place, keywords=keywords,
             options={"guardrail": guardrail, "evidence_mode": evidence_mode, "usage": usage, "photos": photo_notes or [], "ratings": ratings or [],
-                     "news": news_list or []},
+                     "news": news_list or [], "flow": flow},
             body=fin["body"], chars=fin["chars"],
             quality=quality, model=usage.get("model") or llm.MODEL, parent_id=parent_id)
         yield sse("done", {"article_id": article_id, "title": title, "body": fin["body"], "chars": fin["chars"],
@@ -421,6 +436,7 @@ def article_stream():
     photos = read_photos(data, c["kind"])
     ratings = read_ratings(data, c["kind"])
     news_list = news.read_news_list(data.get("news")) if c["kind"] == "invest" else []  # 참고 기사는 투자 생각 글 전용
+    flow = pick_invest_flow(str(data.get("invest_flow", "auto"))) if c["kind"] == "invest" else ""
     if c["kind"] == "invest":
         bad = invest_guard.violations("", title)
         if bad:
@@ -428,8 +444,8 @@ def article_stream():
     return sse_response(_generate_events(
         kind=c["kind"], title=title, keywords=keywords, memo=c["memo"], place=c["place"],
         guardrail=c["guardrail"], evidence_mode=c["evidence_mode"], photos=photos, ratings=ratings,
-        photo_names=read_photo_names(data), news_list=news_list,
-        build_prompt=lambda notes: prompts.build_article_prompt(c["kind"], title, keywords, c["memo"], c["place"], notes, ratings, news_list)))
+        photo_names=read_photo_names(data), news_list=news_list, flow=flow,
+        build_prompt=lambda notes: prompts.build_article_prompt(c["kind"], title, keywords, c["memo"], c["place"], notes, ratings, news_list, flow)))
 
 
 @app.post("/api/articles/<int:article_id>/rewrite")
@@ -446,7 +462,7 @@ def article_rewrite(article_id: int):
         kind=art["kind"], title=art["title"], keywords=art["keywords"], memo=art["memo"], place=art["place"],
         guardrail=bool(opts.get("guardrail")), evidence_mode=opts.get("evidence_mode", "strict"),
         photo_notes=notes, parent_id=article_id, title_input=art["title_input"], ratings=opts.get("ratings") or [],
-        news_list=opts.get("news") or [],
+        news_list=opts.get("news") or [], flow=opts.get("flow", ""),
         build_prompt=lambda n: prompts.build_rewrite_prompt(art["kind"], art["body"], issues, art["keywords"], n, opts.get("ratings") or [],
                                                             opts.get("news") or [])))
 

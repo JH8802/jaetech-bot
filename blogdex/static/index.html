@@ -195,7 +195,24 @@
     </div>
 
     <label class="cap" for="memo" id="memoCap">메모</label>
-    <div id="memoTplRow" class="hidden" style="margin-bottom:6px"><button class="btn ghost" id="btnMemoTpl" type="button" style="height:32px;font-size:12px">📝 메모 양식 넣기</button> <button class="btn ghost" id="btnMarket" type="button" style="height:32px;font-size:12px">📈 오늘 시황 불러오기</button> <span class="hint" style="margin:0" id="marketMsg">항목만 채우면 돼요. 비운 항목은 글에서 빠져요.</span></div>
+    <div id="memoTplRow" class="hidden" style="margin-bottom:6px">
+      <div class="row" style="align-items:center;gap:6px;flex-wrap:wrap">
+        <button class="btn ghost" id="btnMemoTplShort" type="button" style="height:32px;font-size:12px">📝 간단 양식</button>
+        <button class="btn ghost" id="btnMemoTpl" type="button" style="height:32px;font-size:12px">📝 자세한 양식</button>
+        <button class="btn ghost" id="btnMarket" type="button" style="height:32px;font-size:12px">📈 오늘 시황 불러오기</button>
+        <label style="font-size:12px;margin-left:auto">글 흐름
+          <select id="investFlow" style="height:32px;font-size:12px">
+            <option value="auto">자동 (매번 다르게 · 추천)</option>
+            <option value="scene">일상 장면에서 시작</option>
+            <option value="feeling">감정 고백형</option>
+            <option value="question">이웃에게 묻는 질문형</option>
+            <option value="news">뉴스 하나 깊게</option>
+            <option value="diary">짧은 일기형 (소제목 없음)</option>
+          </select>
+        </label>
+      </div>
+      <span class="hint" style="margin:4px 0 0;display:block" id="marketMsg">양식은 입력을 돕는 칸일 뿐 글에 그대로 나오지 않아요. 양식 없이 자유롭게 적어도 되고, 비운 항목은 글에서 빠져요.</span>
+    </div>
     <textarea id="memo" maxlength="4000"></textarea>
     <p class="hint" id="memoCount" style="text-align:right;margin:2px 0 0"></p>
     <p class="hint" id="memoHint"></p>
@@ -341,6 +358,14 @@ const KIND_UI = {
 KIND_UI.food.placeCap = '매장 이름';
 const PHOTO_HINT = $('photoHint').innerHTML;  // 맛집·호텔·정보글의 기본 사진 안내
 const PHOTO_HINT_INVEST = '그래프·차트, 증권사 리포트 일부, 메시지·화면 캡처를 올리면 AI가 <b>또렷하게 읽히는 글자·숫자와 큰 흐름</b>만 읽어 글에 반영하고, 글 속 <b>\'사진 N\'</b> 자리에 놓으라고 표시해요. 메시지 속 이름·연락처 같은 개인 정보와 리포트의 목표주가·투자의견은 글에 쓰지 않아요. 이미지는 서버에 저장하지 않아요.';
+const INVEST_MEMO_SHORT = `[오늘 든 생각]
+- 
+
+[계기가 된 뉴스·숫자 (있으면)]
+- 
+
+[이웃에게 하고 싶은 말 (있으면)]
+- `;
 const INVEST_MEMO_TEMPLATE = `[요즘 시장 분위기]
 - 
 
@@ -391,10 +416,12 @@ function updateHints() {
   el.classList.toggle('hidden', !short);
   $('evidenceHint').classList.toggle('hidden', !(PLACE_KINDS.includes(state.kind) && $('evidence').value === 'template'));
 }
-$('btnMemoTpl').onclick = () => {
-  const m = $('memo'); m.value = m.value.trim() ? m.value.replace(/\s+$/, '') + '\n\n' + INVEST_MEMO_TEMPLATE : INVEST_MEMO_TEMPLATE;
+function insertMemoTemplate(tpl) {
+  const m = $('memo'); m.value = m.value.trim() ? m.value.replace(/\s+$/, '') + '\n\n' + tpl : tpl;
   m.focus(); updateHints();
-};
+}
+$('btnMemoTpl').onclick = () => insertMemoTemplate(INVEST_MEMO_TEMPLATE);
+$('btnMemoTplShort').onclick = () => insertMemoTemplate(INVEST_MEMO_SHORT);
 /* ---------- 참고 기사 / 오늘 시황 ---------- */
 function renderNews() {
   $('newsList').innerHTML = state.news.map((n, i) => `<div class="newsitem"><div><b>${esc(n.title || '(제목 없음)')}</b><br><span style="color:var(--sub)">${esc([n.source, n.published].filter(Boolean).join(' · '))} · 본문 ${n.text.length.toLocaleString()}자</span><br>${esc(n.text.slice(0, 120))}…</div><button class="x" type="button" data-i="${i}" title="빼기">✕</button></div>`).join('');
@@ -767,7 +794,7 @@ $('btnWrite').onclick = () => {
   const photos = state.photos;
   if (photos.length > photoLimit()) { showError(`이 글 종류는 사진을 최대 ${photoLimit()}장까지 올릴 수 있어요. ${photos.length - photoLimit()}장을 빼거나 글 종류를 바꿔 주세요.`); return; }
   state.resultPhotos = [...photos];
-  runStream('/api/articles/stream', { ...commonBody(), title: $('title').value.trim(), keywords: invest ? [] : keywordList(), news: NEWS_KINDS.includes(state.kind) ? state.news : [], photos: photos.map((p) => p.url), photo_names: photos.map((p) => p.name || '') });
+  runStream('/api/articles/stream', { ...commonBody(), title: $('title').value.trim(), keywords: invest ? [] : keywordList(), invest_flow: invest ? $('investFlow').value : undefined, news: NEWS_KINDS.includes(state.kind) ? state.news : [], photos: photos.map((p) => p.url), photo_names: photos.map((p) => p.name || '') });
 };
 $('btnRewrite').onclick = () => { if (!state.busy && state.article) runStream(`/api/articles/${state.article.id}/rewrite`, { kind: state.article.kind }); };
 

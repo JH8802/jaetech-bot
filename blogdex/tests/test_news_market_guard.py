@@ -165,7 +165,7 @@ class InvestFormatAndGuardTest(unittest.TestCase):
         self.assertTrue(added)
         paras = pp.split_paragraphs(withd)
         i = next(i for i, p in enumerate(paras) if p.startswith("한 줄 정리"))
-        self.assertEqual(paras[i - 1], invest_guard.DISCLAIMER)
+        self.assertIn(paras[i - 1], invest_guard.DISCLAIMERS)
         self.assertFalse(invest_guard.ensure_disclaimer(withd)[1])  # 이미 있으면 다시 넣지 않음
 
     def test_soft_context_does_not_hide_imperative(self):
@@ -206,6 +206,40 @@ class InvestOnlyFeaturesTest(unittest.TestCase):
         raw = '[{"n": 1, "category": "리포트·문서", "desc": "d", "text": "%s"}]' % long_text
         self.assertEqual(len(llm.parse_photo_notes(raw, 1, 1, text_max=400)[0]["text"]), 400)
         self.assertEqual(len(llm.parse_photo_notes(raw, 1)[0]["text"]), 100)
+
+
+class InvestFlowTest(unittest.TestCase):
+    def test_flows_have_different_shapes(self):
+        self.assertGreaterEqual(len(prompts.INVEST_FLOWS), 5)
+        blocks = {f: prompts.flow_block(f) for f in prompts.INVEST_FLOWS}
+        self.assertIn("소제목 없음", blocks["diary"])
+        self.assertIn("오늘의 한 줄", blocks["question"])
+        up = prompts.build_article_prompt("invest", "t", [], "메모", None, flow="feeling")
+        self.assertIn("[이번 글의 흐름 - 감정 고백형]", up)
+        self.assertNotIn("[이번 글의 흐름", prompts.build_article_prompt("food", "t", [], "메모", None, flow="feeling"))
+
+    def test_spec_no_longer_fixes_section_order(self):
+        spec = prompts.KIND_SPECS["invest"]
+        self.assertNotIn("'1. ' 요즘 내가 본 시장·뉴스", spec)
+        self.assertIn("메모 양식의 항목 순서를 그대로 따라가지 않습니다", spec)
+
+    def test_today_one_liner_and_label_less_ending(self):
+        self.assertTrue(pp.ONE_LINER_RE.match("오늘의 한 줄: 흔들려도 괜찮아요."))
+        body = "인트로입니다.\n\n1. 소제목\n\n본문입니다.\n\n결국 마음이 먼저라는 걸 배웠어요.\n\n#주식 #시장 #마음"
+        out, added = invest_guard.ensure_disclaimer(body)
+        paras = pp.split_paragraphs(out)
+        self.assertTrue(added)
+        self.assertIn(paras[-3], invest_guard.DISCLAIMERS)  # 라벨 없는 맺음 문장 바로 앞
+        self.assertEqual(paras[-2], "결국 마음이 먼저라는 걸 배웠어요.")
+        for d in invest_guard.DISCLAIMERS:  # 어떤 안내 문장이든 다시 넣지 않음
+            self.assertTrue(invest_guard.DISCLAIMER_RE.search(d))
+
+    def test_auto_flow_differs_from_last(self):
+        for _ in range(10):
+            a = A.pick_invest_flow("auto")
+            b = A.pick_invest_flow("auto")
+            self.assertNotEqual(a, b)
+        self.assertEqual(A.pick_invest_flow("diary"), "diary")
 
 
 class ApiFlowTest(unittest.TestCase):
@@ -285,6 +319,7 @@ class ApiFlowTest(unittest.TestCase):
         full = self.c.get(f"/api/articles/{done['article_id']}").get_json()["article"]
         self.assertEqual(full["options"]["news"][0]["source"], "연합뉴스")
         self.assertIn("투자 판단과 책임", full["body"])  # 안내 문장 보장
+        self.assertIn(full["options"]["flow"], prompts.INVEST_FLOWS)
 
 
 if __name__ == "__main__":
