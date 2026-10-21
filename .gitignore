@@ -22,3 +22,6 @@ Thumbs.db
 
 # blogdex 로컬 데이터(원고 DB, 사진)
 blogdex/data/
+
+# blogdex 배포용 압축 파일
+blogdex-*.zip
