@@ -46,6 +46,15 @@ python blogdex/app.py          # → http://127.0.0.1:5000
 
 API 키 없이 화면만 확인하려면: `BLOGDEX_MOCK=1 python blogdex/app.py` (샘플 원고, 비용 0원)
 
+## 다른 컴퓨터에서 쓰기 (압축 파일)
+1. 압축 파일을 원하는 폴더에 풀기(예: `C:\blogdex-test`).
+2. Python 3.11 이상 설치(설치 화면에서 "Add python.exe to PATH" 체크).
+3. `blogdex\install_blogdex.bat` 실행 → 패키지 설치, `.env` 생성.
+4. 메모장으로 `.env` 를 열어 `ANTHROPIC_API_KEY=` 뒤에 키를 넣고 저장. (키 없이 실행하면 샘플 모드)
+5. `blogdex\run_blogdex.bat` 실행 → 브라우저가 열림. 헤더의 `버전`은 압축할 때의 버전(VERSION 파일).
+- 압축 파일로 받은 폴더는 git 이 없어 `update_blogdex.bat` 이 동작하지 않습니다. 새 버전은 새 압축 파일로 받으세요.
+- 내 원고·말투 샘플·별점 항목은 컴퓨터마다 따로 저장됩니다(`blogdex\data\blogdex.db`). 옮기려면 이 파일을 복사하세요.
+
 ## 설정 (.env)
 
 모델은 **Claude Sonnet 5.5로 고정**돼 있어요(원고·사진 분석 모두). 바꾸려면 `blogdex/llm.py` 맨 위의 `MODEL` 한 줄을 고치세요.

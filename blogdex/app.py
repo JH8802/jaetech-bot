@@ -33,7 +33,7 @@ EVIDENCE_MODES = {"strict", "template"}
 app = Flask(__name__, static_folder="static", static_url_path="/static")
 app.config["MAX_CONTENT_LENGTH"] = 40 * 1024 * 1024  # 사진 최대 30장(브라우저에서 줄인 JPEG) + 본문
 MAX_PHOTOS = 30  # 가장 큰 한도(요청 크기 계산용)
-PHOTO_LIMITS = {"info": 20, "food": 20, "hotel": 30, "invest": 10}  # 투자 생각: 그래프·리포트·캡처 같은 이미지 자료  # 글 종류별 사진 한도
+PHOTO_LIMITS = {"info": 20, "food": 20, "hotel": 30, "invest": 10}  # 글 종류별 사진 한도(투자 생각: 그래프·리포트·캡처)
 VISION_BATCH = 10  # 사진 분석은 10장씩 나누어 호출(출력이 잘리거나 오래 걸리는 것을 막음)
 MAX_PHOTO_BYTES = 3 * 1024 * 1024
 PHOTO_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
@@ -44,8 +44,14 @@ def _code_version() -> str:
     try:
         r = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=os.path.dirname(os.path.abspath(__file__)),
                            capture_output=True, text=True, timeout=3)
-        return r.stdout.strip() or "?"
+        if r.stdout.strip():
+            return r.stdout.strip()
     except Exception:
+        pass
+    try:  # git 없이 압축 파일로 받은 경우: 압축할 때 적어 둔 VERSION 파일
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "VERSION"), encoding="utf-8") as f:
+            return f.read().strip() or "?"
+    except OSError:
         return "?"
 
 
