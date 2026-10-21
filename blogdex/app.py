@@ -307,14 +307,34 @@ def titles():
 
 # ---------- 원고 ----------
 def pick_invest_flow(requested: str) -> str:
-    """투자 생각 글의 흐름. 직접 고르면 그것을, '자동'이면 직전 글과 다른 흐름을 무작위로 고릅니다."""
+    """투자 생각 글의 흐름. 직접 고르면 그것을, '무작위'면 직전 글과 다른 흐름을 고르고,
+    '자동'(기본)이면 'ai' 를 돌려줘 원고를 쓰기 직전에 AI가 메모를 읽고 고르게 합니다(choose_flow_by_memo)."""
     if requested in prompts.INVEST_FLOWS:
         flow = requested
-    else:
+    elif requested == "random":
         last = storage.get_setting("invest_last_flow")[0]
         flow = random.choice([f for f in prompts.INVEST_FLOWS if f != last])
+    else:
+        return "ai"
     storage.set_setting("invest_last_flow", flow)
     return flow
+
+
+def choose_flow_by_memo(memo: str, news_list, photo_notes, usage: dict) -> tuple[str, bool]:
+    """AI가 메모(·기사 제목·이미지 설명)를 읽고 흐름을 고릅니다. 실패하면 직전과 다른 흐름을 무작위로. (흐름, AI가 골랐는지)"""
+    last = storage.get_setting("invest_last_flow")[0]
+    flow = ""
+    try:
+        text = llm.ask_text(prompts.FLOW_PICK_SYSTEM, prompts.build_flow_pick_prompt(memo, news_list, photo_notes, last),
+                            max_tokens=50, effort="low", usage=usage)
+        flow = prompts.parse_flow_pick(text)
+    except Exception:
+        app.logger.exception("flow pick failed")
+    by_ai = bool(flow)
+    if not flow:
+        flow = random.choice([f for f in prompts.INVEST_FLOWS if f != last])
+    storage.set_setting("invest_last_flow", flow)
+    return flow, by_ai
 
 
 def _enforce_invest_guard(fin, system, usage, kind, place, keywords, title, ratings, news_list):
@@ -370,7 +390,13 @@ def _generate_events(*, kind, title, keywords, memo, place, guardrail, evidence_
             yield sse("photos", {"notes": photo_notes})
         system = prompts.build_system(kind, guardrail, evidence_mode, len(photo_notes or []),
                                       style_sample=style_for(kind), has_news=bool(news_list))
-        user_prompt = build_prompt(photo_notes)
+        flow_by_ai = False
+        if flow == "ai":
+            yield sse("status", {"text": "메모를 읽고 어울리는 글 흐름을 고르고 있어요."})
+            pick_usage = {}
+            flow, flow_by_ai = choose_flow_by_memo(memo, news_list, photo_notes, pick_usage)
+            photo_usage = llm.merge_usage(photo_usage, pick_usage)
+        user_prompt = build_prompt(photo_notes, flow)
         yield sse("status", {"text": "원고를 쓰고 있어요."})
         for chunk in llm.stream_text(system, user_prompt, max_tokens=16000, usage=usage):
             parts.append(chunk)
@@ -401,7 +427,7 @@ def _generate_events(*, kind, title, keywords, memo, place, guardrail, evidence_
                 yield ev
             usage = fin.pop("_usage", usage)
             if flow in prompts.INVEST_FLOWS:
-                fin["notes"].insert(0, f"이번 글 흐름: {prompts.INVEST_FLOWS[flow][0]}")
+                fin["notes"].insert(0, f"이번 글 흐름: {prompts.INVEST_FLOWS[flow][0]}" + (" (메모를 보고 AI가 고름)" if flow_by_ai else ""))
         quality = eval_style.evaluate(kind, fin["body"], keywords, memo, title=title, ad_check=guardrail)
         yield sse("replace", {"text": fin["body"]})
         article_id = storage.save_article(
@@ -445,7 +471,7 @@ def article_stream():
         kind=c["kind"], title=title, keywords=keywords, memo=c["memo"], place=c["place"],
         guardrail=c["guardrail"], evidence_mode=c["evidence_mode"], photos=photos, ratings=ratings,
         photo_names=read_photo_names(data), news_list=news_list, flow=flow,
-        build_prompt=lambda notes: prompts.build_article_prompt(c["kind"], title, keywords, c["memo"], c["place"], notes, ratings, news_list, flow)))
+        build_prompt=lambda notes, fl: prompts.build_article_prompt(c["kind"], title, keywords, c["memo"], c["place"], notes, ratings, news_list, fl)))
 
 
 @app.post("/api/articles/<int:article_id>/rewrite")
@@ -463,7 +489,7 @@ def article_rewrite(article_id: int):
         guardrail=bool(opts.get("guardrail")), evidence_mode=opts.get("evidence_mode", "strict"),
         photo_notes=notes, parent_id=article_id, title_input=art["title_input"], ratings=opts.get("ratings") or [],
         news_list=opts.get("news") or [], flow=opts.get("flow", ""),
-        build_prompt=lambda n: prompts.build_rewrite_prompt(art["kind"], art["body"], issues, art["keywords"], n, opts.get("ratings") or [],
+        build_prompt=lambda n, fl: prompts.build_rewrite_prompt(art["kind"], art["body"], issues, art["keywords"], n, opts.get("ratings") or [],
                                                             opts.get("news") or [])))
 
 
