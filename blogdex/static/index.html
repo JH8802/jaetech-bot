@@ -160,8 +160,12 @@
     </div>
   </details>
 
-  <div class="card">
+  <div class="card" id="writeCard">
     <h2>새 원고 만들기</h2>
+    <div id="draftBanner" class="hidden" style="border:1px solid #ffd43b;background:#fff9db;border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:13px">
+      💾 <b>임시저장된 재료가 있어요</b> <span id="draftInfo" style="color:var(--sub)"></span>
+      <div class="row" style="margin-top:8px"><button class="btn" id="btnDraftLoad" type="button" style="height:32px;font-size:12px">불러오기</button><button class="btn ghost" id="btnDraftDrop" type="button" style="height:32px;font-size:12px">지우고 새로 쓰기</button></div>
+    </div>
 
     <label class="cap">글 종류</label>
     <div class="chips" id="chips">
@@ -197,9 +201,9 @@
     <label class="cap" for="memo" id="memoCap">메모</label>
     <div id="memoTplRow" class="hidden" style="margin-bottom:6px">
       <div class="row" style="align-items:center;gap:6px;flex-wrap:wrap">
+        <button class="btn ghost" id="btnMarket" type="button" style="height:32px;font-size:12px">📈 오늘 시황 불러오기</button>
         <button class="btn ghost" id="btnMemoTplShort" type="button" style="height:32px;font-size:12px">📝 간단 양식</button>
         <button class="btn ghost" id="btnMemoTpl" type="button" style="height:32px;font-size:12px">📝 자세한 양식</button>
-        <button class="btn ghost" id="btnMarket" type="button" style="height:32px;font-size:12px">📈 오늘 시황 불러오기</button>
         <label style="font-size:12px;margin-left:auto">글 흐름
           <select id="investFlow" style="height:32px;font-size:12px">
             <option value="auto">자동 (메모를 읽고 AI가 판단 · 추천)</option>
@@ -212,7 +216,7 @@
           </select>
         </label>
       </div>
-      <span class="hint" style="margin:4px 0 0;display:block" id="marketMsg">양식은 입력을 돕는 칸일 뿐 글에 그대로 나오지 않아요. 양식 없이 자유롭게 적어도 되고, 비운 항목은 글에서 빠져요.</span>
+      <span class="hint" style="margin:4px 0 0;display:block" id="marketMsg">시황을 먼저 불러온 뒤 양식을 넣으면 시황 아래에 양식이 붙어요. 양식은 입력을 돕는 칸일 뿐 글에 그대로 나오지 않아요. 양식 없이 자유롭게 적어도 되고, 비운 항목은 글에서 빠져요.</span>
     </div>
     <textarea id="memo" maxlength="4000"></textarea>
     <p class="hint" id="memoCount" style="text-align:right;margin:2px 0 0"></p>
@@ -259,6 +263,10 @@
       </label>
     </div>
 
+    <div class="row" style="align-items:center;margin-bottom:8px">
+      <button class="btn ghost" id="btnDraftSave" type="button" style="height:34px;font-size:12px">💾 임시저장</button>
+      <span class="hint" id="draftStatus" style="margin:0">입력하는 동안 몇 초마다 자동으로 임시저장돼요(내 컴퓨터의 원고 DB).</span>
+    </div>
     <button class="btn wide" id="btnWrite" disabled>원고 생성하기</button>
     <div class="error" id="error"></div>
   </div>
@@ -419,7 +427,7 @@ function updateHints() {
 }
 function insertMemoTemplate(tpl) {
   const m = $('memo'); m.value = m.value.trim() ? m.value.replace(/\s+$/, '') + '\n\n' + tpl : tpl;
-  m.focus(); updateHints();
+  m.focus(); updateHints(); scheduleDraftSave();
 }
 $('btnMemoTpl').onclick = () => insertMemoTemplate(INVEST_MEMO_TEMPLATE);
 $('btnMemoTplShort').onclick = () => insertMemoTemplate(INVEST_MEMO_SHORT);
@@ -427,6 +435,7 @@ $('btnMemoTplShort').onclick = () => insertMemoTemplate(INVEST_MEMO_SHORT);
 function renderNews() {
   $('newsList').innerHTML = state.news.map((n, i) => `<div class="newsitem"><div><b>${esc(n.title || '(제목 없음)')}</b><br><span style="color:var(--sub)">${esc([n.source, n.published].filter(Boolean).join(' · '))} · 본문 ${n.text.length.toLocaleString()}자</span><br>${esc(n.text.slice(0, 120))}…</div><button class="x" type="button" data-i="${i}" title="빼기">✕</button></div>`).join('');
   $('newsList').querySelectorAll('.x').forEach((b) => (b.onclick = () => { state.news.splice(+b.dataset.i, 1); renderNews(); }));
+  scheduleDraftSave();
 }
 $('btnNews').onclick = async () => {
   const url = $('newsUrl').value.trim();
@@ -460,7 +469,7 @@ $('btnMarket').onclick = async () => {
     const m = $('memo');
     const rest = dropEmptyTemplateSections(m.value.replace(MARKET_BLOCK_RE, '')).trim();  // 예전 시황 블록·빈 양식 칸은 지움
     m.value = d.memo + (rest ? '\n\n' + rest : '');
-    $('marketMsg').textContent = `메모 맨 위에 시황만 넣었어요(${d.fetched_at} 조회). 필요 없는 줄은 지워도 돼요.`; updateHints();
+    $('marketMsg').textContent = `메모 맨 위에 시황만 넣었어요(${d.fetched_at} 조회). 필요 없는 줄은 지워도 돼요.`; updateHints(); scheduleDraftSave();
   } catch (e) { $('marketMsg').textContent = e.message; }
   $('btnMarket').disabled = false;
 };
@@ -761,6 +770,7 @@ function renderPhotos() {
     };
     grid.append(d);
   });
+  scheduleDraftSave();
   $('photoCount').textContent = state.photos.length ? `${state.photos.length}장 · 번호 순서대로 글 앞쪽부터 놓여요` : '';
 }
 $('btnPhotos').onclick = () => $('fileInput').click();
@@ -793,7 +803,7 @@ async function runStream(url, body) {
       else if (ev === 'photos') renderPhotoNotes(d.notes);
       else if (ev === 'chunk') { raw += d.text; scheduleRender(raw); }
       else if (ev === 'replace') { stopStreamRender(); raw = d.text; renderResult(raw, false); }
-      else if (ev === 'done') showArticle({ id: d.article_id, kind: body.kind || state.article?.kind || state.kind, title: d.title, body: d.body, chars: d.chars, quality: d.quality, notes: d.notes, usage: d.usage, photos: d.photos });
+      else if (ev === 'done') { if (url === '/api/articles/stream') clearDraftAfterWrite(); showArticle({ id: d.article_id, kind: body.kind || state.article?.kind || state.kind, title: d.title, body: d.body, chars: d.chars, quality: d.quality, notes: d.notes, usage: d.usage, photos: d.photos }); }
       else if (ev === 'error') throw new Error(d.message);
     });
     $('resultCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -912,6 +922,80 @@ $('btnStyleSave').onclick = async () => {
   $('btnStyleSave').disabled = false;
 };
 loadStyle();
+
+/* ---------- 임시저장(원고 생성 전 입력 재료) ---------- */
+// 브라우저가 아니라 서버(내 컴퓨터의 원고 DB)에 하나만 보관. 새로고침·창 닫기·브라우저 캐시 삭제에도 남음.
+// 이전 임시저장본이 있으면 불러오거나 지우기 전까지 자동 저장을 멈춰서 덮어쓰지 않음.
+state.draftPaused = false; var draftTimer = 0;  // var: 위쪽 함수(사진·기사 목록)가 먼저 불러도 오류 없게
+function collectDraft() {
+  return {
+    kind: state.kind, title: $('title').value, kw: $('kw').value, memo: $('memo').value,
+    place: { q: $('placeQuery').value, cat: $('mCategory').value, addr: $('mAddress').value },
+    ratings: PLACE_KINDS.includes(state.kind) ? ratingRows[state.kind].map((r) => ({ label: r.label, score: r.score })) : [],
+    news: state.news, photos: state.photos.map((p) => ({ url: p.url, name: p.name })),
+    investFlow: $('investFlow').value, guardrail: $('guardrail').checked, evidence: $('evidence').value,
+  };
+}
+const draftEmpty = (d) => !d.title.trim() && !d.memo.trim() && !d.news.length && !d.photos.length && !d.place.q.trim();
+function draftTime(t) { return t ? t.slice(5, 16).replace('-', '/') : ''; }
+async function saveDraft(manual) {
+  clearTimeout(draftTimer);
+  if (state.draftPaused && !manual) return;
+  const d = collectDraft();
+  if (draftEmpty(d)) { if (manual) $('draftStatus').textContent = '임시저장할 내용이 아직 없어요.'; return; }
+  try {
+    const res = await fetch('/api/draft', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ draft: d }) });
+    const r = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(r.error || '임시저장하지 못했어요.');
+    state.draftPaused = false; $('draftBanner').classList.add('hidden');
+    $('draftStatus').textContent = `임시저장됨 · ${draftTime(r.saved_at)}${manual ? '' : ' (자동)'}`;
+  } catch (e) { $('draftStatus').textContent = e.message; }
+}
+function scheduleDraftSave() { if (state.draftPaused) return; clearTimeout(draftTimer); draftTimer = setTimeout(() => saveDraft(false), 3000); }
+function restoreDraft(d) {
+  setKind(d.kind || 'info');
+  $('title').value = d.title || ''; $('kw').value = d.kw || ''; $('memo').value = d.memo || '';
+  const p = d.place || {}; $('placeQuery').value = p.q || ''; $('mCategory').value = p.cat || ''; $('mAddress').value = p.addr || '';
+  if (PLACE_KINDS.includes(state.kind) && Array.isArray(d.ratings) && d.ratings.length) { ratingRows[state.kind] = d.ratings; renderRatings(); }
+  state.news = d.news || []; renderNews();
+  state.photos = d.photos || []; renderPhotos();
+  $('investFlow').value = d.investFlow || 'auto';
+  if (!$('guardrail').disabled) $('guardrail').checked = !!d.guardrail;
+  if (d.evidence) $('evidence').value = d.evidence;
+  $('btnWrite').disabled = !$('title').value.trim();
+  updateHints();
+}
+async function checkDraft() {
+  try {
+    const r = await api('/api/draft');
+    if (!r.draft || draftEmpty({ title: '', memo: '', news: [], photos: [], place: { q: '' }, ...r.draft })) return;
+    state.pendingDraft = r.draft; state.draftPaused = true;
+    const d = r.draft;
+    $('draftInfo').textContent = `(${draftTime(r.saved_at)} · ${KIND_LABEL[d.kind] || ''}${d.title ? ' · ' + d.title.slice(0, 30) : ''}${d.photos && d.photos.length ? ` · 사진 ${d.photos.length}장` : ''}${d.news && d.news.length ? ` · 기사 ${d.news.length}개` : ''})`;
+    $('draftBanner').classList.remove('hidden');
+    $('draftStatus').textContent = '이전 임시저장본이 있어서 자동 저장을 잠시 멈췄어요. 위에서 불러오거나 지워 주세요.';
+  } catch (e) { /* 옛 서버면 조용히 무시 */ }
+}
+$('btnDraftLoad').onclick = () => {
+  if (state.pendingDraft) restoreDraft(state.pendingDraft);
+  state.pendingDraft = null; state.draftPaused = false; $('draftBanner').classList.add('hidden');
+  $('draftStatus').textContent = '임시저장본을 불러왔어요. 이어서 입력하면 다시 자동 저장돼요.';
+};
+$('btnDraftDrop').onclick = async () => {
+  try { await fetch('/api/draft', { method: 'DELETE' }); } catch (e) { /* 무시 */ }
+  state.pendingDraft = null; state.draftPaused = false; $('draftBanner').classList.add('hidden');
+  $('draftStatus').textContent = '임시저장본을 지웠어요. 새로 입력하면 자동 저장돼요.';
+};
+$('btnDraftSave').onclick = () => saveDraft(true);
+// 원고가 만들어지면 메모·참고 기사는 원고와 함께 저장되므로 임시저장을 비움(이어서 고치면 다시 자동 저장)
+async function clearDraftAfterWrite() {
+  clearTimeout(draftTimer);
+  try { await fetch('/api/draft', { method: 'DELETE' }); } catch (e) { /* 무시 */ }
+  $('draftStatus').textContent = '원고가 저장돼서 임시저장을 비웠어요. 재료를 고치면 다시 자동 저장돼요.';
+}
+$('writeCard').addEventListener('input', scheduleDraftSave);
+$('writeCard').addEventListener('change', scheduleDraftSave);
+checkDraft();
 
 fetch('/api/version').then((r) => r.json()).then((d) => { $('ver').textContent = '버전 ' + d.version; }).catch(() => {});
 </script>

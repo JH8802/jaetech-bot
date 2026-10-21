@@ -224,6 +224,38 @@ def style_put():
     return jsonify(scope=scope, style_sample=text, updated_at=updated)
 
 
+MAX_DRAFT_BYTES = 30 * 1024 * 1024  # 임시저장 한도(사진 포함)
+
+
+@app.get("/api/draft")
+def draft_get():
+    """원고 생성 전 입력 재료의 임시저장본(하나만 보관)."""
+    raw, saved_at = storage.get_setting("draft")
+    try:
+        draft = json.loads(raw) if raw else None
+    except ValueError:
+        draft = None
+    return jsonify(draft=draft, saved_at=saved_at)
+
+
+@app.put("/api/draft")
+def draft_put():
+    """입력 중인 제목·메모·참고 기사·사진 등을 내 컴퓨터의 원고 DB 에 임시저장합니다(새로고침·창 닫기 대비)."""
+    draft = (request.get_json(silent=True) or {}).get("draft")
+    if not isinstance(draft, dict) or draft.get("kind") not in prompts.KINDS:
+        raise ValueError("임시저장할 내용이 올바르지 않아요.")
+    raw = json.dumps(draft, ensure_ascii=False)
+    if len(raw.encode("utf-8")) > MAX_DRAFT_BYTES:
+        raise ValueError("임시저장하기에 너무 커요(사진이 많을 수 있어요). 사진 몇 장을 빼고 다시 시도해 주세요.")
+    return jsonify(saved_at=storage.set_setting("draft", raw))
+
+
+@app.delete("/api/draft")
+def draft_delete():
+    storage.set_setting("draft", "")
+    return jsonify(ok=True)
+
+
 @app.post("/api/news/preview")
 def news_preview():
     """기사 주소를 읽어 제목·언론사·날짜·본문 앞부분을 돌려줍니다. 화면에서 확인한 뒤 원고 생성에 함께 보냅니다."""
