@@ -21,7 +21,12 @@ if errorlevel 1 (
 
 echo.
 echo  필요한 패키지를 확인하는 중...
-python -m pip install -r blogdex\requirements.txt --quiet --disable-pip-version-check
+call "%~dp0find_python.bat"
+if not defined PY (
+  pause
+  exit /b 1
+)
+%PY% -m pip install -r blogdex\requirements.txt --quiet --disable-pip-version-check
 
 echo.
 echo  업데이트가 끝났어요. 서버가 켜져 있었다면 끄고(run_blogdex.bat 창 닫기) 다시 실행하세요.
