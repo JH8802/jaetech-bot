@@ -15,7 +15,7 @@ MAX_HASHTAGS = 10
 MIN_HASHTAGS = 5
 HASHTAG_RANGE = {"invest": (3, 5)}  # 글 종류별 (최소, 최대). 없으면 (MIN_HASHTAGS, MAX_HASHTAGS)
 RATING_HEAD = "★ 별점 한눈에 보기"
-ONE_LINER_RE = re.compile(r"^(한\s*줄\s*(평|정리))\s*[:：]")
+ONE_LINER_RE = re.compile(r"^(한\s*줄\s*(평|정리)|오늘의\s*한\s*줄)\s*[:：]")
 SOURCE_HEAD = "📰 참고한 기사"
 # 문장 끝(. ? !) 뒤 공백. 닫는 태그·따옴표·괄호가 붙어 있어도 문장 끝으로 본다(lookbehind 는 갈래마다 길이가 고정이어야 해서 나눠 씀)
 SENT_END_RE = re.compile(r"(?<=[.?!])\s+|(?<=[.?!][\"”’')\]])\s+|(?<=[.?!]\{\{/bold\}\})\s+|(?<=[.?!]\{\{/color\}\})\s+|(?<=[.?!]\{\{/highlight\}\})\s+")
