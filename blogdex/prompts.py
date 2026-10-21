@@ -402,19 +402,24 @@ def build_article_prompt(kind: str, title: str, keywords: list[str], memo: str, 
 
 
 def build_title_prompt(kind: str, keyword: str, memo: str, place: dict | None, exclude: list[str], guardrail: bool) -> str:
-    parts = [f"글 종류: {KINDS[kind]['label']}", f"주제/키워드: {keyword}"]
+    parts = [f"글 종류: {KINDS[kind]['label']}", f"주제/키워드: {keyword or '(없음 - 아래 메모의 핵심 주제로 제목을 지으세요)'}"]
     pb = _place_block(place)
     if pb:
         parts.append(pb)
     if memo and memo.strip():
-        parts.append("작성자 메모(참고):\n" + memo.strip()[:600])
+        if kind == "invest":  # 제목에는 숫자 나열이 필요 없으니 자동 시황 블록은 빼고, 메모를 더 길게 참고
+            memo_t = re.sub(r"\[자동 시황[^\n]*\](?:\n- [^\n]*)*", "", memo).strip()[:2000]
+        else:
+            memo_t = memo.strip()[:600]
+        if memo_t:
+            parts.append("작성자 메모(참고):\n" + memo_t)
     if exclude:
         parts.append("아래 제목들과 겹치지 않는 새로운 방향으로 쓰세요:\n" + "\n".join(f"- {x}" for x in exclude))
     if kind == "invest":
         rules = [
-            "블로그 이웃에게 남기는 투자 일기·생각 글의 제목 5개를 제안하세요.",
+            "블로그 이웃에게 남기는 투자 일기·생각 글의 제목 7개를 제안하세요.",
             "- 검색 키워드를 억지로 넣지 말고, 글쓴이의 감정이나 생각이 담긴 담백한 제목(예: '요즘 시장 보면서 흔들리는 마음을 적어 봤어요')",
-            "- 25~35자 안팎, 5개는 서로 다른 각도(감정형, 질문형, 원칙형, 반성형, 일상 장면형)",
+            "- 25~35자 안팎, 서로 다른 각도(감정형, 질문형, 원칙형, 반성형, 일상 장면형)",
             "- 매수·매도 권유, 종목 추천, 급등·대박·무조건 같은 자극적·단정적 표현 금지",
             "- 메모에 없는 수치나 사건을 제목에 넣지 않기",
             "- 한 줄에 제목 하나만, 번호·따옴표·부연 설명 없이 출력",

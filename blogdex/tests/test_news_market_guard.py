@@ -242,6 +242,26 @@ class ApiFlowTest(unittest.TestCase):
         a = self.c.post("/api/news/preview", json={"url": "https://example.com"}).get_json()["article"]
         self.assertTrue(a["text"])
 
+    def test_invest_titles_from_memo_when_title_empty(self):
+        r = self.c.post("/api/titles", json={"kind": "invest", "keyword": "", "memo": "[자동 시황 - x]\n- 코스피 1\n\n[그걸 보고 든 내 감정]\n- 불안"})
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(len(r.get_json()["titles"]), 5)
+        self.assertEqual(self.c.post("/api/titles", json={"kind": "invest", "keyword": "", "memo": ""}).status_code, 400)
+        self.assertEqual(self.c.post("/api/titles", json={"kind": "info", "keyword": "", "memo": "메모"}).status_code, 400)
+
+    def test_invest_title_prompt_skips_market_block(self):
+        p = prompts.build_title_prompt("invest", "", "[자동 시황 - 2026]\n- 코스피 5,768.01 (+1.76%)\n\n불안한 하루", None, [], True)
+        self.assertNotIn("5,768.01", p)
+        self.assertIn("불안한 하루", p)
+        self.assertIn("메모의 핵심 주제로", p)
+
+    def test_invest_titles_all_filtered_gives_message(self):
+        from unittest import mock
+        with mock.patch.object(A.llm, "ask_text", return_value="무조건 오르는 종목\n지금이 기회입니다"):
+            r = self.c.post("/api/titles", json={"kind": "invest", "keyword": "시장", "memo": "메모"})
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("다시 생성", r.get_json()["error"])
+
     def test_memo_limit_is_larger_for_invest_only(self):
         ok = self.c.post("/api/articles/stream", json={"kind": "invest", "title": "요즘 시장 생각", "memo": "가" * 15000})
         self.assertEqual(ok.status_code, 200)
