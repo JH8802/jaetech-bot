@@ -3,15 +3,14 @@ chcp 65001 >nul
 title Blog Writer install
 cd /d "%~dp0.."
 
-where python >nul 2>nul
-if errorlevel 1 (
-  echo [오류] python 을 찾을 수 없어요. python.org 에서 설치할 때 "Add python.exe to PATH" 를 꼭 체크하세요.
+call "%~dp0find_python.bat"
+if not defined PY (
   pause
   exit /b 1
 )
 
 echo  필요한 패키지를 설치하는 중... (처음 한 번만, 1~2분)
-python -m pip install -r blogdex\requirements.txt --disable-pip-version-check
+%PY% -m pip install -r blogdex\requirements.txt --disable-pip-version-check
 if errorlevel 1 (
   echo.
   echo [오류] 설치에 실패했어요. 위쪽 메시지를 캡처해서 알려 주세요.
