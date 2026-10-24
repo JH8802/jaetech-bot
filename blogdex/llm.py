@@ -112,6 +112,8 @@ def ask_text(system: str, user: str, max_tokens: int = 1024, effort: str = "low"
             return _mock_expand(user)
         if "[글 흐름 고르기]" in user:  # 샘플: 메모에 '불안'이 있으면 감정 고백형, 아니면 짧은 일기형
             return "feeling" if "불안" in user.split("[작성자 메모]", 1)[-1] else "diary"
+        if "[어미 바꾸기]" in user:  # 샘플: 고치지 않고 그대로 돌려줌
+            return user.split("[기존 원고]\n", 1)[1].rsplit("\n\n설명 없이", 1)[0]
         if "[가드레일 위반 문장]" in user:  # 샘플: 고치지 않고 그대로 돌려줌(코드 삭제 단계가 처리)
             return user.split("[기존 원고]\n", 1)[1].rsplit("\n\n설명 없이", 1)[0]
         return "\n".join(_mock_titles(user))
