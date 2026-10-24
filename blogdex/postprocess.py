@@ -17,6 +17,7 @@ HASHTAG_RANGE = {"invest": (3, 5)}  # 글 종류별 (최소, 최대). 없으면 
 RATING_HEAD = "★ 별점 한눈에 보기"
 ONE_LINER_RE = re.compile(r"^(한\s*줄\s*(평|정리)|오늘의\s*한\s*줄)\s*[:：]")
 SOURCE_HEAD = "📰 참고한 기사"
+SUMMARY_HEAD = "📌 이 글 핵심 3줄"  # 정보글 상단 요약(줄마다 ①②③, 문장 단위로 다시 나누지 않음)
 # 문장 끝(. ? !) 뒤 공백. 닫는 태그·따옴표·괄호가 붙어 있어도 문장 끝으로 본다(lookbehind 는 갈래마다 길이가 고정이어야 해서 나눠 씀)
 SENT_END_RE = re.compile(r"(?<=[.?!])\s+|(?<=[.?!][\"”’')\]])\s+|(?<=[.?!]\{\{/bold\}\})\s+|(?<=[.?!]\{\{/color\}\})\s+|(?<=[.?!]\{\{/highlight\}\})\s+")
 
@@ -258,7 +259,8 @@ def _put_source_block(paras: list[str], news: list[dict]) -> list[str]:
 def is_special_paragraph(par: str) -> bool:
     """소제목·해시태그·별점·참고 기사·사진·지도 줄처럼 문장 단위로 다루지 않는 문단"""
     plain = strip_tags(par).strip()
-    return bool(HEADING_RE.match(plain) or plain.startswith(("#", RATING_HEAD, SOURCE_HEAD)) or PHOTO_RE.fullmatch(plain) or MAP_LINE_MARK in plain)
+    return bool(HEADING_RE.match(plain) or plain.startswith(("#", RATING_HEAD, SOURCE_HEAD, SUMMARY_HEAD)) or PHOTO_RE.fullmatch(plain)
+                or MAP_LINE_MARK in plain)
 
 
 def split_sentences(par: str) -> list[str]:
@@ -311,8 +313,7 @@ def finalize(kind: str, raw: str, place: dict | None, keywords: list[str], title
         if not any(ONE_LINER_RE.match(strip_tags(p)) for p in paras[: end if end is not None else len(paras)]):
             notes.append("글 끝의 '한 줄 평'이 없어요. 직접 한 줄 평을 써 넣어 주세요.")
     paras = _put_source_block(paras, news or [])
-    if kind == "invest":
-        paras = one_sentence_per_line(paras)
+    paras = one_sentence_per_line(paras)  # 모든 글: 문장마다 줄바꿈(모바일 가독성). 소제목·별점·요약 등은 그대로
     body = "\n\n".join(paras)
 
     if kind in ("food", "hotel"):
