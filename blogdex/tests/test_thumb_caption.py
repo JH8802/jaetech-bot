@@ -61,7 +61,8 @@ class InvestKindTest(unittest.TestCase):
         for guard in (True, False):  # 투자 글 원칙은 가드레일 설정과 상관없이 항상 들어감
             sysmsg = prompts.build_system("invest", guard, "strict")
             self.assertIn("[투자 글 쓰기 원칙 - 절대 규칙", sysmsg)
-            self.assertLess(sysmsg.index("[투자 글 쓰기 원칙"), sysmsg.index("[글쓴이 말투"))  # 말투보다 앞
+            self.assertLess(sysmsg.index("[투자 글 쓰기 원칙"), sysmsg.index("[투자 생각 고정 문체"))  # 문체보다 앞
+            self.assertNotIn("[글쓴이 말투 컨셉", sysmsg)  # 투자 생각은 말투 컨셉 대신 고정 문체
             self.assertIn("[출력 전 마지막 점검 - 투자 글]", sysmsg)
             self.assertIn("'작성자 메모'(메모 속 [자동 시황] 블록 포함), '참고 기사', '이미지 자료'에 있는 것만", sysmsg)
             self.assertIn("한 문장이 끝나면 줄을 바꿔", sysmsg)

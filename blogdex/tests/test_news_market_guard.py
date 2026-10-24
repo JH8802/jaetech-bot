@@ -212,7 +212,8 @@ class InvestFlowTest(unittest.TestCase):
     def test_flows_have_different_shapes(self):
         self.assertGreaterEqual(len(prompts.INVEST_FLOWS), 5)
         blocks = {f: prompts.flow_block(f) for f in prompts.INVEST_FLOWS}
-        self.assertIn("소제목 없음", blocks["diary"])
+        for b in blocks.values():  # 고정 문체: 어느 흐름이든 소제목 없이
+            self.assertIn("소제목: 쓰지 않음", b)
         self.assertIn("오늘의 한 줄", blocks["question"])
         up = prompts.build_article_prompt("invest", "t", [], "메모", None, flow="feeling")
         self.assertIn("[이번 글의 흐름 - 감정 고백형]", up)
