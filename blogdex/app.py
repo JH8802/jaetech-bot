@@ -20,6 +20,7 @@ import market
 import news
 import postprocess
 import prompts
+import register as reg
 import storage
 
 MAX_TITLE = 200
@@ -370,7 +371,28 @@ def choose_flow_by_memo(memo: str, news_list, photo_notes, usage: dict) -> tuple
     return flow, by_ai
 
 
-def _enforce_invest_guard(fin, system, usage, kind, place, keywords, title, ratings, news_list):
+def _enforce_register(fin, system, usage, kind, place, keywords, title, ratings, news_list, register):
+    """말투 샘플 어미 일치율이 90% 미만이면 AI에게 어미만 고치게 한 번 요청합니다. fin 을 고쳐 씁니다."""
+    share, wrong = reg.match_ratio(fin["body"], register)
+    if share < 0.9:
+        yield sse("status", {"text": f"말투 샘플 어미({reg.LABELS[register]})에 맞게 문장 끝을 고치고 있어요."})
+        try:
+            r_usage = {}
+            raw = llm.ask_text(system, prompts.build_register_fix_prompt(fin["body"], register, wrong), max_tokens=12000,
+                               effort="low", usage=r_usage)
+            fixed = postprocess.finalize(kind, raw, place, keywords, title, 0, ratings, news_list)
+            usage = llm.merge_usage(usage, r_usage)
+            new_share, _ = reg.match_ratio(fixed["body"], register)
+            if fixed["chars"] >= fin["chars"] * 0.8 and new_share > share:  # 엉뚱한 응답은 받지 않음
+                fin["body"], fin["chars"] = fixed["body"], fixed["chars"]
+                share = new_share
+        except Exception:
+            app.logger.exception("register fix failed")
+    fin["notes"].append(f"말투 샘플 어미({reg.LABELS[register]}) 일치율 {share:.0%}")
+    fin["_usage"] = usage
+
+
+def _enforce_invest_guard(fin, system, usage, kind, place, keywords, title, ratings, news_list, register=""):
     """투자 글 가드레일 강제(invest_guard.py 참고): AI 수정 1번 → 남은 위반 문장 삭제 → 안내 문장 보장. fin 을 고쳐 씁니다."""
     hits = invest_guard.violations(fin["body"])
     if hits:
@@ -389,7 +411,7 @@ def _enforce_invest_guard(fin, system, usage, kind, place, keywords, title, rati
     body, removed = invest_guard.remove_violations(fin["body"])
     if removed:
         fin["notes"].append(f"원칙에 어긋난 문장 {len(removed)}개를 지웠어요: " + " / ".join(r[:40] for r in removed[:3]))
-    body, added = invest_guard.ensure_disclaimer(body)
+    body, added = invest_guard.ensure_disclaimer(body, register)
     if added:
         fin["notes"].append("개인 의견 안내 문장(투자 판단과 책임은 각자에게 있어요)을 넣었어요.")
     if body != fin["body"]:
@@ -421,8 +443,10 @@ def _generate_events(*, kind, title, keywords, memo, place, guardrail, evidence_
                 note["name"] = photo_names[idx]
         if photo_notes:
             yield sse("photos", {"notes": photo_notes})
+        style_sample = style_for(kind)
+        register = reg.detect_register(style_sample) if kind == "invest" else ""  # 투자 생각: 말투 샘플 어미를 최우선
         system = prompts.build_system(kind, guardrail, evidence_mode, len(photo_notes or []),
-                                      style_sample=style_for(kind), has_news=bool(news_list))
+                                      style_sample=style_sample, has_news=bool(news_list), register=register)
         flow_by_ai = False
         if flow == "ai":
             yield sse("status", {"text": "메모를 읽고 어울리는 글 흐름을 고르고 있어요."})
@@ -456,17 +480,21 @@ def _generate_events(*, kind, title, keywords, memo, place, guardrail, evidence_
                 app.logger.exception("expand failed")
                 fin["notes"].append("분량 보강에 실패해 처음 글을 그대로 썼어요.")
         if kind == "invest":
-            for ev in _enforce_invest_guard(fin, system, usage, kind, place, keywords, title, ratings, news_list):
+            if register:
+                for ev in _enforce_register(fin, system, usage, kind, place, keywords, title, ratings, news_list, register):
+                    yield ev
+                usage = fin.pop("_usage", usage)
+            for ev in _enforce_invest_guard(fin, system, usage, kind, place, keywords, title, ratings, news_list, register):
                 yield ev
             usage = fin.pop("_usage", usage)
             if flow in prompts.INVEST_FLOWS:
                 fin["notes"].insert(0, f"이번 글 흐름: {prompts.INVEST_FLOWS[flow][0]}" + (" (메모를 보고 AI가 고름)" if flow_by_ai else ""))
-        quality = eval_style.evaluate(kind, fin["body"], keywords, memo, title=title, ad_check=guardrail)
+        quality = eval_style.evaluate(kind, fin["body"], keywords, memo, title=title, ad_check=guardrail, register=register)
         yield sse("replace", {"text": fin["body"]})
         article_id = storage.save_article(
             kind=kind, title_input=title_input or title, title_final=title, memo=memo, place=place, keywords=keywords,
             options={"guardrail": guardrail, "evidence_mode": evidence_mode, "usage": usage, "photos": photo_notes or [], "ratings": ratings or [],
-                     "news": news_list or [], "flow": flow},
+                     "news": news_list or [], "flow": flow, "register": register},
             body=fin["body"], chars=fin["chars"],
             quality=quality, model=usage.get("model") or llm.MODEL, parent_id=parent_id)
         yield sse("done", {"article_id": article_id, "title": title, "body": fin["body"], "chars": fin["chars"],
@@ -551,7 +579,8 @@ def articles_update_body(article_id: int):
     if len(body) > MAX_BODY:
         raise ValueError("본문이 너무 길어요.")
     quality = eval_style.evaluate(art["kind"], body, art["keywords"], art["memo"], title=art["title"],
-                                  ad_check=bool((art["options"] or {}).get("guardrail")))
+                                  ad_check=bool((art["options"] or {}).get("guardrail")),
+                                  register=(art["options"] or {}).get("register", ""))
     chars = postprocess.count_chars(body)
     storage.update_body(article_id, body, chars, quality)
     return jsonify(chars=chars, quality=quality)

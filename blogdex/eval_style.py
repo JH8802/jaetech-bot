@@ -8,6 +8,7 @@ import re
 import statistics as st
 
 import adcheck
+import register as reg
 from postprocess import HASHTAG_RANGE, HEADING_RE, MAP_LINE_MARK, MAX_HASHTAGS, MIN_HASHTAGS, RATING_HEAD, SOURCE_HEAD, count_chars, find_hashtag_index, split_paragraphs, strip_tags
 
 GENERIC_WORDS = ["편안", "무난", "자연스럽", "부담", "좋았", "좋겠", "차분", "다양한", "효과적", "전반적으로"]
@@ -75,7 +76,8 @@ def _memo_coverage(memo: str, body_plain: str) -> tuple[float, int]:
     return sum(1 for t in tokens if hit(t)) / len(tokens), len(tokens)
 
 
-def evaluate(kind: str, body: str, keywords: list[str], memo: str = "", title: str = "", ad_check: bool = False) -> dict:
+def evaluate(kind: str, body: str, keywords: list[str], memo: str = "", title: str = "", ad_check: bool = False,
+             register: str = "") -> dict:
     paras, heads, tags = _body_parts(body)
     text = "\n".join(paras)
     plain_len = len(re.sub(r"\s", "", text))
@@ -128,7 +130,13 @@ def evaluate(kind: str, body: str, keywords: list[str], memo: str = "", title: s
         formal = ends.count("formal") / len(ends)
         casual = (ends.count("polite") + ends.count("colloquial")) / len(ends)
         first_p = sum(bool(FIRST_PERSON_RE.match(s)) for s in sents) / len(sents)
-        if kind in ("food", "hotel", "invest"):
+        if kind == "invest" and register in reg.LABELS:  # 말투 샘플 어미를 따르는 투자 생각 글
+            share, _ = reg.match_ratio(body, register)
+            checks.append(_check("endings", f"말투 샘플 어미({reg.LABELS[register]})", f"{share:.0%}", "90% 이상", share >= 0.9,
+                                 f"모든 문장의 어미를 {reg.LABELS[register]}로 맞출 것"))
+            checks.append(_check("first_person", "'저는'으로 시작하는 문장", f"{first_p:.0%}", "35% 이하", first_p <= 0.35,
+                                 "'저는/저도'로 시작하는 문장을 25% 이하로 줄일 것"))
+        elif kind in ("food", "hotel", "invest"):
             checks.append(_check("endings", "말투 섞임(합니다체 / 해요·구어)", f"{formal:.0%} / {casual:.0%}", "합니다체 30~70%", 0.30 <= formal <= 0.70 and casual >= 0.20,
                                  "합니다체를 약 50%, 해요체와 구어 어미(~더라고요, ~거든요, ~잖아요)를 약 50% 섞을 것"))
             checks.append(_check("first_person", "'저는'으로 시작하는 문장", f"{first_p:.0%}", "35% 이하", first_p <= 0.35,

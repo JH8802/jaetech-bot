@@ -17,6 +17,18 @@ DISCLAIMERS = [
     "제 일기 같은 글이라 정답은 아니에요.\n매수·매도를 권하는 글이 아니고, 투자 판단과 책임은 각자에게 있어요.",
 ]
 DISCLAIMER = DISCLAIMERS[0]
+# 말투 샘플 어미가 한다체·합니다체일 때 쓰는 안내 문장
+DISCLAIMERS_BY_REGISTER = {
+    "plain": [
+        "이 글은 내 개인적인 생각을 적은 기록이다.\n특정 종목의 매수나 매도를 권하는 글이 아니다.\n투자 판단과 책임은 각자에게 있다.",
+        "어디까지나 내 개인 생각일 뿐, 무언가를 사거나 팔라는 이야기는 아니다.\n투자 판단과 책임은 각자의 몫이다.",
+        "정답이 아니라 내 투자 일기다.\n매수·매도를 권하는 글이 아니고, 투자 판단과 책임은 각자에게 있다.",
+    ],
+    "formal": [
+        "이 글은 제 개인적인 생각을 적은 기록입니다.\n특정 종목의 매수나 매도를 권하는 글이 아닙니다.\n투자 판단과 책임은 각자에게 있습니다.",
+        "어디까지나 제 개인 생각이며, 무언가를 사거나 팔라는 이야기는 아닙니다.\n투자 판단과 책임은 각자의 몫입니다.",
+    ],
+}
 DISCLAIMER_RE = re.compile(r"투자\s*(?:판단|결정)[^\n.]{0,20}(?:책임|본인|각자|스스로)|(?:매수|매도|투자)[^\n.]{0,12}(?:권유|추천|권하)[^\n.]{0,8}(?:글|것)이?\s*아니")
 
 
@@ -47,7 +59,7 @@ def remove_violations(body: str) -> tuple[str, list[str]]:
     return normalize_tags("\n\n".join(out)), removed
 
 
-def ensure_disclaimer(body: str) -> tuple[str, bool]:
+def ensure_disclaimer(body: str, register: str = "") -> tuple[str, bool]:
     """안내 문장이 없으면 '한 줄 정리' 바로 앞(없으면 참고 기사·해시태그 앞)에 넣습니다."""
     if DISCLAIMER_RE.search(strip_tags(body)):
         return body, False
@@ -59,5 +71,5 @@ def ensure_disclaimer(body: str) -> tuple[str, bool]:
     one = next((i for i in range(end - 1, -1, -1) if ONE_LINER_RE.match(strip_tags(paras[i]))), None)
     if one is None and end > 0 and not is_special_paragraph(paras[end - 1]):
         one = end - 1  # 라벨 없이 끝나는 흐름: 마지막 본문 문단(맺음) 바로 앞
-    paras.insert(one if one is not None else end, random.choice(DISCLAIMERS))
+    paras.insert(one if one is not None else end, random.choice(DISCLAIMERS_BY_REGISTER.get(register, DISCLAIMERS)))
     return "\n\n".join(paras), True

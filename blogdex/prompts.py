@@ -225,7 +225,34 @@ STYLE_SAMPLE_TAIL = "\n[말투 샘플 끝]"
 MAX_STYLE_SAMPLE = 3000
 
 
-def _build_invest_system(style_sample: str, has_news: bool = False, photo_count: int = 0) -> str:
+# 말투 샘플의 어미가 뚜렷할 때(register.detect_register) 투자 생각 글에 거는 최우선 어미 규칙
+REGISTER_RULES = {
+    "plain": "모든 문장을 한다체(평서형 '-다', 의문형 '-까?/-나?')로 끝낸다(예: '~라고 본다.', '~생각한다.', '~것이다.', '~일까?'). '-요', '-죠', '-습니다/-ㅂ니다' 어미는 한 문장도 쓰지 않는다. 1인칭은 꼭 필요할 때만 '나/내'로 쓰고 '저/제'는 쓰지 않는다.",
+    "formal": "모든 문장을 합니다체('-습니다/-ㅂ니다', 의문형 '-습니까?')로 끝냅니다. '-요', '-죠', '-다' 어미는 한 문장도 쓰지 않습니다.",
+    "polite": "모든 문장을 해요체('-요', '-죠')로 끝내요. '-습니다/-ㅂ니다', '-다' 어미는 한 문장도 쓰지 않아요.",
+}
+
+
+def register_block(register: str) -> str:
+    return ("[종결어미 - 최우선 규칙 (작성자 말투 샘플에서 확인한 어미)]\n" + REGISTER_RULES[register] + "\n"
+            "- 이 지시문과 예시에 나오는 다른 어미('~해요', '~입니다' 등)는 내용만 참고하고, 어미는 위 규칙대로 바꿔 쓴다.\n"
+            "- 소제목·맺음 문장·개인 의견 안내 문장도 같은 어미로 쓴다. 어미 비율을 섞으라는 다른 지시보다 이 규칙이 우선한다.")
+
+
+def build_register_fix_prompt(body: str, register: str, wrong: list[str]) -> str:
+    """원고의 종결어미만 말투 샘플 어미로 바꾸게 하는 지시(어미 일치율이 낮을 때 한 번)."""
+    examples = "\n".join(f"- {w}" for w in wrong[:12])
+    return "\n\n".join([
+        "[어미 바꾸기]",
+        "아래 원고의 문장 끝(종결어미)만 다음 규칙대로 바꾸세요. 단어·내용·문장 순서·줄바꿈(한 줄에 한 문장)·소제목·강조 태그({{bold}} 등)·<사진N> 줄·참고 기사 목록·해시태그는 그대로 둡니다.\n"
+        + REGISTER_RULES[register],
+        "[어미가 다른 문장 예]\n" + examples,
+        "[기존 원고]\n" + body,
+        "설명 없이 원고 본문만 출력합니다.",
+    ])
+
+
+def _build_invest_system(style_sample: str, has_news: bool = False, photo_count: int = 0, register: str = "") -> str:
     """투자 생각 글: 검색 최적화 없이 일기·에세이로. 가드레일(투자 글 쓰기 원칙)은 끌 수 없고 맨 앞과 맨 끝에 둡니다."""
     tag_rules = (TAG_RULES
                  .replace("{{bold}} 는 8~14번, {{color}} 는 3~7번", "{{bold}} 는 4~8번, {{color}} 는 1~3번")
@@ -236,20 +263,28 @@ def _build_invest_system(style_sample: str, has_news: bool = False, photo_count:
                .replace("- 문장 길이에 변화를 줍니다. 20자 안팎의 짧은 문장을 전체의 약 20% 섞고, 60자를 넘는 긴 문장은 20% 이하로 합니다.\n", "")
                .replace("- '편안한, 무난한, 자연스러운, 부담 없는, 좋았다' 같은 범용 표현을 반복하지 말고 구체적인 사실이나 장면으로 바꿉니다. (1,000자당 3회 이하)",
                         "- '편안한, 무난한, 자연스러운, 부담 없는, 좋았다' 같은 일상 표현은 말하듯 자연스러운 곳에 써도 됩니다. 1,000자당 7회 이하면 충분하고, 일부러 없앨 필요는 없습니다. 같은 표현을 연달아 반복하지만 않습니다."))
-    parts = [INVEST_ROLE, INVEST_PRINCIPLES, PERSONA]
+    persona, spec = PERSONA, KIND_SPECS["invest"]
+    if register:  # 말투 샘플의 어미가 뚜렷하면 고정 어미 비율 지시를 빼고 샘플 어미를 최우선으로
+        persona = persona.replace("\n- 합니다체와 해요체를 자연스럽게 섞습니다.", "")
+        spec = re.sub(r"문체: 1인칭 일기·에세이\.[^\n]*", "문체: 1인칭 일기·에세이. 종결어미는 '[종결어미 - 최우선 규칙]'을 따릅니다.", spec)
+    parts = [INVEST_ROLE, INVEST_PRINCIPLES, persona]
     if style_sample and style_sample.strip():
         parts.append(STYLE_SAMPLE_HEAD + style_sample.strip()[:MAX_STYLE_SAMPLE] + STYLE_SAMPLE_TAIL)
-    parts += [KIND_SPECS["invest"], INVEST_FORMAT, tag_rules, writing, INVEST_MATERIAL]
+    if register:
+        parts.append(register_block(register))
+    parts += [spec, INVEST_FORMAT, tag_rules, writing, INVEST_MATERIAL]
     if has_news:
         parts.append(NEWS_RULES)
     parts += [NO_META, INVEST_PHOTO_RULES if photo_count else NO_PHOTO, INVEST_FINAL_CHECK]
+    if register:
+        parts.append("마지막으로, 모든 문장의 어미가 '[종결어미 - 최우선 규칙]'과 같은지 확인한 뒤 출력한다.")
     return "\n\n".join(parts)
 
 
 def build_system(kind: str, guardrail: bool, evidence_mode: str, photo_count: int = 0, style_sample: str = "",
-                 has_news: bool = False) -> str:
+                 has_news: bool = False, register: str = "") -> str:
     if kind == "invest":
-        return _build_invest_system(style_sample, has_news, photo_count)
+        return _build_invest_system(style_sample, has_news, photo_count, register)
     parts = [BASE_ROLE, PERSONA]
     if style_sample and style_sample.strip():
         parts.append(STYLE_SAMPLE_HEAD + style_sample.strip()[:MAX_STYLE_SAMPLE] + STYLE_SAMPLE_TAIL)
