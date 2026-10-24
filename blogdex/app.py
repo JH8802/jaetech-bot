@@ -444,7 +444,7 @@ def _generate_events(*, kind, title, keywords, memo, place, guardrail, evidence_
         if photo_notes:
             yield sse("photos", {"notes": photo_notes})
         style_sample = style_for(kind)
-        register = reg.detect_register(style_sample) if kind == "invest" else ""  # 투자 생각: 말투 샘플 어미를 최우선
+        register = "plain" if kind == "invest" else ""  # 투자 생각: 고정 문체(분석 칼럼형)는 한다체
         system = prompts.build_system(kind, guardrail, evidence_mode, len(photo_notes or []),
                                       style_sample=style_sample, has_news=bool(news_list), register=register)
         flow_by_ai = False

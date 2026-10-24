@@ -313,6 +313,11 @@ def finalize(kind: str, raw: str, place: dict | None, keywords: list[str], title
         if not any(ONE_LINER_RE.match(strip_tags(p)) for p in paras[: end if end is not None else len(paras)]):
             notes.append("글 끝의 '한 줄 평'이 없어요. 직접 한 줄 평을 써 넣어 주세요.")
     paras = _put_source_block(paras, news or [])
+    if kind == "invest":  # 투자 생각은 소제목 없이 쓰는 고정 문체: 남은 소제목 줄은 지움
+        kept = [p for p in paras if not HEADING_RE.match(strip_tags(p))]
+        if len(kept) < len(paras):
+            notes.append(f"투자 생각 문체(소제목 없음)에 맞춰 소제목 {len(paras) - len(kept)}줄을 지웠어요.")
+        paras = kept
     paras = one_sentence_per_line(paras)  # 모든 글: 문장마다 줄바꿈(모바일 가독성). 소제목·별점·요약 등은 그대로
     body = "\n\n".join(paras)
 
