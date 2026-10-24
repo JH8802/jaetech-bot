@@ -9,6 +9,7 @@
 - 입력칸 내용은 자동 저장 (껐다 켜도 이어서 작성)
 - 생성·수정한 원고는 drafts/ 폴더에 자동 저장 (덮어쓸 때 이전 버전은 drafts/history/)
 """
+import os
 import re
 from datetime import datetime
 
@@ -23,7 +24,7 @@ from blog_utils import (parse_draft_metadata, load_past_titles, find_keyword_ove
                         find_placeholders, apply_placeholders, compose_draft,
                         write_draft_file, read_draft_file, list_saved_drafts,
                         load_style_sample, save_style_sample, STYLE_SAMPLE_MAX,
-                        load_autosave, save_autosave)
+                        load_autosave, save_autosave, DATA_DIR, DRAFTS_DIR)
 
 st.set_page_config(page_title="블로그 초안 생성기", page_icon="✍️")
 
@@ -201,6 +202,7 @@ with st.sidebar:
         )
     else:
         st.caption("아직 저장된 원고가 없어. 초안을 생성하면 자동으로 여기 쌓여.")
+    st.caption(f"📁 데이터 폴더: {os.path.abspath(DATA_DIR)}")
 
 # ─────────────────────────────────────────────
 # 입력 영역
@@ -353,7 +355,7 @@ if st.button("✍️ 초안 생성", type="primary"):
                 except Exception as e:
                     st.error(f"❌ {platform} 초안 생성 실패: {e}\n(네트워크 문제일 수 있어 — 아래 '초안 생성'을 다시 눌러봐)")
                     continue
-            path = f"drafts/{datetime.now().strftime('%Y%m%d_%H%M%S')}_{platform.replace(' ', '')}.txt"
+            path = os.path.join(DRAFTS_DIR, f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{platform.replace(' ', '')}.txt")
             write_draft_file(path, topic, platform, target_keyword.strip(), draft, inputs)
             drafts[platform], filenames[platform] = draft, path
 

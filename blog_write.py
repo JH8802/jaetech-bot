@@ -11,7 +11,7 @@ from blog_factcheck import check_numbers, build_references, unverified
 from blog_reviewer import (scan_cliches, scan_structure, scan_seo, scan_health_claims, scan_ai_patterns,
                            review_draft, ai_issue, AI_REVIEW_LABELS)
 from blog_sources import resolve_sources, is_bare_url
-from blog_utils import parse_draft_metadata, load_past_titles, find_keyword_overlap, body_to_html, write_draft_file
+from blog_utils import parse_draft_metadata, load_past_titles, find_keyword_overlap, body_to_html, write_draft_file, DRAFTS_DIR
 from datetime import datetime
 import os
 
@@ -206,7 +206,7 @@ if __name__ == "__main__":
         print(f"⚠️ 의견이 {len(personal_take)}자야 — 300자까지만 반영할게.")
         personal_take = personal_take[:300]
 
-    os.makedirs("drafts", exist_ok=True)
+    os.makedirs(DRAFTS_DIR, exist_ok=True)
 
     for platform in platforms:
         print(f"\n{'#' * 50}")
@@ -240,7 +240,7 @@ if __name__ == "__main__":
         print_review(draft, meta, platform, target_keyword, inputs)
 
         slug = platform.replace(" ", "")
-        filename = f"drafts/{datetime.now().strftime('%Y%m%d_%H%M%S')}_{slug}.txt"
+        filename = os.path.join(DRAFTS_DIR, f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{slug}.txt")
         write_draft_file(filename, topic, platform, target_keyword, draft, inputs)
 
         print(f"\n💾 저장됨: {filename}")

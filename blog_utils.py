@@ -5,6 +5,16 @@ import re
 import shutil
 from datetime import datetime
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
+# 원고·문체 샘플·자동 저장을 둘 폴더. PC 두 대에서 같이 쓰려면 .env에
+#   BLOG_DATA_DIR=C:\Users\이름\OneDrive\blog_data
+# 처럼 클라우드 동기화 폴더를 지정하면 된다. 비워두면 프로그램 폴더를 그대로 씀.
+DATA_DIR = os.path.expanduser(os.getenv("BLOG_DATA_DIR", "").strip().strip('"')) or "."
+DRAFTS_DIR = os.path.join(DATA_DIR, "drafts")
+
 
 def extract_text(message):
     """Claude 응답에서 실제 텍스트만 뽑아낸다.
@@ -85,7 +95,7 @@ def has_keyword(text, keyword):
     return all(word.lower() in flat for word in keyword.split())
 
 
-def _read_past_drafts(platform, drafts_dir="drafts"):
+def _read_past_drafts(platform, drafts_dir=DRAFTS_DIR):
     """drafts/ 폴더에서 같은 플랫폼 초안을 최신순으로 읽어
     (파일명, 제목, 타깃 키워드)를 하나씩 돌려준다.
     다른 플랫폼 글은 다른 블로그라 비교/링크 대상이 아니므로 제외."""
@@ -107,7 +117,7 @@ def _read_past_drafts(platform, drafts_dir="drafts"):
         yield name, title, keyword
 
 
-def load_past_titles(platform, drafts_dir="drafts", limit=30):
+def load_past_titles(platform, drafts_dir=DRAFTS_DIR, limit=30):
     """같은 플랫폼 지난 초안의 [제목]만 최신순·중복 없이 (내부 링크 추천용)."""
     titles = []
     for _, title, _ in _read_past_drafts(platform, drafts_dir):
@@ -118,7 +128,7 @@ def load_past_titles(platform, drafts_dir="drafts", limit=30):
     return titles
 
 
-def find_keyword_overlap(platform, keyword, exclude=(), drafts_dir="drafts"):
+def find_keyword_overlap(platform, keyword, exclude=(), drafts_dir=DRAFTS_DIR):
     """같은 플랫폼에 같은 타깃 키워드로 쓴 지난 글 제목들을 찾는다.
     같은 키워드 글이 여러 개면 내 글끼리 검색 순위를 나눠 먹음(키워드 잠식).
     지난 글의 타깃 키워드가 같거나, 키워드 기록이 없는 옛 초안이면 제목에
@@ -340,7 +350,7 @@ def read_draft_file(path):
     return {**info, "draft": draft.strip(), "inputs": inputs}
 
 
-def list_saved_drafts(drafts_dir="drafts", limit=100):
+def list_saved_drafts(drafts_dir=DRAFTS_DIR, limit=100):
     """저장된 원고 목록 (최신순). 반환: [{"path", "label"}]"""
     if not os.path.isdir(drafts_dir):
         return []
@@ -363,9 +373,9 @@ def list_saved_drafts(drafts_dir="drafts", limit=100):
 # ─────────────────────────────────────────────
 # 내 문체 샘플 / 입력 자동 저장
 # ─────────────────────────────────────────────
-STYLE_SAMPLE_PATH = "my_style.txt"
+STYLE_SAMPLE_PATH = os.path.join(DATA_DIR, "my_style.txt")
 STYLE_SAMPLE_MAX = 3000
-AUTOSAVE_PATH = os.path.join("drafts", "_autosave.json")
+AUTOSAVE_PATH = os.path.join(DRAFTS_DIR, "_autosave.json")
 
 
 def load_style_sample():
