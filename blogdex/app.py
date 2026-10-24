@@ -327,7 +327,8 @@ def titles():
     exclude = [str(x)[:MAX_TITLE] for x in (data.get("exclude") or [])][:15]
     system = prompts.INVEST_ROLE + "\n\n" + prompts.INVEST_PRINCIPLES if c["kind"] == "invest" else prompts.BASE_ROLE
     user = prompts.build_title_prompt(c["kind"], keyword, c["memo"], c["place"], exclude, c["guardrail"])
-    text = llm.ask_text(system, user, max_tokens=1024, effort="low")
+    # 모델이 답하기 전에 생각(thinking)하는 토큰도 max_tokens 에 포함되므로 넉넉히(작으면 생각만 하다 잘림)
+    text = llm.ask_text(system, user, max_tokens=8000, effort="low")
     result = [t for t in (clean_title(l) for l in text.splitlines()) if t]
     if c["kind"] == "invest":  # 권유·보장·단정 표현이 든 제목 후보는 버림(7개를 받아 5개까지 남김)
         result = [t for t in result if not invest_guard.violations("", t)]
@@ -358,7 +359,7 @@ def choose_flow_by_memo(memo: str, news_list, photo_notes, usage: dict) -> tuple
     flow = ""
     try:
         text = llm.ask_text(prompts.FLOW_PICK_SYSTEM, prompts.build_flow_pick_prompt(memo, news_list, photo_notes, last),
-                            max_tokens=50, effort="low", usage=usage)
+                            max_tokens=4000, effort="low", usage=usage)  # 생각 토큰 포함이라 넉넉히
         flow = prompts.parse_flow_pick(text)
     except Exception:
         app.logger.exception("flow pick failed")

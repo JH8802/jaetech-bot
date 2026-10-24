@@ -191,6 +191,7 @@
       <button class="btn" id="btnTitles" style="flex:1">제목 자동 생성</button>
       <button class="btn ghost" id="btnRegen" title="제목 다시 생성 (R)">⟳<kbd>R</kbd></button>
     </div>
+    <p class="hint warnhint hidden" id="titleError" style="margin-top:8px"></p>
     <div id="candidates" class="hidden" style="margin-top:12px"><div id="candList"></div></div>
 
     <div id="kwBox">
@@ -710,6 +711,7 @@ async function makeTitles(regen) {
   if (state.busy) return;
   showError(''); setBusy(true);
   const label = $('btnTitles').textContent; $('btnTitles').textContent = '생성 중...';
+  $('titleError').classList.add('hidden');
   try {
     const data = await postJSON('/api/titles', { ...commonBody(), keyword: $('title').value.trim() || (currentPlace() || {}).name || '', exclude: regen ? state.titles : [] });
     state.titles = data.titles;
@@ -722,7 +724,10 @@ async function makeTitles(regen) {
     });
     $('candidates').classList.remove('hidden');
     if (!$('kw').value.trim() && data.keywords) $('kw').value = data.keywords.join(', ');
-  } catch (e) { showError(e.message); }
+    $('titleError').classList.add('hidden');
+  } catch (e) {  // 오류는 맨 아래(원고 생성 버튼 밑)뿐 아니라 제목 버튼 바로 아래에도 보여 줌
+    showError(e.message); $('titleError').textContent = e.message; $('titleError').classList.remove('hidden');
+  }
   finally { $('btnTitles').textContent = label; setBusy(false); }
 }
 $('btnTitles').onclick = () => makeTitles(false);
