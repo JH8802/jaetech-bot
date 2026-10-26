@@ -62,6 +62,7 @@ METADATA_TAGS = {
     "[메타설명]": "meta_description",
     "[주소]": "slug",
     "[태그]": "tags",
+    "[제목 후보]": "title_candidates",  # 자료로 쓰기 모드 — 여러 줄이면 " / "로 이어 붙임
 }
 
 
@@ -80,7 +81,11 @@ def parse_draft_metadata(draft):
         matched_key = next((k for tag, k in METADATA_TAGS.items() if stripped.startswith(tag)), None)
         if matched_key:
             tag = next(tag for tag, k in METADATA_TAGS.items() if k == matched_key)
-            meta[matched_key] = stripped[len(tag):].strip()
+            value = stripped[len(tag):].strip()
+            if matched_key == "title_candidates" and meta[matched_key]:
+                meta[matched_key] += " / " + value
+            else:
+                meta[matched_key] = value
         else:
             body_lines.append(line)
 
@@ -154,61 +159,197 @@ VISUAL_TAGS = ("[사진 제안]", "[그래프 제안]", "[지도 제안]")
 PLACEHOLDER_RE = re.compile(
     r"^[ \t]*\[(?:내부링크 제안|사진 제안|그래프 제안|지도 제안)\][^\n]*$"
     r"|([.。!?])?[ \t]*\[출처 필요[^\]\n]*\]"
-    r"|\[추가 필요[^\]\n]*\]",
+    r"|\[추가 필요[^\]\n]*\]"
+    r"|\[검수[^\]\n]*\]",
     re.MULTILINE,
 )
-_INLINE_TAG_RE = re.compile(r"\[(?:출처 필요|추가 필요)[^\]\n]*\]")
+_INLINE_TAG_RE = re.compile(r"\[(?:출처 필요|추가 필요|검수)[^\]\n]*\]")
 _LINK_LINE_RE = re.compile(r"^\[링크:\s*(.*?)\s*\|\s*(https?://\S+)\s*\]$")
 _IMAGE_LINE_RE = re.compile(r"^\[이미지:\s*(https?://\S+)\s*\|\s*(.*?)\s*\]$")
+_BULLET_RE = re.compile(r"^[-•·]\s+")
+_NUMBERED_RE = re.compile(r"^\d{1,2}[.)]\s+")
+NOTICE_PREFIXES = VISUAL_TAGS + ("[내부링크 제안]", "[추가 필요", "[검수")
+SUMMARY_TITLE = "한눈에 보기"
+
+
+def parse_body_blocks(body):
+    """본문(태그 포함 일반 텍스트)을 블록 목록으로 해석한다 — HTML/워드프레스 블록 출력 공용.
+
+    본문 표기법:
+      [소제목] 제목                → ("h2", 제목)
+      [요약] … [요약 끝]            → ("summary", [줄...])   한눈에 보기 박스
+      [표] 표 제목(선택)
+      항목 | 값 | 비고 (첫 줄 = 머리글)
+      … [표 끝]                     → ("table", {"caption", "rows"})
+      - 항목 / 1. 항목 (연속된 줄)   → ("ul"|"ol", [항목...])
+      [링크: 제목 | 주소]           → ("link", (제목, 주소))
+      [이미지: 주소 | ALT]          → ("image", (주소, ALT))
+      [사진 제안]·[내부링크 제안]·[추가 필요]·[검수] 줄 → ("notice", 줄)
+      그 외 연속된 줄               → ("p", [줄...])
+    """
+    blocks, para = [], []
+    lines = body.split("\n")
+    i = 0
+
+    def flush():
+        if para:
+            blocks.append(("p", list(para)))
+            para.clear()
+
+    while i < len(lines):
+        s = lines[i].strip()
+        if not s:
+            flush()
+        elif s.startswith("[요약]"):
+            flush()
+            items = []
+            i += 1
+            while i < len(lines) and not lines[i].strip().startswith("[요약 끝]"):
+                if lines[i].strip():
+                    items.append(_BULLET_RE.sub("", lines[i].strip()))
+                i += 1
+            blocks.append(("summary", items))
+        elif s.startswith("[표]"):
+            flush()
+            caption = s[s.index("]") + 1:].strip() if "]" in s else ""
+            rows = []
+            i += 1
+            while i < len(lines) and not lines[i].strip().startswith("[표 끝]"):
+                row = lines[i].strip().strip("|")
+                if row and not re.fullmatch(r"[\s|:\-]+", row):  # 마크다운식 구분선(---|---)은 건너뜀
+                    rows.append([c.strip() for c in row.split("|")])
+                i += 1
+            if rows:
+                width = max(len(r) for r in rows)
+                rows = [r + [""] * (width - len(r)) for r in rows]
+                blocks.append(("table", {"caption": caption, "rows": rows}))
+        elif s.startswith("[소제목]"):
+            flush()
+            blocks.append(("h2", s[len("[소제목]"):].strip()))
+        elif _LINK_LINE_RE.match(s):
+            flush()
+            blocks.append(("link", _LINK_LINE_RE.match(s).groups()))
+        elif _IMAGE_LINE_RE.match(s):
+            flush()
+            blocks.append(("image", _IMAGE_LINE_RE.match(s).groups()))
+        elif s.startswith(NOTICE_PREFIXES):
+            flush()
+            blocks.append(("notice", s))
+        elif _BULLET_RE.match(s) or _NUMBERED_RE.match(s):
+            flush()
+            kind = "ul" if _BULLET_RE.match(s) else "ol"
+            pattern = _BULLET_RE if kind == "ul" else _NUMBERED_RE
+            items = []
+            while i < len(lines) and pattern.match(lines[i].strip()):
+                items.append(pattern.sub("", lines[i].strip()))
+                i += 1
+            blocks.append((kind, items))
+            continue
+        else:
+            para.append(s)
+        i += 1
+    flush()
+    return blocks
+
+
+def _inline(text):
+    """문단 안 글자: HTML 이스케이프 + 아직 안 채운 [출처 필요]/[추가 필요]/[검수] 형광펜."""
+    return _INLINE_TAG_RE.sub(lambda m: f"<mark>{m.group(0)}</mark>", html.escape(text))
+
+
+def _table_html(data):
+    head, *rest = data["rows"]
+    thead = "<thead><tr>" + "".join(f"<th>{_inline(c)}</th>" for c in head) + "</tr></thead>"
+    tbody = "<tbody>" + "".join(
+        "<tr>" + "".join(f"<td>{_inline(c)}</td>" for c in row) + "</tr>" for row in rest
+    ) + "</tbody>"
+    return f"<table>{thead}{tbody}</table>"
 
 
 def body_to_html(body):
-    """본문(태그 포함 일반 텍스트)을 티스토리 HTML 모드 / 워드프레스 코드
-    편집기에 바로 붙여넣을 HTML로 바꾼다.
-    - [소제목] → <h2> (구글이 읽는 제목 구조가 확실하게 들어감)
-    - 문단 → <p>
-    - [링크: 제목 | 주소] → 관련 글 링크, [이미지: 주소 | ALT] → 이미지
-    - 아직 안 채운 [사진/그래프/지도 제안], [내부링크 제안], [추가 필요] → 노란 안내 문단
-    - 문장 안의 아직 안 채운 [출처 필요]/[추가 필요] → 노란 형광펜 표시
-    """
-    blocks = []
-    paragraph = []
-
-    def flush():
-        if paragraph:
-            blocks.append("<p>" + "<br>\n".join(paragraph) + "</p>")
-            paragraph.clear()
-
-    def mark_inline(text):
-        return _INLINE_TAG_RE.sub(lambda m: f'<mark>{m.group(0)}</mark>', text)
-
-    for line in body.split("\n"):
-        stripped = line.strip()
-        link = _LINK_LINE_RE.match(stripped)
-        image = _IMAGE_LINE_RE.match(stripped)
-        if not stripped:
-            flush()
-        elif stripped.startswith("[소제목]"):
-            flush()
-            blocks.append(f"<h2>{html.escape(stripped[len('[소제목]'):].strip())}</h2>")
-        elif link:
-            flush()
-            title, url = link.groups()
-            blocks.append(f'<p>👉 함께 보면 좋은 글: <a href="{html.escape(url)}">{html.escape(title)}</a></p>')
-        elif image:
-            flush()
-            url, alt = image.groups()
-            blocks.append(f'<p><img src="{html.escape(url)}" alt="{html.escape(alt)}"></p>')
-        elif stripped.startswith(VISUAL_TAGS) or stripped.startswith(("[내부링크 제안]", "[추가 필요")):
-            flush()
-            blocks.append(
-                '<p style="background:#fff3cd;padding:8px;">'
-                f"📌 {html.escape(stripped)}</p>"
+    """티스토리 HTML 모드에 붙여넣을 일반 HTML.
+    소제목 → <h2>, 요약 박스·표·목록 포함. 아직 안 채운 항목은 노란 표시로 남김."""
+    out = []
+    for kind, data in parse_body_blocks(body):
+        if kind == "p":
+            out.append("<p>" + "<br>\n".join(_inline(x) for x in data) + "</p>")
+        elif kind == "h2":
+            out.append(f"<h2>{html.escape(data)}</h2>")
+        elif kind in ("ul", "ol"):
+            out.append(f"<{kind}>" + "".join(f"<li>{_inline(x)}</li>" for x in data) + f"</{kind}>")
+        elif kind == "table":
+            cap = f"<p><strong>{html.escape(data['caption'])}</strong></p>\n" if data["caption"] else ""
+            out.append(cap + _table_html(data))
+        elif kind == "summary":
+            out.append(
+                '<div style="background:#f3f6fa;padding:16px 20px;border-radius:8px;">'
+                f"<p><strong>{SUMMARY_TITLE}</strong></p><ul>"
+                + "".join(f"<li>{_inline(x)}</li>" for x in data) + "</ul></div>"
             )
-        else:
-            paragraph.append(mark_inline(html.escape(stripped)))
-    flush()
-    return "\n\n".join(blocks)
+        elif kind == "link":
+            title, url = data
+            out.append(f'<p>👉 함께 보면 좋은 글: <a href="{html.escape(url)}">{html.escape(title)}</a></p>')
+        elif kind == "image":
+            url, alt = data
+            out.append(f'<p><img src="{html.escape(url)}" alt="{html.escape(alt)}"></p>')
+        elif kind == "notice":
+            out.append(f'<p style="background:#fff3cd;padding:8px;">📌 {html.escape(data)}</p>')
+    return "\n\n".join(out)
+
+
+def _wp(name, inner, attrs=""):
+    attrs = f" {attrs}" if attrs else ""
+    return f"<!-- wp:{name}{attrs} -->\n{inner}\n<!-- /wp:{name} -->"
+
+
+def _wp_list(kind, items):
+    tag = "ul" if kind == "ul" else "ol"
+    attrs = "" if kind == "ul" else '{"ordered":true}'
+    lis = "\n\n".join(_wp("list-item", f"<li>{_inline(x)}</li>") for x in items)
+    return _wp("list", f'<{tag} class="wp-block-list">{lis}</{tag}>', attrs)
+
+
+def body_to_gutenberg(body):
+    """워드프레스 블록 에디터(구텐베르크)의 '코드 편집기'에 붙여넣을 블록 HTML.
+    소제목·문단·목록·표·요약 박스가 각각 블록으로 바로 만들어진다.
+    (워드프레스 공식 블록 라이브러리로 '정상 블록'으로 인식되는 형식인지 검증한 형식)"""
+    out = []
+    for kind, data in parse_body_blocks(body):
+        if kind == "p":
+            out.append(_wp("paragraph", "<p>" + "<br>".join(_inline(x) for x in data) + "</p>"))
+        elif kind == "h2":
+            out.append(_wp("heading", f'<h2 class="wp-block-heading">{html.escape(data)}</h2>'))
+        elif kind in ("ul", "ol"):
+            out.append(_wp_list(kind, data))
+        elif kind == "table":
+            if data["caption"]:
+                out.append(_wp("paragraph", f"<p><strong>{html.escape(data['caption'])}</strong></p>"))
+            out.append(_wp("table", f'<figure class="wp-block-table">{_table_html(data)}</figure>',
+                           '{"hasFixedLayout":false}'))
+        elif kind == "summary":
+            inner = (_wp("paragraph", f"<p><strong>{SUMMARY_TITLE}</strong></p>") + "\n\n"
+                     + _wp_list("ul", data))
+            out.append(_wp(
+                "group",
+                '<div class="wp-block-group has-background" style="background-color:#f3f6fa;'
+                'padding-top:20px;padding-right:20px;padding-bottom:20px;padding-left:20px">'
+                f"{inner}</div>",
+                '{"style":{"color":{"background":"#f3f6fa"},"spacing":{"padding":{"top":"20px",'
+                '"bottom":"20px","left":"20px","right":"20px"}}},"layout":{"type":"constrained"}}',
+            ))
+        elif kind == "link":
+            title, url = data
+            out.append(_wp("paragraph",
+                           f'<p>👉 함께 보면 좋은 글: <a href="{html.escape(url)}">{html.escape(title)}</a></p>'))
+        elif kind == "image":
+            url, alt = data
+            out.append(_wp("image",
+                           f'<figure class="wp-block-image"><img src="{html.escape(url)}" alt="{html.escape(alt)}"/></figure>'))
+        elif kind == "notice":
+            out.append(_wp("paragraph",
+                           f'<p class="has-background" style="background-color:#fff3cd">📌 {html.escape(data)}</p>',
+                           '{"style":{"color":{"background":"#fff3cd"}}}'))
+    return "\n\n".join(out)
 
 
 # ─────────────────────────────────────────────
@@ -235,6 +376,10 @@ def find_placeholders(body):
             alt_m = re.search(r'ALT:\s*"([^"]*)"', raw)
             items.append({"kind": "visual", "label": f"🖼️ {tag[1:-1]}", "hint": raw[len(tag):].strip(),
                           "context": "", "alt": alt_m.group(1) if alt_m else ""})
+        elif raw.startswith("[검수"):
+            hint = re.search(r"\[검수\s*[:：]?\s*([^\]]*)\]", raw)
+            items.append({"kind": "review", "label": "🔎 검수 표시", "hint": hint.group(1).strip() if hint else "",
+                          "context": context, "alt": ""})
         elif "[출처 필요" in raw:
             hint = re.search(r"\[출처 필요\s*[:：]?\s*([^\]]*)\]", raw)
             items.append({"kind": "source", "label": "📚 출처 필요", "hint": hint.group(1).strip() if hint else "",
@@ -277,7 +422,7 @@ def apply_placeholders(body, fills):
             if text.startswith("("):
                 return f" {text}{punct}" if punct else f" {text}"
             return f"{punct} {text}" if punct else f" {text}"
-        if item["kind"] == "add":
+        if item["kind"] in ("add", "review"):
             return text
         if item["kind"] == "link":
             if not re.match(r"https?://", text):
@@ -299,6 +444,7 @@ def compose_draft(meta):
     """parse_draft_metadata() 형태의 dict를 다시 원고 텍스트로 합친다 (화면에서 고친 내용 저장용)."""
     return "\n".join([
         f"[제목] {meta.get('title', '')}",
+        *[f"[제목 후보] {t.strip()}" for t in meta.get("title_candidates", "").split(" / ") if t.strip()],
         f"[카테고리] {meta.get('category', '')}",
         f"[메타설명] {meta.get('meta_description', '')}",
         f"[주소] {meta.get('slug', '')}",
