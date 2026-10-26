@@ -108,6 +108,9 @@ def scan_structure(draft):
     issues = []
 
     paragraphs = [p for p in draft.split("\n\n") if p.strip() and not p.strip().startswith("[")]
+    # 표(| 구분)·목록(- / 1.) 묶음은 문단이 아니므로 길이 점검에서 뺌
+    paragraphs = [p for p in paragraphs
+                  if not all("|" in l or re.match(r"^\s*(?:[-•·]|\d{1,2}[.)])\s", l) for l in p.strip().split("\n"))]
     long_paragraphs = [p for p in paragraphs if len(p) > 400]
     if long_paragraphs:
         issues.append(f"긴 문단 {len(long_paragraphs)}개 (400자 초과 — 나누면 가독성 좋아짐)")
@@ -187,6 +190,11 @@ def scan_seo(meta, platform, target_keyword=""):
     if platform == "워드프레스" and not meta.get("slug"):
         issues.append("글 주소(슬러그)가 없음")
 
+    reviews = body.count("[검수")
+    if reviews:
+        issues.append(f"[검수] {reviews}곳 — AI가 판단이 필요하다고 표시한 부분 (인정 범위 밖 표현·자료 충돌 등). "
+                      "확인하고 '남은 항목 채우기'에서 처리해야 함")
+
     pending = body.count("[추가 필요")
     if pending:
         issues.append(f"[추가 필요] {pending}곳 — AI가 재료가 없어 못 채운 부분. 발행 전에 직접 채우거나 "
@@ -224,6 +232,9 @@ def collect_issues(review):
     issues += [f"[검색 최적화] {i}" for i in review.get("seo", [])]
     issues += [f"[표시광고 표현 확인] {i}" for i in review.get("claims", [])]
     issues += [f"[AI 말투] {i}" for i in review.get("ai_patterns", [])]
+    for row in review.get("copied", []):
+        issues.append(f"[원문과 거의 같은 문장] '{row['sentence']}' ({row['source']}) — 자료 문장을 거의 그대로 "
+                      "옮김. 같은 뜻을 블로그 문체로 완전히 새로 써야 함 (저작권)")
     for row in review.get("facts", []):
         if not row["found_in"]:
             issues.append(f"[근거 없는 숫자] '{row['number']}' ({row['context']}) — 입력한 메모·출처에 없는 숫자. "

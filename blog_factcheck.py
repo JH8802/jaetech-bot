@@ -69,3 +69,36 @@ def build_references(inputs):
 
 def unverified(rows):
     return [r for r in rows if not r["found_in"]]
+
+
+# ─────────────────────────────────────────────
+# 원문 문장 복사 검사 (자료로 쓰기 모드) — 저작권·복붙 방지
+# ─────────────────────────────────────────────
+COPY_NGRAM = 6  # 어절(띄어쓰기 단위) 6개가 연속으로 원문과 같으면 '거의 그대로 옮김'으로 봄
+
+
+def _words(text):
+    return re.findall(r"[0-9A-Za-z가-힣]+", text or "")
+
+
+def find_copied_sentences(body, raw_texts, n=COPY_NGRAM):
+    """본문 문장 중 자료 원문(웹페이지 글)과 어절 n개 이상 연속으로 같은 문장을 찾는다.
+    raw_texts: {자료 이름: 원문 글자}. 반환: [{"sentence", "source"}]"""
+    shingles = {}
+    for name, text in (raw_texts or {}).items():
+        words = _words(text)
+        for i in range(len(words) - n + 1):
+            shingles.setdefault(" ".join(words[i:i + n]), name)
+    if not shingles:
+        return []
+
+    found = []
+    clean = _TAG_RE.sub(" ", body)
+    for sentence in re.split(r"(?<=[.!?])\s+|\n+", clean):
+        words = _words(sentence)
+        for i in range(len(words) - n + 1):
+            source = shingles.get(" ".join(words[i:i + n]))
+            if source:
+                found.append({"sentence": sentence.strip()[:120], "source": source})
+                break
+    return found
