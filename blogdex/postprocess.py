@@ -133,7 +133,7 @@ def insert_map_line(text: str, place_name: str) -> str:
     elif heads:  # 소제목이 하나뿐이면 본문 끝(관련 글 자리·참고 기사·해시태그보다 앞)
         end = find_hashtag_index(paras)
         end = end if end is not None else len(paras)
-        tail = next((i for i in range(end) if RELATED_MARK in strip_tags(paras[i]) or strip_tags(paras[i]).startswith(SOURCE_HEAD)), end)
+        tail = next((i for i in range(heads[-1] + 1, end) if RELATED_MARK in strip_tags(paras[i]) or strip_tags(paras[i]).startswith(SOURCE_HEAD)), end)
         paras.insert(tail, line)
     else:
         return text
@@ -304,11 +304,19 @@ def one_sentence_per_line(paras: list[str]) -> list[str]:
 
 
 def _put_related_line(paras: list[str], series: dict | None) -> list[str]:
-    """시리즈 글이면 해시태그 바로 앞에 '관련 글 링크 삽입' 자리 줄을 둡니다(이미 있던 줄은 지우고 다시)."""
+    """시리즈 글이면 해시태그 바로 앞에 '관련 글 링크 삽입' 자리 줄을 둡니다(이미 있던 줄은 지우고 다시).
+    series['prev_link'] 이고 2편 이상이면 인트로 바로 뒤에도 '이전 편' 자리를 둡니다."""
     paras = [p for p in paras if RELATED_MARK not in strip_tags(p)]
-    if series and series.get("name"):
-        idx = find_hashtag_index(paras)
-        paras.insert(idx if idx is not None else len(paras), f"({RELATED_MARK}: 〈{series['name']}〉 다른 편)")
+    if not (series and series.get("name")):
+        return paras
+    idx = find_hashtag_index(paras)
+    paras.insert(idx if idx is not None else len(paras), f"({RELATED_MARK}: 〈{series['name']}〉 다른 편)")
+    if series.get("prev_link") and int(series.get("part") or 0) != 1:  # 1편에는 이전 편이 없음
+        def intro_end(p):
+            plain = strip_tags(p)
+            return bool(HEADING_RE.match(plain) or plain.startswith((SUMMARY_HEAD, INFO_BOX_HEAD)) or PHOTO_RE.fullmatch(plain.strip()))
+        cut = next((i for i, p in enumerate(paras) if i > 0 and intro_end(p)), min(1, len(paras)))
+        paras.insert(cut, f"({RELATED_MARK}: 〈{series['name']}〉 이전 편)")
     return paras
 
 
