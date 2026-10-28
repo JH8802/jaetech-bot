@@ -11,7 +11,7 @@
 """
 import re
 
-from postprocess import HEADING_RE, MAP_LINE_MARK, SOURCE_HEAD, find_hashtag_index, split_paragraphs, strip_tags
+from postprocess import HEADING_RE, MAP_LINE_MARK, RELATED_MARK, SOURCE_HEAD, find_hashtag_index, split_paragraphs, strip_tags
 
 # (수준, 분류, [정규식...])
 RULES = [
@@ -65,7 +65,7 @@ def _units(title: str, body: str):
     paras = split_paragraphs(strip_tags(body))
     tag_i = find_hashtag_index(paras)
     for i, par in enumerate(paras):
-        if re.fullmatch(r"<\s*사진\s*\d+\s*>", par) or MAP_LINE_MARK in par or par.startswith(SOURCE_HEAD):  # 참고 기사 목록(기사 제목)은 내 표현이 아님
+        if re.fullmatch(r"<\s*사진\s*\d+\s*>", par) or MAP_LINE_MARK in par or RELATED_MARK in par or par.startswith(SOURCE_HEAD):  # 참고 기사 목록(기사 제목)은 내 표현이 아님
             continue
         if i == tag_i:
             for t in re.findall(r"#[^\s#]+", par):

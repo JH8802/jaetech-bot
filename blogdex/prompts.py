@@ -269,6 +269,19 @@ def build_register_fix_prompt(body: str, register: str, wrong: list[str]) -> str
     ])
 
 
+# 맛집글·호텔·여행 후기·정보글 공통: 첫 화면 정보 박스, 실용 정보 라벨 줄, 순서·동선 표기
+INFO_LAYOUT_RULES = """[정보 정리 형식 - 첫 화면에서 답을 주고, 경험은 본문에서]
+1) 한눈에 보기 박스: 인트로 바로 뒤(정보글은 '📌 이 글 핵심 3줄' 바로 뒤), 첫 소제목 앞에 한 문단으로 둡니다. 첫 줄은 '📋 한눈에 보기' 그대로, 그 아래 줄마다 '라벨: 값' 한 줄씩 3~6줄입니다.
+   - 맛집글: 위치 / 영업시간 / 휴무 / 가격대(대표 메뉴 가격) / 주차 / 예약·대기 중 재료가 있는 것
+   - 호텔·여행 후기: 위치 / 체크인·체크아웃(숙소) 또는 운영 시간(여행지) / 요금 / 주차·교통 / 예약 중 재료가 있는 것
+   - 정보글: 주제의 핵심 사실(예: 대상, 기간, 금액, 방법, 확인할 곳) 중 재료가 있는 것
+   - 값은 메모·업체 정보·사진·참고 자료에 있는 것만 씁니다. 맛집·숙소·여행지의 위치와 영업(운영) 시간은 재료가 없으면 '[확인 필요: 항목]'으로 남기고, 그 밖에 재료가 없는 항목은 줄을 만들지 않습니다.
+   - 박스에 쓴 값은 본문에서 같은 문장으로 다시 나열하지 않습니다. 본문에서는 그 정보에 얽힌 경험이나 팁만 씁니다.
+2) 실용 정보 라벨 줄: 휴무, 우천 시, 주차, 대기, 예약, 준비물 같은 실용 정보가 메모에 있으면 해당 섹션 안에 '라벨: 값' 줄로 정리합니다(한 문단에 2~5줄, 줄마다 하나). 라벨은 2~6자 명사로 쓰고 강조 태그를 붙이지 않습니다.
+3) 순서와 동선: 예약·신청·이용 순서처럼 단계가 있으면 '① ', '② ', '③ ' 으로 시작하는 줄로 씁니다(한 문단, 줄마다 한 단계). '1. ' 형식은 소제목과 헷갈리니 단계에 쓰지 않습니다. 여러 장소를 도는 코스·동선은 'A ➡ B ➡ C' 한 줄로 씁니다. 메모에 순서나 장소가 있을 때만 씁니다.
+- 이 줄들은 마크다운 기호(-, *, #)로 시작하지 않습니다. 박스와 라벨 줄은 정보를 빠르게 찾게 하는 장치일 뿐이니, 글의 중심은 여전히 작성자의 경험과 판단입니다."""
+
+
 def _build_invest_system(style_sample: str, has_news: bool = False, photo_count: int = 0, register: str = "") -> str:
     """투자 생각 글: 검색 최적화 없이 일기·에세이로. 가드레일(투자 글 쓰기 원칙)은 끌 수 없고 맨 앞과 맨 끝에 둡니다."""
     tag_rules = (TAG_RULES
@@ -311,6 +324,7 @@ def build_system(kind: str, guardrail: bool, evidence_mode: str, photo_count: in
     parts.append(EVIDENCE_STRICT if evidence_mode == "strict" else EVIDENCE_TEMPLATE)
     parts.append(NO_META)
     parts.append(PHOTO_RULES if photo_count else NO_PHOTO)
+    parts.append(INFO_LAYOUT_RULES)
     if has_news:
         parts.append(NEWS_RULES)
     if guardrail:
@@ -358,6 +372,7 @@ RATING_RULES = """[한 줄 평과 별점 - 맛집글·호텔·여행 후기 공�
 - 글의 마지막 본문 문단(해시태그 바로 앞)은 '한 줄 평: ' 으로 시작하는 한 문장(25~45자)입니다. 글 전체의 결론을 말투 컨셉대로 요약하고, 긍정적이되 억지 칭찬은 하지 않습니다.
 - 별점 줄('★ 별점 한눈에 보기' 문단)은 시스템이 한 줄 평 앞에 넣으니 쓰지 않습니다.
 - 메모에 방송 출연·촬영지·수상·인증·화제가 된 이력이 있으면 인트로 2~3번째 문단 안에 한 번 자연스럽게 언급합니다(첫 문단은 장면으로 시작). 메모에 적힌 표현 그대로만 쓰고, 방송명·시기·순위를 덧붙이거나 과장하지 않습니다. 메모에 없으면 지어내지 않습니다.
+- '작성자 별점'이 주어지면 '한 줄 평' 문단 바로 앞에 '[별점 이유]' 문단을 씁니다. 첫 줄은 '[별점 이유]' 그대로, 그 아래 줄마다 '항목 이름: 이유'(15~30자, 명사형이나 짧은 구절) 한 줄씩입니다. 항목 이름은 작성자 별점의 이름 그대로 쓰고, 메모·사진에 근거가 있는 항목만 씁니다(근거가 없으면 그 항목 줄은 만들지 않습니다). 이 문단은 시스템이 별점 줄 옆으로 옮기니 본문 문장처럼 쓰지 않습니다.
 - '작성자 별점'이 주어지면 그것은 작성자가 실제로 준 점수(1~5점)입니다. 글과 한 줄 평이 별점과 어긋나지 않게 쓰고(예: 가격 2점인데 '가성비 최고'라고 쓰지 않기), 2점 이하 항목은 아쉬운 점으로, 4점 이상 항목은 좋았던 점으로 다룹니다. 메모에 이유가 없으면 이유를 지어내지 않고 점수에 맞는 정도로만 언급합니다. 별점 숫자를 본문에 반복해서 쓰지는 않습니다."""
 
 PHOTO_CATEGORIES = {
@@ -487,7 +502,7 @@ def flow_block(flow: str) -> str:
 
 def build_article_prompt(kind: str, title: str, keywords: list[str], memo: str, place: dict | None,
                          photo_notes: list[dict] | None = None, ratings: list[dict] | None = None, news: list[dict] | None = None,
-                         flow: str = "") -> str:
+                         flow: str = "", series: dict | None = None) -> str:
     parts = [f"[글 제목]\n{title}"]
     if keywords:
         parts.append("[핵심 키워드]\n" + ", ".join(keywords))
@@ -505,6 +520,10 @@ def build_article_prompt(kind: str, title: str, keywords: list[str], memo: str, 
         parts.append(news_block(news))
     if kind == "invest" and flow in INVEST_FLOWS:
         parts.append(flow_block(flow))
+    if series and series.get("name"):
+        part = f" {series['part']}편" if series.get("part") else ""
+        parts.append(f"[시리즈]\n이 글은 '{series['name']}' 시리즈{part}입니다. 인트로에서 시리즈의 몇 번째 글인지 한 번 자연스럽게 밝힙니다. "
+                     "다른 편의 내용은 지어내지 않고, 다른 편 링크 자리는 시스템이 글 끝에 넣으니 쓰지 않습니다.")
     first_line = (
         "위 재료로 원고를 쓰세요. 첫 줄부터 바로 본문을 시작하고 제목 줄은 쓰지 않습니다."
         if kind == "info"
@@ -570,7 +589,7 @@ def build_rewrite_prompt(kind: str, body: str, issues: list[str], keywords: list
         news_block(news),
         "[기존 원고]\n" + body,
         "'📰 참고한 기사' 문단은 시스템이 다시 넣으니 빼도 됩니다." if news else "",
-        "'★ 별점 한눈에 보기' 문단은 시스템이 다시 넣으니 그대로 두거나 빼도 됩니다. '한 줄 평:'(또는 '한 줄 정리:') 문단은 해시태그 바로 앞의 마지막 본문 문단으로 유지합니다.",
+        "'★ 별점 한눈에 보기' 문단은 항목 옆 이유까지 그대로 둡니다. '📋 한눈에 보기' 박스와 '라벨: 값' 줄, ①② 단계 줄도 형식을 유지합니다. '한 줄 평:'(또는 '한 줄 정리:') 문단은 해시태그 바로 앞의 마지막 본문 문단으로 유지합니다.",
         "출력 형식 규칙은 그대로이며, 설명 없이 원고 본문만 출력합니다.",
     ]).strip()
 
@@ -609,6 +628,6 @@ def build_expand_prompt(kind: str, body: str, chars: int, target_min: int, memo:
     if ratings:
         parts.append(rating_block(ratings))
     parts.append("[기존 원고]\n" + body)
-    parts.append("'★ 별점 한눈에 보기' 문단은 시스템이 다시 넣으니 그대로 두거나 빼도 됩니다. '한 줄 평:'(또는 '한 줄 정리:') 문단은 해시태그 바로 앞의 마지막 본문 문단으로 유지합니다.")
+    parts.append("'★ 별점 한눈에 보기' 문단은 항목 옆 이유까지 그대로 둡니다. '📋 한눈에 보기' 박스와 '라벨: 값' 줄, ①② 단계 줄도 형식을 유지합니다. '한 줄 평:'(또는 '한 줄 정리:') 문단은 해시태그 바로 앞의 마지막 본문 문단으로 유지합니다.")
     parts.append("설명 없이 보강한 원고 본문만 출력합니다.")
     return "\n\n".join(parts)
