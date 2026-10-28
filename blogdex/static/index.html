@@ -200,6 +200,7 @@
         <input type="text" id="seriesName" maxlength="40" placeholder="시리즈 이름 (예: 서울시티투어버스)" autocomplete="off" style="flex:1">
         <input type="number" id="seriesPart" min="1" max="99" placeholder="몇 편" style="max-width:110px">
       </div>
+      <label style="font-size:13px;display:block;margin-top:6px"><input type="checkbox" id="seriesPrev"> 인트로 바로 뒤에 <b>이전 편 링크 자리</b>도 넣기 <small style="color:var(--sub)">(2편부터)</small></label>
       <p class="hint" style="margin-top:4px">쓰면 제목 끝에 (N편)이 붙고, 해시태그에 시리즈 이름이 들어가며, 글 끝에 '관련 글 링크 삽입' 자리가 생겨요.</p>
     </div>
     <div id="kwBox">
@@ -836,7 +837,7 @@ $('btnWrite').onclick = () => {
   if (photos.length > photoLimit()) { showError(`이 글 종류는 사진을 최대 ${photoLimit()}장까지 올릴 수 있어요. ${photos.length - photoLimit()}장을 빼거나 글 종류를 바꿔 주세요.`); return; }
   state.resultPhotos = [...photos];
   runStream('/api/articles/stream', { ...commonBody(), title: $('title').value.trim(), keywords: invest ? [] : keywordList(), invest_flow: invest ? $('investFlow').value : undefined,
-    series: invest ? null : { name: $('seriesName').value.trim(), part: +$('seriesPart').value || 0 }, news: NEWS_KINDS.includes(state.kind) ? state.news : [], photos: photos.map((p) => p.url), photo_names: photos.map((p) => p.name || '') });
+    series: invest ? null : { name: $('seriesName').value.trim(), part: +$('seriesPart').value || 0, prev_link: $('seriesPrev').checked }, news: NEWS_KINDS.includes(state.kind) ? state.news : [], photos: photos.map((p) => p.url), photo_names: photos.map((p) => p.name || '') });
 };
 $('btnRewrite').onclick = () => { if (!state.busy && state.article) runStream(`/api/articles/${state.article.id}/rewrite`, { kind: state.article.kind }); };
 
@@ -861,7 +862,7 @@ async function copyArticle() {
 $('btnCopy').onclick = copyArticle;
 function newArticle() {
   state.article = null; $('title').value = ''; $('memo').value = ''; $('kw').value = ''; state.news = []; renderNews();
-  $('seriesName').value = ''; $('seriesPart').value = ''; $('candidates').classList.add('hidden');
+  $('seriesName').value = ''; $('seriesPart').value = ''; $('seriesPrev').checked = false; $('candidates').classList.add('hidden');
   $('placeQuery').value = ''; $('mCategory').value = ''; $('mAddress').value = ''; updateHints(); Object.values(ratingRows).forEach((rows) => rows.forEach((r) => { r.score = ''; })); renderRatings(); state.photos = []; state.resultPhotos = []; renderPhotos(); $('photoNotes').innerHTML = ''; $('todoPanel').innerHTML = ''; state.adTerms = [];
   $('resultBox').innerHTML = '<div class="empty">원고 제목을 입력하세요.<br>원고를 생성하면 결과가 여기에 표시됩니다.</div>';
   $('actions').classList.add('hidden'); $('quality').innerHTML = ''; $('notes').textContent = ''; $('btnWrite').disabled = true; showError('');
@@ -953,7 +954,7 @@ function collectDraft() {
     ratings: PLACE_KINDS.includes(state.kind) ? ratingRows[state.kind].map((r) => ({ label: r.label, score: r.score })) : [],
     news: state.news, photos: state.photos.map((p) => ({ url: p.url, name: p.name })),
     investFlow: $('investFlow').value, guardrail: $('guardrail').checked, evidence: $('evidence').value,
-    series: { name: $('seriesName').value, part: $('seriesPart').value },
+    series: { name: $('seriesName').value, part: $('seriesPart').value, prev: $('seriesPrev').checked },
   };
 }
 const draftEmpty = (d) => !d.title.trim() && !d.memo.trim() && !d.news.length && !d.photos.length && !d.place.q.trim();
@@ -980,7 +981,7 @@ function restoreDraft(d) {
   state.news = d.news || []; renderNews();
   state.photos = d.photos || []; renderPhotos();
   $('investFlow').value = d.investFlow || 'auto';
-  $('seriesName').value = (d.series || {}).name || ''; $('seriesPart').value = (d.series || {}).part || '';
+  $('seriesName').value = (d.series || {}).name || ''; $('seriesPart').value = (d.series || {}).part || ''; $('seriesPrev').checked = !!(d.series || {}).prev;
   if (!$('guardrail').disabled) $('guardrail').checked = !!d.guardrail;
   if (d.evidence) $('evidence').value = d.evidence;
   $('btnWrite').disabled = !$('title').value.trim();

@@ -137,7 +137,7 @@ def read_series(data: dict, kind: str) -> dict | None:
         part = int(raw.get("part") or 0)
     except (TypeError, ValueError):
         part = 0
-    return {"name": name, "part": part if 1 <= part <= 99 else 0}
+    return {"name": name, "part": part if 1 <= part <= 99 else 0, "prev_link": bool(raw.get("prev_link"))}
 
 
 def series_title(title: str, series: dict | None) -> str:

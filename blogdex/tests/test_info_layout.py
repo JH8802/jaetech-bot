@@ -50,6 +50,20 @@ class InfoLayoutTest(unittest.TestCase):
         self.assertEqual(pp.finalize("hotel", body, {"name": "타이거버스"}, ["타이거버스"], series=s)["body"].count("관련 글 링크 삽입"), 1)
         self.assertNotIn("관련 글 링크 삽입", pp.finalize("hotel", body, {"name": "타이거버스"}, ["타이거버스"])["body"])
 
+    def test_prev_link_after_intro_from_part_two(self):
+        s2 = {"name": "서울시티투어버스", "part": 2, "prev_link": True}
+        paras = pp.split_paragraphs(pp.finalize("hotel", RAW, {"name": "타이거버스"}, ["타이거버스"], series=s2)["body"])
+        i = paras.index("(관련 글 링크 삽입: 〈서울시티투어버스〉 이전 편)")
+        self.assertTrue(paras[i - 1].startswith("시청역 근처 놉스에 다녀왔어요."))  # 인트로 바로 뒤
+        self.assertTrue(paras[i + 1].startswith("📋 한눈에 보기"))
+        self.assertEqual(paras[-2], "(관련 글 링크 삽입: 〈서울시티투어버스〉 다른 편)")
+        again = pp.finalize("hotel", "\n\n".join(paras), {"name": "타이거버스"}, ["타이거버스"], series=s2)["body"]
+        self.assertEqual(again.count("이전 편)"), 1)
+        s1 = dict(s2, part=1)  # 1편에는 이전 편 자리가 없음
+        self.assertNotIn("이전 편", pp.finalize("hotel", RAW, {"name": "타이거버스"}, ["타이거버스"], series=s1)["body"])
+        off = dict(s2, prev_link=False)
+        self.assertNotIn("이전 편", pp.finalize("hotel", RAW, {"name": "타이거버스"}, ["타이거버스"], series=off)["body"])
+
     def test_eval_skips_box_and_counts_label_lines_separately(self):
         body = pp.finalize("food", RAW, {"name": "놉스 시청점"}, ["놉스"], ratings=RATINGS)["body"]
         self.assertTrue(eval_style.evaluate("food", body, ["놉스"])["checks"])
@@ -82,7 +96,7 @@ class SeriesApiTest(unittest.TestCase):
         self.assertEqual(done["title"], "타이거버스 총정리 (1편)")
         self.assertIn("관련 글 링크 삽입", done["body"])
         art = self.c.get(f"/api/articles/{done['article_id']}").get_json()["article"]
-        self.assertEqual(art["options"]["series"], {"name": "서울시티투어버스", "part": 1})
+        self.assertEqual(art["options"]["series"], {"name": "서울시티투어버스", "part": 1, "prev_link": False})
 
 
 if __name__ == "__main__":
