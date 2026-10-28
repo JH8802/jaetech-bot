@@ -125,6 +125,28 @@ def read_common(data: dict) -> dict:
     }
 
 
+def read_series(data: dict, kind: str) -> dict | None:
+    """시리즈 글 정보 {name, part}. 투자 생각 글에는 쓰지 않습니다. 이름이 없으면 None."""
+    raw = data.get("series") if kind != "invest" else None
+    if not isinstance(raw, dict):
+        return None
+    name = re.sub(r"\s+", " ", str(raw.get("name", ""))).strip()[:40]
+    if not name:
+        return None
+    try:
+        part = int(raw.get("part") or 0)
+    except (TypeError, ValueError):
+        part = 0
+    return {"name": name, "part": part if 1 <= part <= 99 else 0}
+
+
+def series_title(title: str, series: dict | None) -> str:
+    """시리즈 편 번호가 있으면 제목 끝에 '(N편)'을 붙입니다(이미 있으면 그대로)."""
+    if series and series.get("part") and not re.search(r"\(\s*\d+\s*편\s*\)\s*$", title):
+        return f"{title} ({series['part']}편)"
+    return title
+
+
 def read_ratings(data: dict, kind: str) -> list[dict]:
     """항목별 별점 [{label, score(1~5)}]. 맛집글·호텔·여행 후기만 쓰고, 점수가 없는 항목은 뺍니다."""
     if kind not in prompts.PLACE_KINDS:
@@ -380,7 +402,7 @@ def _enforce_register(fin, system, usage, kind, place, keywords, title, ratings,
             r_usage = {}
             raw = llm.ask_text(system, prompts.build_register_fix_prompt(fin["body"], register, wrong), max_tokens=12000,
                                effort="low", usage=r_usage)
-            fixed = postprocess.finalize(kind, raw, place, keywords, title, 0, ratings, news_list)
+            fixed = postprocess.finalize(kind, raw, place, keywords, title, 0, ratings, news_list)  # 투자 생각 전용(시리즈 없음)
             usage = llm.merge_usage(usage, r_usage)
             new_share, _ = reg.match_ratio(fixed["body"], register)
             if fixed["chars"] >= fin["chars"] * 0.8 and new_share > share:  # 엉뚱한 응답은 받지 않음
@@ -400,7 +422,7 @@ def _enforce_invest_guard(fin, system, usage, kind, place, keywords, title, rati
         try:
             g_usage = {}
             raw = llm.ask_text(system, prompts.build_guard_fix_prompt(fin["body"], hits), max_tokens=9000, effort=llm.EFFORT, usage=g_usage)
-            fixed = postprocess.finalize(kind, raw, place, keywords, title, 0, ratings, news_list)
+            fixed = postprocess.finalize(kind, raw, place, keywords, title, 0, ratings, news_list)  # 투자 생각 전용(시리즈 없음)
             usage = llm.merge_usage(usage, g_usage)
             # 고친 글이 원래 글의 70% 이상 분량이고 위반이 줄었을 때만 받음(엉뚱한 응답 방지)
             if fixed["chars"] >= fin["chars"] * 0.7 and len(invest_guard.violations(fixed["body"])) < len(hits):
@@ -422,7 +444,7 @@ def _enforce_invest_guard(fin, system, usage, kind, place, keywords, title, rati
 
 def _generate_events(*, kind, title, keywords, memo, place, guardrail, evidence_mode, build_prompt,
                      photos=None, photo_notes=None, parent_id=None, title_input=None, ratings=None, photo_names=None, news_list=None,
-                     flow=""):
+                     flow="", series=None):
     """원고를 스트리밍으로 만들고, 후처리·점검·저장 후 SSE 이벤트를 흘려보냅니다.
     photos(사진 원본)가 있으면 먼저 사진을 살펴보고, photo_notes(이미 분석된 결과)가 있으면 그대로 씁니다."""
     parts, usage, photo_usage = [], {}, {}
@@ -460,7 +482,7 @@ def _generate_events(*, kind, title, keywords, memo, place, guardrail, evidence_
             yield sse("chunk", {"text": chunk})
         usage = llm.merge_usage(photo_usage, usage)
         yield sse("status", {"text": "태그와 해시태그를 정리하고 품질을 점검하고 있어요."})
-        fin = postprocess.finalize(kind, "".join(parts), place, keywords, title, len(photo_notes or []), ratings, news_list)
+        fin = postprocess.finalize(kind, "".join(parts), place, keywords, title, len(photo_notes or []), ratings, news_list, series)
         floor = EXPAND_MIN.get(kind)
         enough_material = len(re.sub(r"\s", "", memo or "")) >= 150 or bool(photo_notes)
         if floor and fin["chars"] < floor and enough_material:
@@ -469,7 +491,7 @@ def _generate_events(*, kind, title, keywords, memo, place, guardrail, evidence_
                 ex_usage = {}
                 raw2 = llm.ask_text(system, prompts.build_expand_prompt(kind, fin["body"], fin["chars"], floor + EXPAND_TARGET_EXTRA, memo, photo_notes, keywords, ratings),
                                     max_tokens=9000, effort=llm.EFFORT, usage=ex_usage)
-                fin2 = postprocess.finalize(kind, raw2, place, keywords, title, len(photo_notes or []), ratings, news_list)
+                fin2 = postprocess.finalize(kind, raw2, place, keywords, title, len(photo_notes or []), ratings, news_list, series)
                 usage = llm.merge_usage(usage, ex_usage)
                 if fin2["chars"] > fin["chars"]:
                     fin2["notes"].append(f"분량이 짧아 한 번 보강했어요({fin['chars']:,}자 → {fin2['chars']:,}자).")
@@ -494,7 +516,7 @@ def _generate_events(*, kind, title, keywords, memo, place, guardrail, evidence_
         article_id = storage.save_article(
             kind=kind, title_input=title_input or title, title_final=title, memo=memo, place=place, keywords=keywords,
             options={"guardrail": guardrail, "evidence_mode": evidence_mode, "usage": usage, "photos": photo_notes or [], "ratings": ratings or [],
-                     "news": news_list or [], "flow": flow, "register": register},
+                     "news": news_list or [], "flow": flow, "register": register, "series": series},
             body=fin["body"], chars=fin["chars"],
             quality=quality, model=usage.get("model") or llm.MODEL, parent_id=parent_id)
         yield sse("done", {"article_id": article_id, "title": title, "body": fin["body"], "chars": fin["chars"],
@@ -524,6 +546,8 @@ def article_stream():
     ratings = read_ratings(data, c["kind"])
     news_list = news.read_news_list(data.get("news")) if c["kind"] == "invest" else []  # 참고 기사는 투자 생각 글 전용
     flow = pick_invest_flow(str(data.get("invest_flow", "auto"))) if c["kind"] == "invest" else ""
+    series = read_series(data, c["kind"])
+    title = series_title(title, series)
     if c["kind"] == "invest":
         bad = invest_guard.violations("", title)
         if bad:
@@ -531,8 +555,9 @@ def article_stream():
     return sse_response(_generate_events(
         kind=c["kind"], title=title, keywords=keywords, memo=c["memo"], place=c["place"],
         guardrail=c["guardrail"], evidence_mode=c["evidence_mode"], photos=photos, ratings=ratings,
-        photo_names=read_photo_names(data), news_list=news_list, flow=flow,
-        build_prompt=lambda notes, fl: prompts.build_article_prompt(c["kind"], title, keywords, c["memo"], c["place"], notes, ratings, news_list, fl)))
+        photo_names=read_photo_names(data), news_list=news_list, flow=flow, series=series,
+        build_prompt=lambda notes, fl: prompts.build_article_prompt(c["kind"], title, keywords, c["memo"], c["place"], notes, ratings, news_list,
+                                                                    fl, series)))
 
 
 @app.post("/api/articles/<int:article_id>/rewrite")
@@ -549,7 +574,7 @@ def article_rewrite(article_id: int):
         kind=art["kind"], title=art["title"], keywords=art["keywords"], memo=art["memo"], place=art["place"],
         guardrail=bool(opts.get("guardrail")), evidence_mode=opts.get("evidence_mode", "strict"),
         photo_notes=notes, parent_id=article_id, title_input=art["title_input"], ratings=opts.get("ratings") or [],
-        news_list=opts.get("news") or [], flow=opts.get("flow", ""),
+        news_list=opts.get("news") or [], flow=opts.get("flow", ""), series=opts.get("series"),
         build_prompt=lambda n, fl: prompts.build_rewrite_prompt(art["kind"], art["body"], issues, art["keywords"], n, opts.get("ratings") or [],
                                                             opts.get("news") or [])))
 

@@ -18,6 +18,9 @@ RATING_HEAD = "★ 별점 한눈에 보기"
 ONE_LINER_RE = re.compile(r"^(한\s*줄\s*(평|정리)|오늘의\s*한\s*줄)\s*[:：]")
 SOURCE_HEAD = "📰 참고한 기사"
 SUMMARY_HEAD = "📌 이 글 핵심 3줄"  # 정보글 상단 요약(줄마다 ①②③, 문장 단위로 다시 나누지 않음)
+INFO_BOX_HEAD = "📋 한눈에 보기"  # 인트로 뒤 '라벨: 값' 정보 박스(맛집·호텔·여행·정보글)
+RATING_REASON_HEAD = "[별점 이유]"  # AI가 쓰는 항목별 별점 이유 문단 → 코드가 별점 줄에 붙이고 지움
+RELATED_MARK = "관련 글 링크 삽입"  # 시리즈 글: 네이버 에디터에서 다른 편 링크를 넣을 자리
 # 문장 끝(. ? !) 뒤 공백. 닫는 태그·따옴표·괄호가 붙어 있어도 문장 끝으로 본다(lookbehind 는 갈래마다 길이가 고정이어야 해서 나눠 씀)
 SENT_END_RE = re.compile(r"(?<=[.?!])\s+|(?<=[.?!][\"”’')\]])\s+|(?<=[.?!]\{\{/bold\}\})\s+|(?<=[.?!]\{\{/color\}\})\s+|(?<=[.?!]\{\{/highlight\}\})\s+")
 
@@ -127,9 +130,11 @@ def insert_map_line(text: str, place_name: str) -> str:
     heads = [i for i, p in enumerate(paras) if HEADING_RE.match(strip_tags(p))]
     if len(heads) >= 2:
         paras.insert(heads[1], line)
-    elif heads:
+    elif heads:  # 소제목이 하나뿐이면 본문 끝(관련 글 자리·참고 기사·해시태그보다 앞)
         end = find_hashtag_index(paras)
-        paras.insert(end if end is not None else len(paras), line)
+        end = end if end is not None else len(paras)
+        tail = next((i for i in range(end) if RELATED_MARK in strip_tags(paras[i]) or strip_tags(paras[i]).startswith(SOURCE_HEAD)), end)
+        paras.insert(tail, line)
     else:
         return text
     return "\n\n".join(paras)
@@ -217,16 +222,41 @@ def region_of(place: dict | None) -> str:
     return m.group(1) if m else ""
 
 
-def build_rating_block(ratings: list[dict]) -> str:
-    """항목별 별점(1~5점)을 글 끝에 넣을 한 문단으로 만듭니다. 모양이 매번 같도록 코드가 직접 만듭니다."""
+def build_rating_block(ratings: list[dict], reasons: dict | None = None) -> str:
+    """항목별 별점(1~5점)을 글 끝에 넣을 한 문단으로 만듭니다. 모양이 매번 같도록 코드가 직접 만듭니다.
+    reasons(항목 → 이유)가 있으면 그 항목 줄 끝에 ' — 이유'를 붙입니다."""
     lines = [RATING_HEAD]
     for r in ratings:
         n = max(1, min(5, int(r["score"])))
-        lines.append(f"{r['label']} {'★' * n}{'☆' * (5 - n)} {n}/5")
+        why = (reasons or {}).get(r["label"], "")
+        lines.append(f"{r['label']} {'★' * n}{'☆' * (5 - n)} {n}/5" + (f" — {why}" if why else ""))
     return "\n".join(lines)
 
 
-def _put_rating_block(paras: list[str], ratings: list[dict]) -> tuple[list[str], list[str]]:
+def take_rating_reasons(paras: list[str], ratings: list[dict]) -> tuple[list[str], dict]:
+    """'[별점 이유]' 문단(AI가 씀)과 이미 있던 별점 줄의 ' — 이유'에서 항목별 이유를 모으고, '[별점 이유]' 문단은 지웁니다."""
+    labels = {r["label"] for r in ratings}
+    reasons, out = {}, []
+    for p in paras:
+        plain = strip_tags(p).strip()
+        if plain.startswith(RATING_REASON_HEAD):
+            for line in plain.split("\n")[1:]:
+                k, _, v = line.partition(":")
+                k, v = k.strip(), v.strip().rstrip(".")
+                if k in labels and v:
+                    reasons[k] = v[:40]
+            continue
+        if plain.startswith(RATING_HEAD):  # 다시 정리할 때(다시 쓰기 등) 기존 이유를 살림
+            for line in plain.split("\n")[1:]:
+                head, sep, why = line.partition(" — ")
+                label = head.split(" ★")[0].split(" ☆")[0].strip()
+                if sep and label in labels and why.strip():
+                    reasons.setdefault(label, why.strip()[:40])
+        out.append(p)
+    return out, reasons
+
+
+def _put_rating_block(paras: list[str], ratings: list[dict], reasons: dict | None = None) -> tuple[list[str], list[str]]:
     """'한 줄 평' 문단 바로 앞(없으면 해시태그 앞)에 별점 블록을 넣습니다. 이미 있던 블록은 지우고 다시 만듭니다."""
     notes = []
     paras = [p for p in paras if not p.startswith(RATING_HEAD)]
@@ -234,7 +264,7 @@ def _put_rating_block(paras: list[str], ratings: list[dict]) -> tuple[list[str],
     end = tag_i if tag_i is not None else len(paras)
     one = next((i for i in range(end - 1, -1, -1) if ONE_LINER_RE.match(strip_tags(paras[i]))), None)
     if ratings:
-        paras.insert(one if one is not None else end, build_rating_block(ratings))
+        paras.insert(one if one is not None else end, build_rating_block(ratings, reasons))
     return paras, notes
 
 
@@ -259,8 +289,8 @@ def _put_source_block(paras: list[str], news: list[dict]) -> list[str]:
 def is_special_paragraph(par: str) -> bool:
     """소제목·해시태그·별점·참고 기사·사진·지도 줄처럼 문장 단위로 다루지 않는 문단"""
     plain = strip_tags(par).strip()
-    return bool(HEADING_RE.match(plain) or plain.startswith(("#", RATING_HEAD, SOURCE_HEAD, SUMMARY_HEAD)) or PHOTO_RE.fullmatch(plain)
-                or MAP_LINE_MARK in plain)
+    return bool(HEADING_RE.match(plain) or plain.startswith(("#", RATING_HEAD, SOURCE_HEAD, SUMMARY_HEAD, INFO_BOX_HEAD, RATING_REASON_HEAD))
+                or PHOTO_RE.fullmatch(plain) or MAP_LINE_MARK in plain or RELATED_MARK in plain)
 
 
 def split_sentences(par: str) -> list[str]:
@@ -268,12 +298,22 @@ def split_sentences(par: str) -> list[str]:
 
 
 def one_sentence_per_line(paras: list[str]) -> list[str]:
-    """투자 생각 글: 문단 안에서 문장이 끝나면 줄을 바꿉니다(네이버에 붙이면 문장마다 엔터)."""
-    return [p if is_special_paragraph(p) else "\n".join(split_sentences(p)) for p in paras]
+    """문단 안에서 문장이 끝나면 줄을 바꿉니다(네이버에 붙이면 문장마다 엔터).
+    이미 줄로 나뉜 것('라벨: 값' 줄, ①② 단계, 동선 줄)은 줄 단위를 그대로 두고 그 안에서만 나눕니다."""
+    return [p if is_special_paragraph(p) else "\n".join(s for line in p.split("\n") for s in split_sentences(line)) for p in paras]
+
+
+def _put_related_line(paras: list[str], series: dict | None) -> list[str]:
+    """시리즈 글이면 해시태그 바로 앞에 '관련 글 링크 삽입' 자리 줄을 둡니다(이미 있던 줄은 지우고 다시)."""
+    paras = [p for p in paras if RELATED_MARK not in strip_tags(p)]
+    if series and series.get("name"):
+        idx = find_hashtag_index(paras)
+        paras.insert(idx if idx is not None else len(paras), f"({RELATED_MARK}: 〈{series['name']}〉 다른 편)")
+    return paras
 
 
 def finalize(kind: str, raw: str, place: dict | None, keywords: list[str], title: str = "", photo_count: int = 0,
-             ratings: list[dict] | None = None, news: list[dict] | None = None) -> dict:
+             ratings: list[dict] | None = None, news: list[dict] | None = None, series: dict | None = None) -> dict:
     """원고를 정리해 {body, chars, notes} 를 돌려줍니다."""
     body, notes = clean_markdown(raw.replace("\r\n", "\n"), title)
     body = normalize_tags(body)
@@ -296,6 +336,8 @@ def finalize(kind: str, raw: str, place: dict | None, keywords: list[str], title
         must += [k.replace(" ", "") for k in keywords[:2]]
     elif keywords and kind != "invest":  # 투자 생각 글의 해시태그는 AI가 고른 핵심 키워드만
         must = [k.replace(" ", "") for k in keywords[:3]]
+    if series and series.get("name") and kind != "invest":
+        must.append(series["name"].replace(" ", ""))
     tag_min, tag_max = HASHTAG_RANGE.get(kind, (MIN_HASHTAGS, MAX_HASHTAGS))
     idx = find_hashtag_index(paras)
     if idx is None:
@@ -306,13 +348,15 @@ def finalize(kind: str, raw: str, place: dict | None, keywords: list[str], title
         n_tags = paras[idx].count("#")
         if n_tags < tag_min:
             notes.append(f"해시태그가 {n_tags}개예요(권장 {tag_min}~{tag_max}개).")
+    paras, reasons = take_rating_reasons(paras, ratings or [])  # '[별점 이유]' 문단은 별점 줄로 옮기고 지움
     if kind in ("food", "hotel"):
-        paras, rn = _put_rating_block(paras, ratings or [])
+        paras, rn = _put_rating_block(paras, ratings or [], reasons)
         notes += rn
         end = find_hashtag_index(paras)
         if not any(ONE_LINER_RE.match(strip_tags(p)) for p in paras[: end if end is not None else len(paras)]):
             notes.append("글 끝의 '한 줄 평'이 없어요. 직접 한 줄 평을 써 넣어 주세요.")
     paras = _put_source_block(paras, news or [])
+    paras = _put_related_line(paras, series)
     if kind == "invest":  # 투자 생각은 소제목 없이 쓰는 고정 문체: 남은 소제목 줄은 지움
         kept = [p for p in paras if not HEADING_RE.match(strip_tags(p))]
         if len(kept) < len(paras):
