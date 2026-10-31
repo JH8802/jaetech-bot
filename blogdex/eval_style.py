@@ -37,6 +37,34 @@ def _body_parts(body: str):
     return text_paras, heads, tags
 
 
+INFO_LINE_RE = re.compile(r"^(?:[^:：.?!]{1,12}[:：]\s|[①-⑳])|➡")
+
+
+def is_info_line(s: str) -> bool:
+    """'라벨: 값' 줄, ①② 단계 줄, 'A ➡ B' 동선 줄: 문장이 아니라 정보 줄이라 문장 길이 통계에서 뺌"""
+    return bool(INFO_LINE_RE.search(s.strip()))
+
+
+def keyword_tokens(keywords: list[str]) -> list[str]:
+    tokens = []
+    for k in keywords[:2]:
+        for t in k.split():
+            if len(t) >= 2 and t not in tokens:
+                tokens.append(t)
+    return tokens
+
+
+def keyword_density(body: str, keywords: list[str]) -> float | None:
+    """핵심 키워드(앞 2개, 단어 단위) 평균 등장 횟수(1,000자당). 박스·소제목·해시태그는 빼고 본문만 셈."""
+    paras, _, _ = _body_parts(body)
+    text = "\n".join(paras)
+    plain_len = len(re.sub(r"\s", "", text))
+    tokens = keyword_tokens(keywords)
+    if not tokens or not plain_len:
+        return None
+    return sum(text.count(t) * 1000 / plain_len for t in tokens) / len(tokens)
+
+
 def _sentences(par: str) -> list[str]:
     """문장 목록. '라벨: 값' 줄이나 ①② 단계처럼 마침표 없이 줄로 나뉜 것은 줄마다 따로 셈."""
     return [s.strip() for line in par.strip().split("\n") for s in re.split(r"(?<=[.?!])\s+", line) if s.strip()]
@@ -83,7 +111,7 @@ def evaluate(kind: str, body: str, keywords: list[str], memo: str = "", title: s
     paras, heads, tags = _body_parts(body)
     text = "\n".join(paras)
     plain_len = len(re.sub(r"\s", "", text))
-    sents = [s for p in paras for s in _sentences(p)]
+    sents = [s for p in paras for s in _sentences(p) if not is_info_line(s)]
     checks = []
 
     seo = kind != "invest"  # 투자 생각 글은 검색 최적화를 하지 않으므로 키워드 점검을 건너뜀
@@ -96,11 +124,7 @@ def evaluate(kind: str, body: str, keywords: list[str], memo: str = "", title: s
                              "핵심 키워드(%s)를 첫 문단 안에 넣을 것" % ", ".join(keywords[:3])))
 
     # 2) 키워드 밀도(단어 단위, 1,000자당)
-    tokens = []
-    for k in (keywords[:2] if seo else []):
-        for t in k.split():
-            if len(t) >= 2 and t not in tokens:
-                tokens.append(t)
+    tokens = keyword_tokens(keywords) if seo else []
     if tokens and plain_len:
         dens = [text.count(t) * 1000 / plain_len for t in tokens]
         avg = sum(dens) / len(dens)
@@ -120,11 +144,12 @@ def evaluate(kind: str, body: str, keywords: list[str], memo: str = "", title: s
                                  "평균 40자 이하 · 50자 넘는 문장 10% 이하", mean <= 40 and long_ <= 0.10,
                                  "한 문장을 15~35자 안팎으로 짧게 나누고, 45자를 넘는 문장은 두 문장으로 쪼갤 것"))
         else:
-            # 원본 3건: 평균 46~53자, 편차 12~15, 짧은 문장 0~4%. 원본 수준은 통과하고 그보다 단조로우면 주의.
-            ok = 28 <= mean <= 60 and sd >= 12
+            # 모바일용으로 문장을 짧게 쓰는 지금 기준: 짧은 문장은 좋고, 길이가 모두 같아 단조로운 것만 주의.
+            # ('라벨: 값'·①②·동선 줄은 문장이 아니라서 위에서 뺌)
+            ok = 18 <= mean <= 55 and sd >= 8
             checks.append(_check("sent_len", "문장 길이 변화", f"평균 {mean:.0f}자 · 편차 {sd:.1f} · 짧은 문장 {short:.0%}",
-                                 "평균 28~60 · 편차 12 이상", ok,
-                                 "문장 길이가 균일함. 20자 안팎의 짧은 문장을 20%쯤 섞고 긴 문장은 줄일 것"))
+                                 "평균 18~55 · 편차 8 이상", ok,
+                                 "문장 길이가 너무 균일하거나 김. 20자 안팎의 짧은 문장과 40~50자 문장을 섞을 것"))
 
     # 4) 종결어미 / 1인칭
     if sents:
