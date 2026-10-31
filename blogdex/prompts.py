@@ -506,6 +506,8 @@ def build_article_prompt(kind: str, title: str, keywords: list[str], memo: str, 
     parts = [f"[글 제목]\n{title}"]
     if keywords:
         parts.append("[핵심 키워드]\n" + ", ".join(keywords))
+        if kind in KEYWORD_TARGET_CHARS:
+            parts.append(keyword_count_block(keywords, KEYWORD_TARGET_CHARS[kind]))
     pb = _place_block(place)
     if pb:
         parts.append(pb)
@@ -600,6 +602,35 @@ def build_guard_fix_prompt(body: str, hits: list[dict]) -> str:
     return "\n\n".join([
         "아래 원고에서 '투자 글 쓰기 원칙'을 어긴 문장이 발견됐습니다. 그 문장들만 원칙에 맞게 고쳐 쓰고(개인 의견·불확실성 표현으로 바꾸거나, 필요 없으면 빼기), 나머지 문장과 형식(한 줄에 한 문장, 소제목, 태그, 한 줄 정리, 해시태그)은 그대로 둔 채 원고 전체를 다시 출력하세요.",
         "[가드레일 위반 문장]\n" + bad,
+        "[기존 원고]\n" + body,
+        "설명 없이 원고 본문만 출력합니다.",
+    ])
+
+
+# 글 종류별 목표 분량(공백 제외) - 키워드 목표 횟수 계산용(1,000자당 4.5회)
+KEYWORD_TARGET_CHARS = {"food": 2300, "hotel": 2700, "info": 2700}
+
+
+def keyword_target(chars: int) -> int:
+    return max(6, -(-int(chars) * 45 // 10000))  # 1,000자당 4.5회, 올림
+
+
+def keyword_count_block(keywords: list[str], chars: int) -> str:
+    n = keyword_target(chars)
+    lines = [f"- '{k}': 본문(박스·소제목·해시태그 제외)에 {n}회 이상, 문단마다 고르게" for k in keywords[:2]]
+    return ("[핵심 키워드 목표 횟수 - 반드시 지킬 것]\n" + "\n".join(lines)
+            + "\n- 줄이거나 바꾸지 않은 그대로의 문구로 쓰고, 한 문장에 두 번 넣지 않습니다. 모자라기 쉬우니 쓰고 나서 세어 보고 채웁니다.")
+
+
+def build_keyword_fix_prompt(body: str, keywords: list[str], chars: int, counts: dict) -> str:
+    """핵심 키워드가 1,000자당 4회에 못 미칠 때, 같은 글에서 키워드만 자연스럽게 더 넣게 하는 지시."""
+    n = keyword_target(chars)
+    want = "\n".join(f"- '{k}': 지금 {counts.get(k, 0)}회 → {n}회 이상" for k in keywords[:2])
+    return "\n\n".join([
+        "[키워드 보강]",
+        "아래 원고에서 핵심 키워드가 부족합니다. 내용·사실·구성·형식(한 줄에 한 문장, 소제목, 태그, 박스, 라벨 줄, 사진 자리, 별점, 한 줄 평, 해시태그)은 그대로 두고, "
+        "기존 문장에 키워드를 자연스럽게 넣거나(예: '이곳' → 키워드) 키워드가 들어간 짧은 문장을 문단마다 하나씩 더해 목표 횟수를 채운 원고 전체를 다시 출력하세요.",
+        "[목표]\n" + want + "\n- 줄이거나 바꾸지 않은 그대로의 문구로 쓰고, 한 문장에 두 번 넣지 않습니다. 없는 사실을 덧붙이지 않습니다.",
         "[기존 원고]\n" + body,
         "설명 없이 원고 본문만 출력합니다.",
     ])

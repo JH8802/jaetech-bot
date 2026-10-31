@@ -393,6 +393,33 @@ def choose_flow_by_memo(memo: str, news_list, photo_notes, usage: dict) -> tuple
     return flow, by_ai
 
 
+KEYWORD_MIN_DENSITY = 4.0
+
+
+def _enforce_keywords(fin, system, usage, kind, place, keywords, title, ratings, news_list, series, photo_notes):
+    """키워드 밀도가 기준(1,000자당 4회)보다 낮으면 AI에게 키워드만 보강하게 한 번 요청합니다. fin 을 고쳐 씁니다."""
+    dens = eval_style.keyword_density(fin["body"], keywords)
+    if dens is not None and dens < KEYWORD_MIN_DENSITY:
+        yield sse("status", {"text": f"핵심 키워드가 1,000자당 {dens:.1f}회로 적어서 자연스럽게 보강하고 있어요."})
+        try:
+            k_usage = {}
+            plain = postprocess.strip_tags(fin["body"])
+            counts = {k: plain.count(k) for k in keywords[:2]}
+            raw = llm.ask_text(system, prompts.build_keyword_fix_prompt(fin["body"], keywords, fin["chars"], counts),
+                               max_tokens=12000, effort="low", usage=k_usage)
+            fixed = postprocess.finalize(kind, raw, place, keywords, title, len(photo_notes or []), ratings, news_list, series)
+            usage = llm.merge_usage(usage, k_usage)
+            new = eval_style.keyword_density(fixed["body"], keywords) or 0
+            if fixed["chars"] >= fin["chars"] * 0.95 and new > dens:  # 엉뚱하거나 줄어든 응답은 받지 않음
+                fin["body"], fin["chars"] = fixed["body"], fixed["chars"]
+                fin["notes"].append(f"핵심 키워드를 보강했어요(1,000자당 {dens:.1f}회 → {new:.1f}회).")
+            else:
+                fin["notes"].append(f"핵심 키워드 보강을 시도했지만 나아지지 않아 처음 글을 썼어요(1,000자당 {dens:.1f}회).")
+        except Exception:
+            app.logger.exception("keyword fix failed")
+    fin["_usage"] = usage
+
+
 def _enforce_register(fin, system, usage, kind, place, keywords, title, ratings, news_list, register):
     """말투 샘플 어미 일치율이 90% 미만이면 AI에게 어미만 고치게 한 번 요청합니다. fin 을 고쳐 씁니다."""
     share, wrong = reg.match_ratio(fin["body"], register)
@@ -501,6 +528,10 @@ def _generate_events(*, kind, title, keywords, memo, place, guardrail, evidence_
             except Exception:  # 보강 실패가 원고 생성 전체를 막으면 안 됩니다
                 app.logger.exception("expand failed")
                 fin["notes"].append("분량 보강에 실패해 처음 글을 그대로 썼어요.")
+        if kind != "invest" and keywords:  # 핵심 키워드가 1,000자당 4회에 못 미치면 키워드만 한 번 보강
+            for ev in _enforce_keywords(fin, system, usage, kind, place, keywords, title, ratings, news_list, series, photo_notes):
+                yield ev
+            usage = fin.pop("_usage", usage)
         if kind == "invest":
             if register:
                 for ev in _enforce_register(fin, system, usage, kind, place, keywords, title, ratings, news_list, register):
