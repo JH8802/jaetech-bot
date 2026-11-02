@@ -239,7 +239,68 @@ def summarize(channel, text):
     return result
 
 
-def summarize_for_threads(channel, text):
+THREADS_SECTORS = [
+    "반도체", "전력망", "소비재", "화장품", "금리", "유가", "식품", "의류",
+    "자동차", "바이오", "금융", "엔터", "교육", "기타",
+]
+
+IDEAS_MARKER = "[내 한 줄 아이디어]"
+
+
+def pick_for_threads(candidates, recent_sectors):
+    """선별된 후보 중 쓰레드에 올릴 1건을 고른다.
+    candidates: [{"channel", "text", "has_image"}], recent_sectors: 최근에 다룬 섹터 목록.
+    반환: (후보 인덱스, 섹터명)
+    """
+    if len(candidates) == 1 or not check_api_limit():
+        return 0, "기타"
+
+    numbered_list = ""
+    for idx, c in enumerate(candidates):
+        image_flag = " [이미지 있음]" if c.get("has_image") else ""
+        numbered_list += f"\n[{idx}]{image_flag} 채널: {c['channel']}\n내용: {c['text'][:300]}\n"
+
+    recent = ", ".join(recent_sectors) if recent_sectors else "없음"
+
+    prompt = f"""아래는 오늘 개인 SNS(쓰레드)에 올릴 투자 소식 후보 {len(candidates)}개야. 이 중 1개를 골라줘.
+
+선택 기준 (중요한 순서):
+1. 일반 개인투자자도 쉽게 공감하거나 생활 속에서 체감할 수 있는 소식
+2. 최근에 다룬 섹터({recent})와 겹치지 않는 섹터 우선
+   (단, 다른 후보들이 내용이 너무 빈약하면 겹쳐도 됨)
+3. [이미지 있음] 표시가 있는 후보 우선 (실제 차트·표가 붙어 있는 소식)
+4. 구체적인 사실이나 숫자가 있는 소식
+
+고른 소식의 섹터는 다음 중 하나로 분류해: {", ".join(THREADS_SECTORS)}
+
+반드시 아래 JSON 형식으로만 답해. 다른 설명 없이 JSON만 출력해.
+{{"index": 0, "sector": "반도체"}}
+
+후보 목록:
+{numbered_list}"""
+
+    try:
+        count_api_call()
+        message = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=60,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        raw = message.content[0].text.strip().replace("```json", "").replace("```", "").strip()
+        parsed = json.loads(raw)
+        index = parsed.get("index", 0)
+        sector = parsed.get("sector", "기타")
+        if not isinstance(index, int) or not 0 <= index < len(candidates):
+            index = 0
+        if sector not in THREADS_SECTORS:
+            sector = "기타"
+        return index, sector
+    except Exception as e:
+        print(f"❌ 쓰레드 소재 선택 오류: {e} → 첫 번째 후보 사용")
+        return 0, "기타"
+
+
+def summarize_for_threads(channel, text, sector=None):
     """텔레그램 발행용이 아니라 쓰레드(Threads) SNS 게시용 초안을 만든다."""
     if not is_valid_text(text):
         return None
@@ -247,31 +308,42 @@ def summarize_for_threads(channel, text):
     if not check_api_limit():
         return None
 
+    if sector and sector != "기타":
+        tag_rule = f"주제 태그는 #{sector} 로 할 것"
+    else:
+        tag_rule = "주제 태그는 이 소식의 섹터 이름 하나만 (예: #반도체, #화장품, #금리)"
+
     prompt = f"""아래는 텔레그램 재테크 채널 '{channel}'에서 가져온 글이야.
 이걸 개인 SNS(쓰레드) 게시글용으로 다시 써줘.
 
-글은 아래 순서로 전개해줘. 이 순서는 네가 참고하는 설계도일 뿐이야.
-결과 글에는 "1줄", "2~4줄", "후킹", "흐름", "반전", "내 판단", "근거", "마무리" 같은
-번호나 단계 이름을 절대 쓰지 말고, 사람이 직접 쓴 SNS 글처럼 자연스럽게 이어서 써줘.
-각 단계는 줄바꿈으로만 구분해.
+[본문 쓰는 법]
+본문은 4~5줄로 짧게, 핵심 포인트는 딱 하나만. 각 줄은 줄바꿈으로 구분해.
+아래 (1)~(4)는 네가 참고할 설계도일 뿐이야. 결과 글에 번호나 "후킹", "핵심" 같은
+단계 이름은 절대 쓰지 말고, 사람이 직접 쓴 SNS 글처럼 자연스럽게 써줘.
 
-(1) 후킹: 숫자, 반전, 또는 질문으로 시작해서 스크롤을 멈추게
-(2) 흐름: 짧은 문장 + 화살표(→)로 원인에서 결과까지 2~3줄로 나눠서 단계별로 설명
-(3) 반전: "근데 의외로 ○○" 식으로 예상 밖의 포인트 짚기
-(4) 내 판단: "나는 ○○로 봄" — 이 소식이 시장/산업 구조에 어떤 의미인지
-    해석하는 수준으로만 쓰고, "사라/팔아라/지금 들어가라" 같은 지시형 톤은 절대 금지
-(5) 근거: "왜냐면 ○○" 한 줄로 (4)의 판단을 뒷받침
-(6) 마무리: 답글을 유도하는 가벼운 A/B 선택형 질문, 또는 저장하고 싶어지는
-    한 줄 단언 중 더 어울리는 쪽으로 (논쟁·편 가르기를 유도하는 자극적 질문은 절대 금지)
+(1) 첫 줄: 숫자·반전·질문 중 하나로 스크롤을 멈추게.
+    단, 원문에 없는 내용으로 과장하거나 오해를 부르는 낚시성 표현은 금지.
+    사실 그대로인데 흥미로운 지점을 짚을 것.
+(2) 다음 1~2줄: 왜 그런지 핵심만. 숫자는 꼭 필요한 1~2개만, 화살표(→)는 쓰더라도 한 번만.
+(3) 다음 1줄: "나는 ○○로 봄" + 짧은 이유. 시장/산업에 어떤 의미인지 해석하는 수준으로만 쓰고,
+    "사라/팔아라/지금 들어가라" 같은 지시형 표현은 절대 금지.
+(4) 마지막 1줄: 누구나 자기 경험이나 체감으로 바로 답할 수 있는 쉬운 질문.
+    (예: "요즘 마트 가면 이거 체감돼?", "너는 이 소식 듣고 제일 먼저 뭐가 떠올랐어?")
+    공부해야 답할 수 있는 분석형 질문, 편 가르기나 분노를 부르는 질문은 금지.
 
-전체 규칙:
-- 반말 섞인 캐주얼한 톤 ("~임", "~함", "~인 듯" 같은 말투)
-- 특정 종목을 "사라/팔아라" 식으로 추천하는 표현은 절대 쓰지 말 것
-  (내 판단도 시장 해석 수준에 머물러야 하고, 투자 지시가 되면 안 됨)
-- 본문이 끝난 다음 줄에 "⚠️ 투자 참고용이며 투자 권유가 아닙니다" 그대로 넣기
-- 마지막 줄에 해시태그 2~4개 (원문 내용 기반), 그리고 맨 마지막 해시태그 뒤에
-  한 칸 띄고 이 소식이 언급된 종목/섹터에 (호재) 또는 (악재) 또는 (중립) 중
-  하나를 붙이기 (예: #반도체 (호재))
+[하지 말 것]
+- "좋아요/댓글/팔로우 눌러줘", "하트로 알려줘" 같은 참여 유도 문구
+- 원문에 없는 개인 경험, 보유 종목, 매매 내역을 지어내는 것
+- 자극적·선동적인 표현, 특정 집단을 비난하는 표현
+
+[형식]
+- 말투: 반말 섞인 캐주얼한 톤 ("~임", "~함", "~인 듯")
+- 본문 다음 줄에 "⚠️ 투자 참고용이며 투자 권유가 아닙니다" 그대로 넣기
+- 그다음 줄에 주제 태그 1개, 한 칸 띄고 (호재) 또는 (악재) 또는 (중립) 중 하나 (예: #반도체 (호재))
+  {tag_rule}
+- 그다음 줄에 "{IDEAS_MARKER}"라고 쓰고, 그 아래에 글쓴이가 자기 상황에 맞으면
+  본문 맨 위에 덧붙일 수 있는 개인적인 한 줄을 "- "로 시작해 2개 제안
+  (예: "- (보유 중이라면) 나도 들고 있어서 이 소식은 그냥 못 넘기겠음")
 
 만약 링크만 있거나 요약할 내용이 없으면 반드시 "SKIP" 이라고만 답해줘.
 
@@ -304,8 +376,15 @@ def summarize_for_threads(channel, text):
         if keyword in result:
             return None
 
-    # 프롬프트의 구조 라벨("1줄 -", "2~4줄 -", "(3)" 등)이 글에 섞여 나오면 제거
-    result = re.sub(r"^[ \t]*\d+(?:~\d+)?줄[ \t]*[-–:][ \t]*", "", result, flags=re.MULTILINE)
-    result = re.sub(r"^[ \t]*\(\d\)[ \t]*", "", result, flags=re.MULTILINE)
+    # 본문(그대로 복사해서 올릴 부분)과 '내 한 줄 아이디어'(참고용)를 분리
+    body, _, ideas = result.partition(IDEAS_MARKER)
+    body, ideas = body.strip(), ideas.strip()
 
-    return result
+    # 프롬프트의 구조 라벨("1줄 -", "2~4줄 -", "(3)" 등)이 본문에 섞여 나오면 제거
+    body = re.sub(r"^[ \t]*\d+(?:~\d+)?줄[ \t]*[-–:][ \t]*", "", body, flags=re.MULTILINE)
+    body = re.sub(r"^[ \t]*\(\d\)[ \t]*", "", body, flags=re.MULTILINE)
+
+    if ideas:
+        body += f"\n\n━━━━━━━━━━\n✍️ 내 한 줄 추가 아이디어 (선택, 맞으면 본문 맨 위에)\n{ideas}"
+
+    return body
