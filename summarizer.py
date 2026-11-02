@@ -246,6 +246,29 @@ THREADS_SECTORS = [
 
 IDEAS_MARKER = "[내 한 줄 아이디어]"
 
+# Meta가 랭킹을 낮춘다고 밝힌 '인게이지먼트 베이트'(행동을 요구하는 참여 유도) 패턴.
+# 경험을 묻는 일반 질문("체감돼?")은 걸리지 않도록 '요구 동사'와 붙은 경우만 잡는다.
+ENGAGEMENT_BAIT_PATTERNS = [
+    r"팔로우\s*(?:해|부탁|눌러|좀)",
+    r"맞팔",
+    r"좋아요[^\n]{0,10}(?:눌러|부탁|꾹|해\s*줘|해주세요)",
+    r"하트[^\n]{0,10}(?:눌러|부탁|꾹|알려|해\s*줘|해주세요)",
+    r"댓글[^\n]{0,15}(?:알려|남겨|달아|부탁)",
+    r"공유[^\n]{0,10}(?:해\s*줘|부탁|해주세요)",
+    r"리포스트[^\n]{0,10}(?:해\s*줘|부탁|해주세요)",
+    r"구독[^\n]{0,10}(?:눌러|부탁|해\s*줘|해주세요)",
+    r"아이디[^\n]{0,10}(?:알려|남겨)",
+]
+
+
+def find_engagement_bait(text):
+    """참여 유도 문구가 있으면 해당 부분을, 없으면 None을 돌려준다."""
+    for pattern in ENGAGEMENT_BAIT_PATTERNS:
+        match = re.search(pattern, text)
+        if match:
+            return match.group(0)
+    return None
+
 
 def pick_for_threads(candidates, recent_sectors):
     """선별된 후보 중 쓰레드에 올릴 1건을 고른다.
@@ -350,30 +373,49 @@ def summarize_for_threads(channel, text, sector=None):
 원문:
 {text}"""
 
-    try:
-        count_api_call()
-        message = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=700,
-            messages=[{"role": "user", "content": prompt}]
-        )
-        result = message.content[0].text.strip()
-    except Exception as e:
-        print(f"❌ 쓰레드 초안 API 오류: {e}")
-        return None
+    retry_note = (
+        "\n\n[주의] 방금 쓴 초안에 참여 유도 문구(좋아요·댓글·팔로우·공유 요청 등)가 있었어. "
+        "이런 문구 없이 다시 써줘. 마무리는 경험을 묻는 질문으로만."
+    )
 
-    # 토큰 한도에 걸려 문장이 중간에 잘린 경우 (해시태그/디스클레이머 누락
-    # 등으로 이어짐) — 어설프게 자른 글 보내느니 이번 타임슬롯은 건너뜀
-    if message.stop_reason == "max_tokens":
-        print("⚠️ 쓰레드 초안이 길이 제한으로 중간에 잘림 → 이번 건 건너뜀")
-        return None
+    result = None
+    for attempt in range(2):
+        if not check_api_limit():
+            return None
+        try:
+            count_api_call()
+            message = client.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=700,
+                messages=[{"role": "user", "content": prompt + (retry_note if attempt else "")}]
+            )
+            result = message.content[0].text.strip()
+        except Exception as e:
+            print(f"❌ 쓰레드 초안 API 오류: {e}")
+            return None
 
-    if not result or len(result.strip()) < 10:
-        return None
-    if "SKIP" in result.strip().upper()[:10]:
-        return None
-    for keyword in INVALID_KEYWORDS:
-        if keyword in result:
+        # 토큰 한도에 걸려 문장이 중간에 잘린 경우 (해시태그/디스클레이머 누락
+        # 등으로 이어짐) — 어설프게 자른 글 보내느니 이번 타임슬롯은 건너뜀
+        if message.stop_reason == "max_tokens":
+            print("⚠️ 쓰레드 초안이 길이 제한으로 중간에 잘림 → 이번 건 건너뜀")
+            return None
+
+        if not result or len(result.strip()) < 10:
+            return None
+        if "SKIP" in result.strip().upper()[:10]:
+            return None
+        for keyword in INVALID_KEYWORDS:
+            if keyword in result:
+                return None
+
+        # Meta가 금지한 인게이지먼트 베이트(참여 유도 문구) 검사 — 1회 재생성 후에도 있으면 폐기
+        bait = find_engagement_bait(result)
+        if not bait:
+            break
+        if attempt == 0:
+            print(f"⚠️ 참여 유도 문구 감지('{bait}') → 다시 생성")
+        else:
+            print(f"⚠️ 재생성 후에도 참여 유도 문구 감지('{bait}') → 이번 건 건너뜀")
             return None
 
     # 본문(그대로 복사해서 올릴 부분)과 '내 한 줄 아이디어'(참고용)를 분리
