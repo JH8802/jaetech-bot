@@ -246,6 +246,8 @@ THREADS_SECTORS = [
 
 IDEAS_MARKER = "[내 한 줄 아이디어]"
 IMAGE_MARKER = "[이미지 제안]"
+# 이미지 제안에서 빼는 출처 (찾기 번거로움 — 사용자 요청)
+EXCLUDED_IMAGE_SOURCES = re.compile(r"DART|다트|전자공시|공시\s*(?:원문|사이트|시스템|자료)|리포트|보고서")
 
 # Meta가 랭킹을 낮춘다고 밝힌 '인게이지먼트 베이트'(행동을 요구하는 참여 유도) 패턴.
 # 경험을 묻는 일반 질문("체감돼?")은 걸리지 않도록 '요구 동사'와 붙은 경우만 잡는다.
@@ -421,8 +423,9 @@ def summarize_for_threads(channel, text, sector=None, return_image_hint=False):
 - 그다음 줄에 "{IMAGE_MARKER}"라고 쓰고, 그 아래에 글쓴이가 직접 캡처해서 본문에 붙이면 좋을
   실제 데이터 이미지를 "- "로 시작해 1~2개 제안. 각 줄에 아래 3가지를 구체적으로:
   ① 원문에 나온 종목·지표 기준으로 무엇을 어느 기간으로 캡처할지
-  ② 어디서 구할 수 있는지 (MTS, 네이버페이 증권, 한국거래소 KRX, DART 공시, 한국은행 ECOS,
-     관세청 수출입 통계, 증권사 리포트 등 실제로 무료로 볼 수 있는 곳)
+  ② 어디서 구할 수 있는지 (MTS, 네이버페이 증권, 한국거래소 KRX, 한국은행 ECOS,
+     관세청 수출입 통계 등 바로 열어서 캡처할 수 있는 곳)
+     단, DART 공시와 증권사 리포트는 찾기 번거로우니 절대 제안하지 말 것
   ③ 본문의 어느 내용(특히 첫 줄)을 뒷받침하는지
   (예: "- KB금융 최근 1년 주가 차트 (MTS·네이버페이 증권) → '실적은 좋은데 주가는 제자리'를 한눈에 보여줌")
   AI 생성 이미지, 원문에 없는 수치를 지어낸 표는 제안하지 말 것.
@@ -491,7 +494,11 @@ def summarize_for_threads(channel, text, sector=None, return_image_hint=False):
             result = before + IDEAS_MARKER + rest
         else:
             image_hint, result = after, before
-        image_hint = image_hint.strip()
+        # 프롬프트로 막았지만, 그래도 제외 출처가 들어간 줄은 코드에서 한 번 더 걸러냄
+        image_hint = "\n".join(
+            line for line in image_hint.strip().splitlines()
+            if line.strip() and not EXCLUDED_IMAGE_SOURCES.search(line)
+        )
 
     body, _, ideas = result.partition(IDEAS_MARKER)
     body, ideas = body.strip(), ideas.strip()
