@@ -261,12 +261,54 @@ ENGAGEMENT_BAIT_PATTERNS = [
 ]
 
 
-def find_engagement_bait(text):
-    """참여 유도 문구가 있으면 해당 부분을, 없으면 None을 돌려준다."""
-    for pattern in ENGAGEMENT_BAIT_PATTERNS:
+# Meta가 랭킹을 낮춘다고 밝힌 '저품질 바이럴'(과장·낚시·오해를 부르는 프레이밍) 패턴.
+# 뉴스에서 흔히 쓰는 사실 표현("유가 급등", "역대급 실적")은 걸리지 않도록,
+# 근거 없는 확신·손해 공포·비밀 프레이밍·매수 지시처럼 명백한 것만 잡는다.
+LOW_QUALITY_VIRAL_PATTERNS = [
+    r"무조건\s*(?:오르|오른|오름|올라|간다|가는|사|산다|들어|수익|상승|먹)",
+    r"100\s*%\s*(?:오르|오른|오름|올라|상승|수익|확실)",
+    r"(?:상승|수익|급등|폭등|떡상|대박)\s*확정",
+    r"떡상|떡락",
+    r"(?:모르면|안\s*보면|놓치면)\s*(?:손해|후회)",
+    r"지금\s*당장\s*(?:사|매수|들어)",
+    r"몰빵",
+    r"인생\s*역전",
+    r"부자\s*(?:되는|될|만들어)",
+    r"아무도\s*(?:모르는|안\s*알려)",
+    r"나만\s*알고\s*싶",
+    r"미쳤(?:다|음|네|어)",
+    r"실화(?:냐|임|야)",
+    r"텐배거|\d+\s*배\s*간다",
+    r"급등주|종목\s*추천|추천\s*종목",
+]
+
+
+def _find_pattern(text, patterns):
+    for pattern in patterns:
         match = re.search(pattern, text)
         if match:
             return match.group(0)
+    return None
+
+
+def find_engagement_bait(text):
+    """참여 유도 문구가 있으면 해당 부분을, 없으면 None을 돌려준다."""
+    return _find_pattern(text, ENGAGEMENT_BAIT_PATTERNS)
+
+
+def find_low_quality_viral(text):
+    """과장·낚시성(저품질 바이럴) 문구가 있으면 해당 부분을, 없으면 None을 돌려준다."""
+    return _find_pattern(text, LOW_QUALITY_VIRAL_PATTERNS)
+
+
+def find_banned_phrase(text):
+    """Meta 가이드 위반 문구를 찾는다. 반환: (종류, 문구) 또는 None"""
+    bait = find_engagement_bait(text)
+    if bait:
+        return "참여 유도", bait
+    viral = find_low_quality_viral(text)
+    if viral:
+        return "과장·낚시", viral
     return None
 
 
@@ -358,6 +400,10 @@ def summarize_for_threads(channel, text, sector=None):
 - "좋아요/댓글/팔로우 눌러줘", "하트로 알려줘" 같은 참여 유도 문구
 - 원문에 없는 개인 경험, 보유 종목, 매매 내역을 지어내는 것
 - 자극적·선동적인 표현, 특정 집단을 비난하는 표현
+- 저품질 바이럴(과장·낚시) 표현: "무조건 오른다", "상승 확정", "떡상", "이거 모르면 손해",
+  "아무도 모르는", "미쳤다", "실화냐", "몰빵", "인생 역전", "텐배거", "급등주/종목 추천" 등
+- 첫 줄에서 던진 궁금증을 본문에서 사실로 풀어주지 않는 것 (첫 줄과 본문이 따로 노는 글 금지)
+- 원문보다 결과를 부풀리거나 확정된 것처럼 쓰는 것 (예상·전망은 "~할 수도", "~전망"으로)
 
 [형식]
 - 말투: 반말 섞인 캐주얼한 톤 ("~임", "~함", "~인 듯")
@@ -373,10 +419,7 @@ def summarize_for_threads(channel, text, sector=None):
 원문:
 {text}"""
 
-    retry_note = (
-        "\n\n[주의] 방금 쓴 초안에 참여 유도 문구(좋아요·댓글·팔로우·공유 요청 등)가 있었어. "
-        "이런 문구 없이 다시 써줘. 마무리는 경험을 묻는 질문으로만."
-    )
+    retry_note = ""
 
     result = None
     for attempt in range(2):
@@ -387,7 +430,7 @@ def summarize_for_threads(channel, text, sector=None):
             message = client.messages.create(
                 model="claude-haiku-4-5-20251001",
                 max_tokens=700,
-                messages=[{"role": "user", "content": prompt + (retry_note if attempt else "")}]
+                messages=[{"role": "user", "content": prompt + retry_note}]
             )
             result = message.content[0].text.strip()
         except Exception as e:
@@ -408,14 +451,21 @@ def summarize_for_threads(channel, text, sector=None):
             if keyword in result:
                 return None
 
-        # Meta가 금지한 인게이지먼트 베이트(참여 유도 문구) 검사 — 1회 재생성 후에도 있으면 폐기
-        bait = find_engagement_bait(result)
-        if not bait:
+        # Meta가 금지한 참여 유도 / 저품질 바이럴(과장·낚시) 문구 검사
+        # → 1회 재생성 후에도 있으면 이번 초안은 폐기
+        found = find_banned_phrase(result)
+        if not found:
             break
+        kind, phrase = found
         if attempt == 0:
-            print(f"⚠️ 참여 유도 문구 감지('{bait}') → 다시 생성")
+            print(f"⚠️ {kind} 문구 감지('{phrase}') → 다시 생성")
+            retry_note = (
+                f"\n\n[주의] 방금 쓴 초안에 {kind} 문구('{phrase}')가 있었어. "
+                "이런 표현 없이 원문 사실 그대로 다시 써줘. 첫 줄은 사실 속 흥미로운 숫자나 반전으로, "
+                "마무리는 경험을 묻는 질문으로만."
+            )
         else:
-            print(f"⚠️ 재생성 후에도 참여 유도 문구 감지('{bait}') → 이번 건 건너뜀")
+            print(f"⚠️ 재생성 후에도 {kind} 문구 감지('{phrase}') → 이번 건 건너뜀")
             return None
 
     # 본문(그대로 복사해서 올릴 부분)과 '내 한 줄 아이디어'(참고용)를 분리
