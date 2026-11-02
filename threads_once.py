@@ -104,7 +104,9 @@ async def main():
         pick = candidates[index]
         print(f"🎯 소재 선택: [{sector}] {pick['channel']} (최근 섹터: {recent_sectors or '없음'})")
 
-        draft = summarize_for_threads(pick["channel"], pick["text"], sector=sector)
+        draft, image_hint = summarize_for_threads(
+            pick["channel"], pick["text"], sector=sector, return_image_hint=True
+        )
         if not draft:
             print("📭 요약 실패 또는 SKIP")
             return
@@ -118,7 +120,11 @@ async def main():
                 print(f"⚠️ 원문 이미지 다운로드 실패: {e}")
 
     if not image_bytes:
-        draft += "\n\n📷 첨부할 원문 이미지가 없어요. 관련 차트(MTS 캡처, 리포트 표 등)를 직접 붙여주세요. AI 이미지보다 실제 데이터 이미지가 반응이 좋았어요."
+        if image_hint:
+            # 이 글 내용에 맞춘 구체적인 캡처 제안 (무엇을 / 어디서 / 왜)
+            draft += f"\n\n📷 원문 이미지가 없어요. 이런 실제 데이터 이미지를 캡처해서 붙여보세요:\n{image_hint}"
+        else:
+            draft += "\n\n📷 첨부할 원문 이미지가 없어요. 관련 차트(MTS 캡처, 리포트 표 등)를 직접 붙여주세요. AI 이미지보다 실제 데이터 이미지가 반응이 좋았어요."
 
     await bot.send_message(
         chat_id=ADMIN_CHAT_ID,
