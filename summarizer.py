@@ -245,6 +245,7 @@ THREADS_SECTORS = [
 ]
 
 IDEAS_MARKER = "[내 한 줄 아이디어]"
+IMAGE_MARKER = "[이미지 제안]"
 
 # Meta가 랭킹을 낮춘다고 밝힌 '인게이지먼트 베이트'(행동을 요구하는 참여 유도) 패턴.
 # 경험을 묻는 일반 질문("체감돼?")은 걸리지 않도록 '요구 동사'와 붙은 경우만 잡는다.
@@ -365,13 +366,17 @@ def pick_for_threads(candidates, recent_sectors):
         return 0, "기타"
 
 
-def summarize_for_threads(channel, text, sector=None):
-    """텔레그램 발행용이 아니라 쓰레드(Threads) SNS 게시용 초안을 만든다."""
+def summarize_for_threads(channel, text, sector=None, return_image_hint=False):
+    """텔레그램 발행용이 아니라 쓰레드(Threads) SNS 게시용 초안을 만든다.
+    return_image_hint=True면 (초안, 이미지 제안) 튜플을 돌려준다.
+    (원문에 이미지가 없을 때 직접 캡처해서 붙일 실제 데이터 이미지 제안)
+    """
+    empty = (None, "") if return_image_hint else None
     if not is_valid_text(text):
-        return None
+        return empty
 
     if not check_api_limit():
-        return None
+        return empty
 
     if sector and sector != "기타":
         tag_rule = f"주제 태그는 #{sector} 로 할 것"
@@ -413,6 +418,14 @@ def summarize_for_threads(channel, text, sector=None):
 - 그다음 줄에 "{IDEAS_MARKER}"라고 쓰고, 그 아래에 글쓴이가 자기 상황에 맞으면
   본문 맨 위에 덧붙일 수 있는 개인적인 한 줄을 "- "로 시작해 2개 제안
   (예: "- (보유 중이라면) 나도 들고 있어서 이 소식은 그냥 못 넘기겠음")
+- 그다음 줄에 "{IMAGE_MARKER}"라고 쓰고, 그 아래에 글쓴이가 직접 캡처해서 본문에 붙이면 좋을
+  실제 데이터 이미지를 "- "로 시작해 1~2개 제안. 각 줄에 아래 3가지를 구체적으로:
+  ① 원문에 나온 종목·지표 기준으로 무엇을 어느 기간으로 캡처할지
+  ② 어디서 구할 수 있는지 (MTS, 네이버페이 증권, 한국거래소 KRX, DART 공시, 한국은행 ECOS,
+     관세청 수출입 통계, 증권사 리포트 등 실제로 무료로 볼 수 있는 곳)
+  ③ 본문의 어느 내용(특히 첫 줄)을 뒷받침하는지
+  (예: "- KB금융 최근 1년 주가 차트 (MTS·네이버페이 증권) → '실적은 좋은데 주가는 제자리'를 한눈에 보여줌")
+  AI 생성 이미지, 원문에 없는 수치를 지어낸 표는 제안하지 말 것.
 
 만약 링크만 있거나 요약할 내용이 없으면 반드시 "SKIP" 이라고만 답해줘.
 
@@ -424,32 +437,32 @@ def summarize_for_threads(channel, text, sector=None):
     result = None
     for attempt in range(2):
         if not check_api_limit():
-            return None
+            return empty
         try:
             count_api_call()
             message = client.messages.create(
                 model="claude-haiku-4-5-20251001",
-                max_tokens=700,
+                max_tokens=900,
                 messages=[{"role": "user", "content": prompt + retry_note}]
             )
             result = message.content[0].text.strip()
         except Exception as e:
             print(f"❌ 쓰레드 초안 API 오류: {e}")
-            return None
+            return empty
 
         # 토큰 한도에 걸려 문장이 중간에 잘린 경우 (해시태그/디스클레이머 누락
         # 등으로 이어짐) — 어설프게 자른 글 보내느니 이번 타임슬롯은 건너뜀
         if message.stop_reason == "max_tokens":
             print("⚠️ 쓰레드 초안이 길이 제한으로 중간에 잘림 → 이번 건 건너뜀")
-            return None
+            return empty
 
         if not result or len(result.strip()) < 10:
-            return None
+            return empty
         if "SKIP" in result.strip().upper()[:10]:
-            return None
+            return empty
         for keyword in INVALID_KEYWORDS:
             if keyword in result:
-                return None
+                return empty
 
         # Meta가 금지한 참여 유도 / 저품질 바이럴(과장·낚시) 문구 검사
         # → 1회 재생성 후에도 있으면 이번 초안은 폐기
@@ -466,9 +479,20 @@ def summarize_for_threads(channel, text, sector=None):
             )
         else:
             print(f"⚠️ 재생성 후에도 {kind} 문구 감지('{phrase}') → 이번 건 건너뜀")
-            return None
+            return empty
 
     # 본문(그대로 복사해서 올릴 부분)과 '내 한 줄 아이디어'(참고용)를 분리
+    # '이미지 제안' 부분을 먼저 떼어냄 (모델이 아이디어보다 앞에 써도 처리되도록)
+    image_hint = ""
+    if IMAGE_MARKER in result:
+        before, _, after = result.partition(IMAGE_MARKER)
+        if IDEAS_MARKER in after:
+            image_hint, _, rest = after.partition(IDEAS_MARKER)
+            result = before + IDEAS_MARKER + rest
+        else:
+            image_hint, result = after, before
+        image_hint = image_hint.strip()
+
     body, _, ideas = result.partition(IDEAS_MARKER)
     body, ideas = body.strip(), ideas.strip()
 
@@ -479,4 +503,6 @@ def summarize_for_threads(channel, text, sector=None):
     if ideas:
         body += f"\n\n━━━━━━━━━━\n✍️ 내 한 줄 추가 아이디어 (선택, 맞으면 본문 맨 위에)\n{ideas}"
 
+    if return_image_hint:
+        return body, image_hint
     return body
