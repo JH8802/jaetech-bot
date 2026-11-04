@@ -64,6 +64,24 @@ class InfoLayoutTest(unittest.TestCase):
         off = dict(s2, prev_link=False)
         self.assertNotIn("이전 편", pp.finalize("hotel", RAW, {"name": "타이거버스"}, ["타이거버스"], series=off)["body"])
 
+    def test_icon_box_with_place_name_kept(self):
+        raw = ("주말에 아이랑 다녀왔어요. 생각보다 넓었습니다.\n\n"
+               "📋 주렁주렁 동물원 영등포점\n📍 서울 영등포구 영중로 15 4층\n⏰ 평일 12:00~20:00\n⏰ 주말 10:30~20:30\n"
+               "🗓️ 휴무 {{color}}매주 월요일{{/color}}\n🎫 성인 29,000원\n🎫 18~36개월 20,300원\n\n"
+               "1. 입장\n\n입구에서 손을 씻고 들어갑니다.\n\n한 줄 평: 아이가 좋아한 곳입니다.\n\n#a #b #c #d #e")
+        body = pp.finalize("hotel", raw, {"name": "주렁주렁 동물원 영등포점"}, ["주렁주렁"])["body"]
+        self.assertIn("📋 주렁주렁 동물원 영등포점\n📍 서울 영등포구 영중로 15 4층\n⏰ 평일 12:00~20:00\n⏰ 주말 10:30~20:30\n"
+                      "🗓️ 휴무 {{color}}매주 월요일{{/color}}\n🎫 성인 29,000원\n🎫 18~36개월 20,300원", body)
+        self.assertTrue(pp.is_special_paragraph("📋 주렁주렁 동물원 영등포점\n📍 주소"))
+
+    def test_box_prompt_icons_for_places_labels_for_info(self):
+        s = prompts.build_system("food", False, "strict")
+        self.assertIn("'📋 ' 뒤에 업체·장소 이름", s)
+        self.assertIn("📍 위치(주소·층) / 📞 전화 / ⏰", s)
+        self.assertIn("휴무 줄의 날짜·요일 부분만 {{color}}", s)
+        self.assertIn("확인되지 않은 편의시설", s)
+        self.assertIn("정보글: 첫 줄은 '📋 한눈에 보기' 그대로", s)
+
     def test_eval_skips_box_and_counts_label_lines_separately(self):
         body = pp.finalize("food", RAW, {"name": "놉스 시청점"}, ["놉스"], ratings=RATINGS)["body"]
         self.assertTrue(eval_style.evaluate("food", body, ["놉스"])["checks"])
