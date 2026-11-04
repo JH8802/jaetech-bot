@@ -11,6 +11,7 @@ UNKNOWN_TAG_RE = re.compile(r"\{\{/?(?!bold\b|color\b|highlight\b)[A-Za-z_]+\}\}
 HEADING_RE = re.compile(r"^\d+\.\s")
 MAP_LINE_MARK = "플레이스 지도 삽입"
 PHOTO_RE = re.compile(r"<\s*사진\s*(\d+)\s*>")
+VIDEO_RE = re.compile(r"<\s*동영상\s*(\d+)\s*>")  # 동영상 자리(사진과 다른 번호 체계)
 MAX_HASHTAGS = 10
 MIN_HASHTAGS = 5
 HASHTAG_RANGE = {"invest": (3, 5)}  # 글 종류별 (최소, 최대). 없으면 (MIN_HASHTAGS, MAX_HASHTAGS)
@@ -144,7 +145,7 @@ _PHOTO_ONLY = re.compile(r"<사진(\d+)>")
 
 
 def _is_text_paragraph(par: str) -> bool:
-    return not (_PHOTO_ONLY.fullmatch(par) or HEADING_RE.match(strip_tags(par)) or MAP_LINE_MARK in par
+    return not (_PHOTO_ONLY.fullmatch(par) or VIDEO_RE.fullmatch(par) or HEADING_RE.match(strip_tags(par)) or MAP_LINE_MARK in par
                 or (par.startswith("#") and par.count("#") >= 3))
 
 
@@ -207,9 +208,40 @@ def normalize_photos(text: str, photo_count: int) -> tuple[str, list[str]]:
     return "\n\n".join(out), notes
 
 
+def normalize_videos(text: str, video_count: int) -> tuple[str, list[str]]:
+    """<동영상N> 자리를 정리합니다: 단독 줄로 분리, 없는 번호·중복 제거, 빠진 번호는 맺음(한 줄 평·별점·관련 글·해시태그) 앞에 넣고 알림."""
+    notes, out, seen = [], [], set()
+    for par in split_paragraphs(text):
+        found = [int(n) for n in VIDEO_RE.findall(par)]
+        if not found:
+            out.append(par)
+            continue
+        rest = re.sub(r"[ \t]{2,}", " ", VIDEO_RE.sub("", par)).strip()
+        if rest and (HEADING_RE.match(strip_tags(rest)) or (rest.startswith("#") and rest.count("#") >= 3)):
+            found = []
+        if rest:
+            out.append(rest)
+        for n in found:
+            if 1 <= n <= video_count and n not in seen:
+                seen.add(n)
+                out.append(f"<동영상{n}>")
+    missing = [n for n in range(1, video_count + 1) if n not in seen]
+    if missing:
+        def closing(p):
+            plain = strip_tags(p)
+            return bool(ONE_LINER_RE.match(plain) or plain.startswith((RATING_HEAD, SOURCE_HEAD)) or RELATED_MARK in plain
+                        or (plain.startswith("#") and plain.count("#") >= 3))
+        end = len(out)
+        while end > 0 and closing(out[end - 1]):
+            end -= 1
+        out[end:end] = [f"<동영상{n}>" for n in missing]
+        notes.append("AI가 빠뜨린 동영상 " + ", ".join(map(str, missing)) + "번 자리를 글 끝(맺음 앞)에 넣었어요. 알맞은 위치로 옮기세요.")
+    return "\n\n".join(out), notes
+
+
 def count_chars(text: str) -> int:
-    """화면 카운터와 같은 기준: 태그 제거, 해시태그 문단 제외, 공백 제외. 사진 자리는 '사진N'(원본과 같은 방식)으로 셉니다."""
-    paras = split_paragraphs(PHOTO_RE.sub(lambda m: f"사진{m.group(1)}", strip_tags(text)))
+    """화면 카운터와 같은 기준: 태그 제거, 해시태그 문단 제외, 공백 제외. 사진 자리는 '사진N'(원본과 같은 방식)으로 셉니다. 동영상 자리는 세지 않음."""
+    paras = split_paragraphs(PHOTO_RE.sub(lambda m: f"사진{m.group(1)}", VIDEO_RE.sub("", strip_tags(text))))
     idx = find_hashtag_index(paras)
     if idx is not None:
         paras.pop(idx)
@@ -290,7 +322,7 @@ def is_special_paragraph(par: str) -> bool:
     """소제목·해시태그·별점·참고 기사·사진·지도 줄처럼 문장 단위로 다루지 않는 문단"""
     plain = strip_tags(par).strip()
     return bool(HEADING_RE.match(plain) or plain.startswith(("#", RATING_HEAD, SOURCE_HEAD, SUMMARY_HEAD, INFO_BOX_HEAD, RATING_REASON_HEAD))
-                or PHOTO_RE.fullmatch(plain) or MAP_LINE_MARK in plain or RELATED_MARK in plain)
+                or PHOTO_RE.fullmatch(plain) or VIDEO_RE.fullmatch(plain) or MAP_LINE_MARK in plain or RELATED_MARK in plain)
 
 
 def split_sentences(par: str) -> list[str]:
@@ -321,12 +353,15 @@ def _put_related_line(paras: list[str], series: dict | None) -> list[str]:
 
 
 def finalize(kind: str, raw: str, place: dict | None, keywords: list[str], title: str = "", photo_count: int = 0,
-             ratings: list[dict] | None = None, news: list[dict] | None = None, series: dict | None = None) -> dict:
+             ratings: list[dict] | None = None, news: list[dict] | None = None, series: dict | None = None,
+             video_count: int = 0) -> dict:
     """원고를 정리해 {body, chars, notes} 를 돌려줍니다."""
     body, notes = clean_markdown(raw.replace("\r\n", "\n"), title)
     body = normalize_tags(body)
     body, photo_notes = normalize_photos(body, photo_count)
     notes += photo_notes
+    body, video_notes = normalize_videos(body, video_count)
+    notes += video_notes
     body, hl = limit_highlights(body, 2)
     if hl > 2:
         notes.append(f"형광펜 {hl}곳 중 2곳만 남겼어요.")

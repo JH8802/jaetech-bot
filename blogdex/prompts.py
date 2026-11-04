@@ -314,7 +314,7 @@ def _build_invest_system(style_sample: str, has_news: bool = False, photo_count:
 
 
 def build_system(kind: str, guardrail: bool, evidence_mode: str, photo_count: int = 0, style_sample: str = "",
-                 has_news: bool = False, register: str = "") -> str:
+                 has_news: bool = False, register: str = "", video_count: int = 0) -> str:
     if kind == "invest":
         return _build_invest_system(style_sample, has_news, photo_count, register)
     parts = [BASE_ROLE, PERSONA]
@@ -326,6 +326,8 @@ def build_system(kind: str, guardrail: bool, evidence_mode: str, photo_count: in
     parts.append(EVIDENCE_STRICT if evidence_mode == "strict" else EVIDENCE_TEMPLATE)
     parts.append(NO_META)
     parts.append(PHOTO_RULES if photo_count else NO_PHOTO)
+    if video_count:
+        parts.append(VIDEO_RULES)
     parts.append(INFO_LAYOUT_RULES)
     if has_news:
         parts.append(NEWS_RULES)
@@ -411,6 +413,42 @@ def build_photo_analysis_prompt(kind: str, title: str, place: dict | None, count
         f"사진 {count}장을 보냅니다(번호 {first}~{first + count - 1}). 각 사진 앞에 '[사진 N]' 표시가 있습니다. n 에는 그 번호를 그대로 쓰고, 사진마다 아래 형식의 JSON 객체를 만들어 배열로 출력하세요.",
         '{"n": 번호, "category": "' + cats + ' 중 하나", "desc": "보이는 것을 한두 문장(60자 안팎)으로", "text": "사진 속에서 또렷이 읽히는 글자(없으면 빈 문자열)", "dish": "음식 사진일 때 요리 이름(아니면 빈 문자열)", "dish_confidence": "확실 | 추정 | 모름", "caption": "사진 아래에 달 짧은 설명(8~22자)", "thumb": 대표 사진 적합도 1~5}',
     ] if x)
+
+
+VIDEO_RULES = """[동영상 자리 규칙]
+- '동영상 정보'는 작성자가 올린 동영상의 파일명·길이와, 그 영상에서 뽑은 대표 장면 한 장을 미리 본 결과입니다. 장면에 보이는 것과 메모에 적힌 것만 근거로 씁니다. 장면 한 장으로 알 수 없는 소리·움직임·이후 장면은 지어내지 않습니다.
+- 동영상마다 그 장면(또는 메모에서 그 영상을 설명한 내용)을 이야기하는 문단 바로 뒤에 단독 한 줄로 <동영상N> 을 씁니다(N은 동영상 정보의 번호). 모든 동영상을 정확히 한 번씩 씁니다. 인트로(첫 소제목 앞)와 소제목·해시태그 줄에는 두지 않습니다.
+- 메모에 파일명(예: 'IMG_1234 영상은 입구')이나 '영상'이라는 말로 설명한 내용이 있으면, 그 설명과 파일명이 같은 동영상을 그 내용 근처에 둡니다. 장면 정보가 없는 동영상은 파일명과 메모로 위치를 정합니다.
+- <동영상N> 바로 앞 문장에는 영상으로 볼 수 있다는 짧은 안내를 자연스럽게 넣어도 됩니다(예: '움직이는 모습은 영상으로 담아 봤어요'). 같은 안내 문장을 반복하지 않습니다.
+- <사진N> 과 <동영상N> 은 서로 다른 번호 체계입니다. 사진 자리 규칙과 함께 지킵니다."""
+
+
+def build_video_analysis_prompt(kind: str, title: str, place: dict | None, count: int) -> str:
+    """동영상에서 뽑은 대표 장면을 보고 무엇을 찍은 영상인지 정리하게 하는 지시."""
+    return "\n\n".join(x for x in [
+        f"글 제목: {title}",
+        _place_block(place),
+        f"각 이미지는 작성자가 찍은 동영상에서 뽑은 대표 장면 한 장입니다(이미지 {count}장, 앞의 '[사진 N]'의 N이 동영상 번호). "
+        "장면에 보이는 것만 보고, 영상 전체의 움직임·소리는 추측하지 않습니다. 이미지마다 아래 형식의 JSON 객체를 만들어 배열로 출력하세요.",
+        '{"n": 번호, "category": "외관 / 내부 / 음식 / 객실 / 풍경 / 체험 / 기타 중 하나", "desc": "무엇을 찍은 장면인지 한두 문장", "text": "", "caption": "짧은 설명(8~22자)", "thumb": 1}',
+    ] if x)
+
+
+def _dur(sec) -> str:
+    try:
+        s = int(round(float(sec)))
+    except (TypeError, ValueError):
+        return ""
+    return f"{s // 60}:{s % 60:02d}" if s > 0 else ""
+
+
+def video_block(notes: list[dict]) -> str:
+    lines = ["[동영상 정보 - 번호는 작성자가 올린 순서]"]
+    for n in notes:
+        meta = ", ".join(x for x in [n.get("name") and f"파일명 {n['name']}", _dur(n.get("duration")) and f"길이 {_dur(n.get('duration'))}"] if x)
+        desc = n.get("desc") or "장면을 읽지 못함 - 파일명과 메모로 위치를 정할 것"
+        lines.append(f"- 동영상 {n['n']}" + (f" ({meta})" if meta else "") + f": {desc}")
+    return "\n".join(lines)
 
 
 def photo_block(notes: list[dict], kind: str = "") -> str:
@@ -504,7 +542,7 @@ def flow_block(flow: str) -> str:
 
 def build_article_prompt(kind: str, title: str, keywords: list[str], memo: str, place: dict | None,
                          photo_notes: list[dict] | None = None, ratings: list[dict] | None = None, news: list[dict] | None = None,
-                         flow: str = "", series: dict | None = None) -> str:
+                         flow: str = "", series: dict | None = None, video_notes: list[dict] | None = None) -> str:
     parts = [f"[글 제목]\n{title}"]
     if keywords:
         parts.append("[핵심 키워드]\n" + ", ".join(keywords))
@@ -518,6 +556,8 @@ def build_article_prompt(kind: str, title: str, keywords: list[str], memo: str, 
     parts.append(f"[{memo_label}]\n" + (memo.strip() if memo and memo.strip() else "(없음)"))
     if photo_notes:
         parts.append(photo_block(photo_notes, kind))
+    if video_notes:
+        parts.append(video_block(video_notes))
     if kind in PLACE_KINDS and ratings:
         parts.append(rating_block(ratings))
     if news:
@@ -583,12 +623,13 @@ def build_title_prompt(kind: str, keyword: str, memo: str, place: dict | None, e
 
 
 def build_rewrite_prompt(kind: str, body: str, issues: list[str], keywords: list[str], photo_notes: list[dict] | None = None,
-                         ratings: list[dict] | None = None, news: list[dict] | None = None) -> str:
+                         ratings: list[dict] | None = None, news: list[dict] | None = None, video_notes: list[dict] | None = None) -> str:
     return "\n\n".join([
         "아래 원고를 같은 주제와 같은 사실을 유지한 채 다시 쓰세요. 아래 '고칠 점'을 모두 반영합니다.",
         "[고칠 점]\n" + "\n".join(f"- {i}" for i in issues),
         "[핵심 키워드]\n" + ", ".join(keywords) if keywords else "",
         photo_block(photo_notes, kind) + "\n- 기존 원고의 <사진N> 줄은 번호를 바꾸지 말고, 그 사진을 설명하는 문단 가까이에 그대로 둡니다." if photo_notes else "",
+        video_block(video_notes) + "\n- 기존 원고의 <동영상N> 줄은 번호를 바꾸지 말고 그대로 둡니다." if video_notes else "",
         rating_block(ratings),
         news_block(news),
         "[기존 원고]\n" + body,
