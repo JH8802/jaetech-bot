@@ -33,7 +33,7 @@ def _body_parts(body: str):
     tags = paras.pop(tag_i) if tag_i is not None else ""
     heads = [p for p in paras if HEADING_RE.match(p)]
     text_paras = [p for p in paras if not HEADING_RE.match(p) and MAP_LINE_MARK not in p and RELATED_MARK not in p
-                  and not p.startswith((RATING_HEAD, SOURCE_HEAD, SUMMARY_HEAD, INFO_BOX_HEAD)) and not re.fullmatch(r"(<)?사진 ?\d+(>)?", p)]
+                  and not p.startswith((RATING_HEAD, SOURCE_HEAD, SUMMARY_HEAD, INFO_BOX_HEAD)) and not re.fullmatch(r"(<)?(사진|동영상) ?\d+(>)?", p)]
     return text_paras, heads, tags
 
 

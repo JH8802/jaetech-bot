@@ -199,6 +199,52 @@ def read_photos(data: dict, kind: str = "food") -> list[dict]:
     return out
 
 
+MAX_VIDEOS = 10  # 글 하나에 올릴 수 있는 동영상 수(파일은 서버로 보내지 않고 대표 장면 한 장만)
+
+
+def read_videos(data: dict, kind: str) -> list[dict]:
+    """동영상 목록 [{'image': {'media_type','data'} 또는 None, 'name', 'duration'}]. 투자 생각 글에는 쓰지 않습니다."""
+    raw = data.get("videos") or []
+    if kind == "invest" or not isinstance(raw, list):
+        return []
+    if len(raw) > MAX_VIDEOS:
+        raise ValueError(f"동영상은 최대 {MAX_VIDEOS}개까지 올릴 수 있어요. ({len(raw)}개 선택됨)")
+    out = []
+    for i, item in enumerate(raw, 1):
+        item = item if isinstance(item, dict) else {}
+        image = None
+        m = re.match(r"^data:([\w/+.-]+);base64,([A-Za-z0-9+/=\s]+)$", str(item.get("frame") or ""))
+        if m and m.group(1) in PHOTO_TYPES:
+            b64 = re.sub(r"\s", "", m.group(2))
+            if len(b64) * 3 // 4 <= MAX_PHOTO_BYTES:
+                image = {"media_type": m.group(1), "data": b64}
+        try:
+            duration = max(0.0, float(item.get("duration") or 0))
+        except (TypeError, ValueError):
+            duration = 0.0
+        out.append({"image": image, "name": str(item.get("name") or f"동영상 {i}")[:120], "duration": round(duration, 1)})
+    return out
+
+
+def analyze_videos(videos: list[dict], kind: str, title: str, place: dict, usage: dict) -> list[dict]:
+    """대표 장면이 있는 동영상만 AI가 보고 설명을 붙입니다. 장면이 없거나 분석이 실패하면 파일명·길이만 남깁니다."""
+    notes = [{"n": i, "name": v["name"], "duration": v["duration"], "category": "", "desc": "", "caption": ""} for i, v in enumerate(videos, 1)]
+    framed = [(i, v["image"]) for i, v in enumerate(videos) if v["image"]]
+    for start in range(0, len(framed), VISION_BATCH):
+        chunk = framed[start:start + VISION_BATCH]
+        try:
+            part = {}
+            raw = llm.ask_vision(prompts.VISION_SYSTEM, prompts.build_video_analysis_prompt(kind, title, place, len(chunk)),
+                                 [img for _, img in chunk], usage=part, start=1)
+            usage.update(llm.merge_usage(usage, part))
+            for j, parsed in enumerate(llm.parse_photo_notes(raw, len(chunk), 1)):
+                idx = chunk[j][0]
+                notes[idx].update(category=parsed.get("category", ""), desc=parsed.get("desc", ""), caption=parsed.get("caption", ""))
+        except Exception:
+            app.logger.exception("video frame analysis failed")
+    return notes
+
+
 # ---------- 화면 / 매장 검색 ----------
 @app.get("/")
 def index():
@@ -396,7 +442,7 @@ def choose_flow_by_memo(memo: str, news_list, photo_notes, usage: dict) -> tuple
 KEYWORD_MIN_DENSITY = 4.0
 
 
-def _enforce_keywords(fin, system, usage, kind, place, keywords, title, ratings, news_list, series, photo_notes):
+def _enforce_keywords(fin, system, usage, kind, place, keywords, title, ratings, news_list, series, photo_notes, video_count=0):
     """키워드 밀도가 기준(1,000자당 4회)보다 낮으면 AI에게 키워드만 보강하게 한 번 요청합니다. fin 을 고쳐 씁니다."""
     dens = eval_style.keyword_density(fin["body"], keywords)
     if dens is not None and dens < KEYWORD_MIN_DENSITY:
@@ -407,7 +453,7 @@ def _enforce_keywords(fin, system, usage, kind, place, keywords, title, ratings,
             counts = {k: plain.count(k) for k in keywords[:2]}
             raw = llm.ask_text(system, prompts.build_keyword_fix_prompt(fin["body"], keywords, fin["chars"], counts),
                                max_tokens=12000, effort="low", usage=k_usage)
-            fixed = postprocess.finalize(kind, raw, place, keywords, title, len(photo_notes or []), ratings, news_list, series)
+            fixed = postprocess.finalize(kind, raw, place, keywords, title, len(photo_notes or []), ratings, news_list, series, video_count)
             usage = llm.merge_usage(usage, k_usage)
             new = eval_style.keyword_density(fixed["body"], keywords) or 0
             if fixed["chars"] >= fin["chars"] * 0.95 and new > dens:  # 엉뚱하거나 줄어든 응답은 받지 않음
@@ -471,7 +517,7 @@ def _enforce_invest_guard(fin, system, usage, kind, place, keywords, title, rati
 
 def _generate_events(*, kind, title, keywords, memo, place, guardrail, evidence_mode, build_prompt,
                      photos=None, photo_notes=None, parent_id=None, title_input=None, ratings=None, photo_names=None, news_list=None,
-                     flow="", series=None):
+                     flow="", series=None, videos=None, video_notes=None):
     """원고를 스트리밍으로 만들고, 후처리·점검·저장 후 SSE 이벤트를 흘려보냅니다.
     photos(사진 원본)가 있으면 먼저 사진을 살펴보고, photo_notes(이미 분석된 결과)가 있으면 그대로 씁니다."""
     parts, usage, photo_usage = [], {}, {}
@@ -492,24 +538,32 @@ def _generate_events(*, kind, title, keywords, memo, place, guardrail, evidence_
                 note["name"] = photo_names[idx]
         if photo_notes:
             yield sse("photos", {"notes": photo_notes})
+        if videos and not video_notes:
+            yield sse("status", {"text": f"동영상 {len(videos)}개의 대표 장면을 살펴보고 있어요."})
+            v_usage = {}
+            video_notes = analyze_videos(videos, kind, title, place, v_usage)
+            photo_usage = llm.merge_usage(photo_usage, v_usage)
+        video_notes = video_notes or []
         style_sample = style_for(kind)
         register = "plain" if kind == "invest" else ""  # 투자 생각: 고정 문체(분석 칼럼형)는 한다체
         system = prompts.build_system(kind, guardrail, evidence_mode, len(photo_notes or []),
-                                      style_sample=style_sample, has_news=bool(news_list), register=register)
+                                      style_sample=style_sample, has_news=bool(news_list), register=register,
+                                      video_count=len(video_notes))
         flow_by_ai = False
         if flow == "ai":
             yield sse("status", {"text": "메모를 읽고 어울리는 글 흐름을 고르고 있어요."})
             pick_usage = {}
             flow, flow_by_ai = choose_flow_by_memo(memo, news_list, photo_notes, pick_usage)
             photo_usage = llm.merge_usage(photo_usage, pick_usage)
-        user_prompt = build_prompt(photo_notes, flow)
+        user_prompt = build_prompt(photo_notes, flow, video_notes)
         yield sse("status", {"text": "원고를 쓰고 있어요."})
         for chunk in llm.stream_text(system, user_prompt, max_tokens=16000, usage=usage):
             parts.append(chunk)
             yield sse("chunk", {"text": chunk})
         usage = llm.merge_usage(photo_usage, usage)
         yield sse("status", {"text": "태그와 해시태그를 정리하고 품질을 점검하고 있어요."})
-        fin = postprocess.finalize(kind, "".join(parts), place, keywords, title, len(photo_notes or []), ratings, news_list, series)
+        fin = postprocess.finalize(kind, "".join(parts), place, keywords, title, len(photo_notes or []), ratings, news_list, series,
+                                                 len(video_notes or []))
         floor = EXPAND_MIN.get(kind)
         enough_material = len(re.sub(r"\s", "", memo or "")) >= 150 or bool(photo_notes)
         if floor and fin["chars"] < floor and enough_material:
@@ -518,7 +572,8 @@ def _generate_events(*, kind, title, keywords, memo, place, guardrail, evidence_
                 ex_usage = {}
                 raw2 = llm.ask_text(system, prompts.build_expand_prompt(kind, fin["body"], fin["chars"], floor + EXPAND_TARGET_EXTRA, memo, photo_notes, keywords, ratings),
                                     max_tokens=9000, effort=llm.EFFORT, usage=ex_usage)
-                fin2 = postprocess.finalize(kind, raw2, place, keywords, title, len(photo_notes or []), ratings, news_list, series)
+                fin2 = postprocess.finalize(kind, raw2, place, keywords, title, len(photo_notes or []), ratings, news_list, series,
+                                                 len(video_notes or []))
                 usage = llm.merge_usage(usage, ex_usage)
                 if fin2["chars"] > fin["chars"]:
                     fin2["notes"].append(f"분량이 짧아 한 번 보강했어요({fin['chars']:,}자 → {fin2['chars']:,}자).")
@@ -529,7 +584,8 @@ def _generate_events(*, kind, title, keywords, memo, place, guardrail, evidence_
                 app.logger.exception("expand failed")
                 fin["notes"].append("분량 보강에 실패해 처음 글을 그대로 썼어요.")
         if kind != "invest" and keywords:  # 핵심 키워드가 1,000자당 4회에 못 미치면 키워드만 한 번 보강
-            for ev in _enforce_keywords(fin, system, usage, kind, place, keywords, title, ratings, news_list, series, photo_notes):
+            for ev in _enforce_keywords(fin, system, usage, kind, place, keywords, title, ratings, news_list, series, photo_notes,
+                                       len(video_notes)):
                 yield ev
             usage = fin.pop("_usage", usage)
         if kind == "invest":
@@ -546,12 +602,13 @@ def _generate_events(*, kind, title, keywords, memo, place, guardrail, evidence_
         yield sse("replace", {"text": fin["body"]})
         article_id = storage.save_article(
             kind=kind, title_input=title_input or title, title_final=title, memo=memo, place=place, keywords=keywords,
-            options={"guardrail": guardrail, "evidence_mode": evidence_mode, "usage": usage, "photos": photo_notes or [], "ratings": ratings or [],
+            options={"guardrail": guardrail, "evidence_mode": evidence_mode, "usage": usage, "photos": photo_notes or [], "videos": video_notes, "ratings": ratings or [],
                      "news": news_list or [], "flow": flow, "register": register, "series": series},
             body=fin["body"], chars=fin["chars"],
             quality=quality, model=usage.get("model") or llm.MODEL, parent_id=parent_id)
         yield sse("done", {"article_id": article_id, "title": title, "body": fin["body"], "chars": fin["chars"],
-                           "quality": quality, "notes": fin["notes"], "usage": usage, "photos": photo_notes or []})
+                           "quality": quality, "notes": fin["notes"], "usage": usage, "photos": photo_notes or [],
+                           "videos": video_notes})
     except Exception as e:  # 스트림 중 오류는 SSE 로 알려 줍니다.
         msg, _ = friendly_error(e)
         if not isinstance(e, (ValueError, RuntimeError, llm.RefusedError, llm.TruncatedError)):
@@ -574,6 +631,7 @@ def article_stream():
     elif not keywords:
         keywords = prompts.derive_keywords(c["kind"], title, c["place"])
     photos = read_photos(data, c["kind"])
+    videos = read_videos(data, c["kind"])
     ratings = read_ratings(data, c["kind"])
     news_list = news.read_news_list(data.get("news")) if c["kind"] == "invest" else []  # 참고 기사는 투자 생각 글 전용
     flow = pick_invest_flow(str(data.get("invest_flow", "auto"))) if c["kind"] == "invest" else ""
@@ -586,9 +644,9 @@ def article_stream():
     return sse_response(_generate_events(
         kind=c["kind"], title=title, keywords=keywords, memo=c["memo"], place=c["place"],
         guardrail=c["guardrail"], evidence_mode=c["evidence_mode"], photos=photos, ratings=ratings,
-        photo_names=read_photo_names(data), news_list=news_list, flow=flow, series=series,
-        build_prompt=lambda notes, fl: prompts.build_article_prompt(c["kind"], title, keywords, c["memo"], c["place"], notes, ratings, news_list,
-                                                                    fl, series)))
+        photo_names=read_photo_names(data), news_list=news_list, flow=flow, series=series, videos=videos,
+        build_prompt=lambda notes, fl, vn: prompts.build_article_prompt(c["kind"], title, keywords, c["memo"], c["place"], notes, ratings, news_list,
+                                                                        fl, series, vn)))
 
 
 @app.post("/api/articles/<int:article_id>/rewrite")
@@ -605,9 +663,9 @@ def article_rewrite(article_id: int):
         kind=art["kind"], title=art["title"], keywords=art["keywords"], memo=art["memo"], place=art["place"],
         guardrail=bool(opts.get("guardrail")), evidence_mode=opts.get("evidence_mode", "strict"),
         photo_notes=notes, parent_id=article_id, title_input=art["title_input"], ratings=opts.get("ratings") or [],
-        news_list=opts.get("news") or [], flow=opts.get("flow", ""), series=opts.get("series"),
-        build_prompt=lambda n, fl: prompts.build_rewrite_prompt(art["kind"], art["body"], issues, art["keywords"], n, opts.get("ratings") or [],
-                                                            opts.get("news") or [])))
+        news_list=opts.get("news") or [], flow=opts.get("flow", ""), series=opts.get("series"), video_notes=opts.get("videos") or [],
+        build_prompt=lambda n, fl, vn: prompts.build_rewrite_prompt(art["kind"], art["body"], issues, art["keywords"], n, opts.get("ratings") or [],
+                                                                opts.get("news") or [], vn)))
 
 
 @app.get("/api/articles")
