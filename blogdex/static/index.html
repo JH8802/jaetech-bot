@@ -525,7 +525,9 @@ const isTags = (p) => p.startsWith('#') && (p.match(/#/g) || []).length >= 3;
 const stripTags = (t) => t.replace(TAG_RE, '');
 const paragraphs = (t) => t.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);
 const SOURCE_HEAD = '📰 참고한 기사';
-const INFO_BOX_HEAD = '📋 한눈에 보기', SUMMARY_HEAD = '📌 이 글 핵심 3줄', RELATED_MARK = '관련 글 링크 삽입';  // 서버 postprocess 와 같게
+const INFO_BOX_HEAD = '📋', SUMMARY_HEAD = '📌 이 글 핵심 3줄', RELATED_MARK = '관련 글 링크 삽입';  // 서버 postprocess 와 같게
+// 정보 박스·핵심 3줄: 첫 줄은 굵게, 나머지 줄은 강조 태그(휴무 날짜 색 등)를 살려 줄마다 <br>
+const boxLines = (p, counter, mode) => p.split('\n').map((l, i) => (i === 0 ? `<b>${esc(stripTags(l))}</b>` : inline(l, counter, mode))).join('<br>');
 const br = (html) => html.replace(/\n/g, '<br>');  // 문단 안 줄바꿈(투자 글: 한 문장 한 줄)을 그대로 보여 주고 붙여넣기
 
 // 복사본의 사진 자리: 번호 순서와 글 순서가 다를 수 있어 파일 이름을 함께 적어 준다(이 화면에서 올린 사진만)
@@ -587,7 +589,7 @@ function renderBody(text) {
     if (p.includes(RELATED_MARK)) return `<p class="mapline">${esc(p)}</p>`;
     if (isTags(p)) return `<p class="tags">${markAd(esc(p))}</p>`;
     const mark = (h) => h.replace(/\[확인 필요[^\]]*\]/g, '<span class="todo">$&</span>');  // 발행 전 직접 확인할 자리
-    if (p.startsWith(INFO_BOX_HEAD) || p.startsWith(SUMMARY_HEAD)) return `<p class="ratingbox">${mark(stripTags(p).split('\n').map((l, i) => (i === 0 ? `<b>${esc(l)}</b>` : esc(l))).join('<br>'))}</p>`;
+    if (p.startsWith(INFO_BOX_HEAD) || p.startsWith(SUMMARY_HEAD)) return `<p class="ratingbox">${mark(boxLines(p, counter, 'view'))}</p>`;
     if (isHead(p)) return `<h3>${mark(markAd(inline(p, counter, 'view')))}</h3>`;
     return `<p>${br(mark(markAd(inline(p, counter, 'view'))))}</p>`;
   }).join('');
@@ -605,7 +607,7 @@ function toCopyHTML(text) {
     if (pn) return `<p>${photoCopyLabel(pn)}${photoCaption(pn) ? `<br>캡션: ${esc(photoCaption(pn))}` : ''}</p>`;
     if (isTags(p)) return `<p>${esc(p)}</p>`;
     if (p.startsWith(SOURCE_HEAD)) return `<p>${esc(p).replace(/\n/g, '<br>')}</p>`;
-    if (p.startsWith(INFO_BOX_HEAD) || p.startsWith(SUMMARY_HEAD)) return `<p>${todoCopy(stripTags(p).split('\n').map((l, i) => (i === 0 ? `<b>${esc(l)}</b>` : esc(l))).join('<br>'))}</p>`;
+    if (p.startsWith(INFO_BOX_HEAD) || p.startsWith(SUMMARY_HEAD)) return `<p>${todoCopy(boxLines(p, counter, 'copy'))}</p>`;
     if (isHead(p)) return `<p><b>${todoCopy(inline(p, counter, 'copy'))}</b></p>`;
     return `<p>${br(todoCopy(inline(p, counter, 'copy')))}</p>`;
   }).join('<p><br></p>');
