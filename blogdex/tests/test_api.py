@@ -153,8 +153,8 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(ok("info", 21), 400)
         self.assertEqual(ok("food", 20), 200)
         self.assertEqual(ok("food", 21), 400)
-        self.assertEqual(ok("hotel", 30), 200)
-        self.assertEqual(ok("hotel", 31), 400)
+        self.assertEqual(ok("hotel", 40), 200)  # 호텔·여행 후기는 40장까지
+        self.assertEqual(ok("hotel", 41), 400)
         r, _ = self._stream(kind="food", photos=[self.PIXEL] * 21)
         self.assertIn("최대 20장", r.get_json()["error"])
 
