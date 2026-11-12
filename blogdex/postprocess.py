@@ -141,6 +141,27 @@ def insert_map_line(text: str, place_name: str) -> str:
     return "\n\n".join(paras)
 
 
+LINK_ICON = "🔗"
+
+
+def add_place_link(text: str, link: str) -> str:
+    """플레이스 링크를 한눈에 보기 박스(📋) 마지막 줄로 넣습니다. 박스가 없으면 지도 삽입 줄 아래, 그것도 없으면 해시태그 앞에 넣습니다."""
+    if not link or link in text:
+        return text
+    paras = split_paragraphs(text)
+    line = f"{LINK_ICON} {link}"
+    box = next((i for i, p in enumerate(paras) if strip_tags(p).startswith(INFO_BOX_HEAD)), None)
+    if box is not None:
+        paras[box] = paras[box].rstrip() + "\n" + line
+    else:
+        at = next((i + 1 for i, p in enumerate(paras) if MAP_LINE_MARK in p), None)
+        if at is None:
+            end = find_hashtag_index(paras)
+            at = end if end is not None else len(paras)
+        paras.insert(at, f"{LINK_ICON} 네이버 지도 {link}")
+    return "\n\n".join(paras)
+
+
 _PHOTO_ONLY = re.compile(r"<사진(\d+)>")
 
 
@@ -321,7 +342,7 @@ def _put_source_block(paras: list[str], news: list[dict]) -> list[str]:
 def is_special_paragraph(par: str) -> bool:
     """소제목·해시태그·별점·참고 기사·사진·지도 줄처럼 문장 단위로 다루지 않는 문단"""
     plain = strip_tags(par).strip()
-    return bool(HEADING_RE.match(plain) or plain.startswith(("#", RATING_HEAD, SOURCE_HEAD, SUMMARY_HEAD, INFO_BOX_HEAD, RATING_REASON_HEAD))
+    return bool(HEADING_RE.match(plain) or plain.startswith(("#", RATING_HEAD, SOURCE_HEAD, SUMMARY_HEAD, INFO_BOX_HEAD, RATING_REASON_HEAD, LINK_ICON))
                 or PHOTO_RE.fullmatch(plain) or VIDEO_RE.fullmatch(plain) or MAP_LINE_MARK in plain or RELATED_MARK in plain)
 
 
@@ -410,4 +431,5 @@ def finalize(kind: str, raw: str, place: dict | None, keywords: list[str], title
 
     if kind in ("food", "hotel"):
         body = insert_map_line(body, (place or {}).get("name", ""))
+        body = add_place_link(body, (place or {}).get("link", ""))
     return {"body": body, "chars": count_chars(body), "notes": notes}

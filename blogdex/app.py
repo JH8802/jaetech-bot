@@ -19,6 +19,7 @@ import llm
 import market
 import news
 import postprocess
+import place_info
 import prompts
 import register as reg
 import storage
@@ -102,7 +103,15 @@ def sse_response(gen) -> Response:
 def read_place(raw) -> dict:
     if not isinstance(raw, dict):
         return {}
-    return {k: str(raw.get(k, "")).strip()[:200] for k in ("name", "category", "address", "phone")}
+    out = {k: str(raw.get(k, "")).strip()[:200] for k in ("name", "category", "address", "phone")}
+    link = place_info.clean_link(raw.get("link"))
+    if str(raw.get("link") or "").strip() and not link:
+        raise ValueError("플레이스 링크는 네이버 지도에서 [공유] → [링크 복사]로 받은 주소(naver.me 또는 map.naver.com)를 넣어 주세요.")
+    details = str(raw.get("details") or "").replace("\r\n", "\n").strip()
+    if len(details) > place_info.MAX_DETAILS:
+        raise ValueError(f"매장 정보는 {place_info.MAX_DETAILS:,}자 이내로 줄여 주세요.")
+    out.update(link=link, details=details)
+    return out
 
 
 def read_common(data: dict) -> dict:
@@ -336,6 +345,41 @@ def news_preview():
         return jsonify(article=news.fetch_article(url))
     except news.FetchError as e:
         raise ValueError(str(e))
+
+
+@app.post("/api/place-info")
+def place_info_read():
+    """네이버 지도에서 복사한 글·화면 캡처를 AI가 읽어 매장 정보로 정리합니다(네이버 지도를 직접 긁어오지 않음)."""
+    data = request.get_json(silent=True) or {}
+    kind = data.get("kind") if data.get("kind") in prompts.PLACE_KINDS else "food"
+    name = str(data.get("name", "")).strip()[:100]
+    text = str(data.get("text", "")).replace("\r\n", "\n").strip()
+    if len(text) > place_info.MAX_PASTE:
+        raise ValueError(f"붙여넣은 글은 {place_info.MAX_PASTE:,}자 이내로 줄여 주세요.")
+    raw_imgs = data.get("images") or []
+    if not isinstance(raw_imgs, list) or len(raw_imgs) > place_info.MAX_CAPTURES:
+        raise ValueError(f"캡처는 최대 {place_info.MAX_CAPTURES}장까지 올릴 수 있어요.")
+    images = []
+    for i, item in enumerate(raw_imgs, 1):
+        m = re.match(r"^data:([\w/+.-]+);base64,([A-Za-z0-9+/=\s]+)$", item if isinstance(item, str) else "")
+        b64 = re.sub(r"\s", "", m.group(2)) if m else ""
+        if not m or m.group(1) not in PHOTO_TYPES or len(b64) * 3 // 4 > MAX_PHOTO_BYTES:
+            raise ValueError(f"캡처 {i}번을 읽을 수 없어요. JPG, PNG 캡처를 올려 주세요.")
+        images.append({"media_type": m.group(1), "data": b64})
+    if not text and not images:
+        raise ValueError("네이버 지도에서 복사한 글을 붙여넣거나 화면 캡처를 올려 주세요.")
+    user = place_info.build_prompt(kind, name, text, len(images))
+    usage: dict = {}
+    if llm.is_mock():
+        raw = place_info.MOCK_JSON
+    elif images:
+        raw = llm.ask_vision(place_info.SYSTEM, user, images, max_tokens=6000, usage=usage)
+    else:
+        raw = llm.ask_text(place_info.SYSTEM, user, max_tokens=6000, effort="low", usage=usage)
+    info = place_info.parse(raw)
+    if not any(info.values()):
+        raise ValueError("매장 정보를 찾지 못했어요. 네이버 지도의 홈 탭(주소·영업시간)과 메뉴 탭이 보이게 캡처해 주세요.")
+    return jsonify(info=info, details=place_info.to_details(info), usage=usage)
 
 
 @app.get("/api/market")

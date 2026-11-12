@@ -369,6 +369,11 @@ def _place_block(place: dict | None) -> str:
     for label, key in (("상호", "name"), ("업종", "category"), ("주소", "address"), ("전화", "phone")):
         if place.get(key):
             lines.append(f"- {label}: {place[key]}")
+    if place.get("details"):
+        lines.append("\n[네이버 지도 정보 - 작성자가 네이버 지도에서 가져와 확인한 정보. 한눈에 보기 박스와 본문의 사실로 사용 가능]\n"
+                     + place["details"]
+                     + "\n- 메모·메뉴판 사진과 값이 다르면(가격 인상 등) 메모·메뉴판 사진(방문 당시 정보)을 우선합니다."
+                     + "\n- 여기 있는 메뉴를 먹었다고 쓰지 않습니다. 먹은 메뉴와 맛은 메모·사진에 있는 것만 씁니다.")
     return "\n".join(lines)
 
 
