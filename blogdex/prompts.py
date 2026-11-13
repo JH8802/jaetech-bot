@@ -5,6 +5,8 @@
 """
 import re
 
+import outline
+
 KINDS = {
     "info": {"label": "정보글"},
     "food": {"label": "맛집글"},
@@ -545,9 +547,19 @@ def flow_block(flow: str) -> str:
     return "\n".join(lines)
 
 
+OUTLINE_RULES = """[글 구성 사용 규칙 - 구성은 설계도이지 사실 자료가 아닙니다]
+- 소제목: '소제목 목차'의 순서와 뜻 그대로 씁니다. 적힌 문구를 최대한 살리고, 공백 포함 40자를 넘으면 뜻을 유지한 채 줄입니다. '[비교 1]' 같은 앞머리 표시는 그대로 둡니다. 목차에 없는 소제목을 새로 만들거나 빼지 않습니다.
+- 소제목 아래 '·' 항목은 그 섹션에서 다룰 내용 가이드입니다. 메모·사진·업체 정보에 재료가 있는 것만 씁니다.
+- 경험(아이 반응, 가장 좋았던 곳, 대기·주차 경험, 한 줄 평 등)은 메모·사진에 있을 때만 씁니다. 구성에만 있고 재료가 없으면 지어내지 말고 '[확인 필요: 무엇]'으로 남깁니다.
+- 구성에 적힌 숫자(요금, 공제율, 한도, 기간, 거리, 시간 등)는 그대로 사실로 쓰지 않습니다. 메모·업체 정보·사진에도 같은 값이 있을 때만 쓰고, 아니면 '[확인 필요: 대중교통 공제율]'처럼 남깁니다. 링크는 지어내지 않고 '(예약 링크 삽입)'처럼 자리만 남깁니다.
+- '검색자 니즈'는 인트로와 각 섹션이 답해야 할 질문입니다. 인트로에서 독자의 고민을 짚고, 글이 그 답을 준다는 것을 보여 줍니다.
+- 키워드는 [핵심 키워드] 규칙을 따릅니다. 세부 키워드는 해당 섹션에 자연스럽게 한 번씩 녹이고 억지로 반복하지 않습니다.
+- 목차에 요약·정리 섹션(예: '3줄 요약', '체크리스트')이 있으면 앞쪽 '📌 이 글 핵심 3줄'과 같은 문장을 반복하지 말고, 실천 항목을 '① ', '② ', '③ ' 줄로 씁니다."""
+
+
 def build_article_prompt(kind: str, title: str, keywords: list[str], memo: str, place: dict | None,
                          photo_notes: list[dict] | None = None, ratings: list[dict] | None = None, news: list[dict] | None = None,
-                         flow: str = "", series: dict | None = None, video_notes: list[dict] | None = None) -> str:
+                         flow: str = "", series: dict | None = None, video_notes: list[dict] | None = None, outline_text: str = "") -> str:
     parts = [f"[글 제목]\n{title}"]
     if keywords:
         parts.append("[핵심 키워드]\n" + ", ".join(keywords))
@@ -569,6 +581,8 @@ def build_article_prompt(kind: str, title: str, keywords: list[str], memo: str, 
         parts.append(news_block(news))
     if kind == "invest" and flow in INVEST_FLOWS:
         parts.append(flow_block(flow))
+    if outline_text and kind != "invest":
+        parts.append(outline.to_block(outline_text) + "\n\n" + OUTLINE_RULES)
     if series and series.get("name"):
         part = f" {series['part']}편" if series.get("part") else ""
         parts.append(f"[시리즈]\n이 글은 '{series['name']}' 시리즈{part}입니다. 인트로에서 시리즈의 몇 번째 글인지 한 번 자연스럽게 밝힙니다. "
@@ -628,7 +642,8 @@ def build_title_prompt(kind: str, keyword: str, memo: str, place: dict | None, e
 
 
 def build_rewrite_prompt(kind: str, body: str, issues: list[str], keywords: list[str], photo_notes: list[dict] | None = None,
-                         ratings: list[dict] | None = None, news: list[dict] | None = None, video_notes: list[dict] | None = None) -> str:
+                         ratings: list[dict] | None = None, news: list[dict] | None = None, video_notes: list[dict] | None = None,
+                         outline_text: str = "") -> str:
     return "\n\n".join([
         "아래 원고를 같은 주제와 같은 사실을 유지한 채 다시 쓰세요. 아래 '고칠 점'을 모두 반영합니다.",
         "[고칠 점]\n" + "\n".join(f"- {i}" for i in issues),
@@ -637,6 +652,7 @@ def build_rewrite_prompt(kind: str, body: str, issues: list[str], keywords: list
         video_block(video_notes) + "\n- 기존 원고의 <동영상N> 줄은 번호를 바꾸지 말고 그대로 둡니다." if video_notes else "",
         rating_block(ratings),
         news_block(news),
+        (outline.to_block(outline_text) + "\n\n" + OUTLINE_RULES) if outline_text and kind != "invest" else "",
         "[기존 원고]\n" + body,
         "'📰 참고한 기사' 문단은 시스템이 다시 넣으니 빼도 됩니다." if news else "",
         "'★ 별점 한눈에 보기' 문단은 항목 옆 이유까지 그대로 둡니다. '📋 한눈에 보기' 박스와 '라벨: 값' 줄, ①② 단계 줄도 형식을 유지합니다. '한 줄 평:'(또는 '한 줄 정리:') 문단은 해시태그 바로 앞의 마지막 본문 문단으로 유지합니다.",

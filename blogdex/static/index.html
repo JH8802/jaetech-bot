@@ -208,6 +208,19 @@
       <p class="hint">주소를 넣으면 글 속 주소 [확인 필요]가 줄고, 지역 해시태그(#마포맛집)가 맞춰져요. 매장 정보는 '한눈에 보기' 박스에 쓰이고, 메뉴판 사진·메모와 다르면 방문 당시 정보(사진·메모)를 우선해요. 플레이스 링크는 박스 마지막 줄(🔗)에 들어가요.</p>
     </div>
 
+    <details class="manual" id="outlineBox">
+      <summary><b>글 구성(목차) 붙여넣기</b> <span id="outlineSummary">(선택 · 주제·키워드·검색자 니즈·소제목 기획을 그대로 붙여넣기)</span></summary>
+      <textarea id="outline" maxlength="4000" style="min-height:140px;margin-top:8px" placeholder="예)&#10;[주제 1] 11월 연말정산 미리보기: 신용카드 vs 체크카드 황금비율&#10;- 메인 키워드: 연말정산 미리보기 신용카드 체크카드&#10;- 세부/연관 키워드: 연말정산 총급여 25% 계산, 신용카드 체크카드 소득공제율&#10;- 검색자 니즈: 남은 11~12월에 무슨 카드를 얼마나 써야 하는지&#10;1. 홈택스 연말정산 미리보기, 11월에 확인해야 하는 이유&#10;   - 1~9월 누적 사용액 조회 방법&#10;2. ..."></textarea>
+      <div class="row" style="margin-top:8px;align-items:center">
+        <button class="btn ghost" id="btnOutline" type="button" style="height:40px">구성 읽기</button>
+        <button class="btn ghost" id="btnOutlineClear" type="button" style="height:40px">비우기</button>
+        <span class="hint" id="outlineMsg" style="margin:0"></span>
+      </div>
+      <p class="hint">[구성 읽기]를 누르면 주제는 제목 칸, 메인·세부 키워드는 핵심 키워드 칸에 채워져요(이미 적힌 칸은 그대로, AI 비용 0원).
+      원고는 <b>소제목을 목차 순서·뜻 그대로</b> 쓰고, 검색자 니즈에 답하도록 써요.
+      구성은 <b>설계도</b>라서, 구성에만 있는 경험(아이 반응 등)이나 숫자(요금·공제율 등)는 메모·사진에도 있어야 글에 쓰이고, 없으면 [확인 필요]로 남아요.</p>
+    </details>
+
     <label class="cap" for="title" id="titleCap">제목 또는 주제</label>
     <input type="text" id="title" maxlength="200" placeholder="블로그 글 제목이나 주제를 입력해주세요" autocomplete="off">
     <div class="row" style="margin-top:10px">
@@ -430,7 +443,7 @@ function setKind(kind) {
   const invest = kind === 'invest';
   $('guardrailName').textContent = invest ? '투자 표현 가드레일' : '표시·광고 가드레일';
   $('guardrailSmall').textContent = invest ? '(매수·매도 권유·수익 보장·전망 단정 표현 제한, 개인 의견 안내 문장 포함)' : '(효능 단정·암시 표현 제한)';
-  $('kwBox').classList.toggle('hidden', invest); $('seriesBox').classList.toggle('hidden', invest);
+  $('kwBox').classList.toggle('hidden', invest); $('seriesBox').classList.toggle('hidden', invest); $('outlineBox').classList.toggle('hidden', invest);
   $('photoCap').textContent = invest ? '이미지 자료' : '사진'; $('photoHint').innerHTML = invest ? PHOTO_HINT_INVEST : PHOTO_HINT; $('memoTplRow').classList.toggle('hidden', !invest);
   $('newsBox').classList.toggle('hidden', !NEWS_KINDS.includes(kind));
   $('guardrail').disabled = invest;  // 투자 글 가드레일은 끌 수 없음(서버도 항상 켬)
@@ -744,6 +757,26 @@ function currentPlace() {
   return name ? { name, category: $('mCategory').value.trim(), address: $('mAddress').value.trim(), phone: $('mPhone').value.trim(),
     link: $('mLink').value.trim(), details: $('mDetails').value.trim() } : null;
 }
+/* ---------- 글 구성(목차): 코드가 읽어 제목·키워드 칸을 채움(AI 호출 없음) ---------- */
+function outlineSummary() {
+  const n = $('outline').value.split('\n').filter((l) => /^\s*(\*\*)?\d{1,2}[.)]/.test(l) && !/^\s{2,}/.test(l)).length;
+  $('outlineSummary').textContent = $('outline').value.trim() ? `(붙여넣음 · 소제목 ${n}개)` : '(선택 · 주제·키워드·검색자 니즈·소제목 기획을 그대로 붙여넣기)';
+}
+$('outline').addEventListener('input', outlineSummary);
+$('btnOutlineClear').onclick = () => { $('outline').value = ''; outlineSummary(); $('outlineMsg').textContent = ''; scheduleDraftSave(); };
+$('btnOutline').onclick = async () => {
+  const text = $('outline').value.trim();
+  if (!text) { $('outlineMsg').textContent = '글 구성을 먼저 붙여넣어 주세요.'; return; }
+  try {
+    const r = await api('/api/outline/parse', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) });
+    const filled = [];
+    if (r.topic && !$('title').value.trim()) { $('title').value = r.topic; $('btnWrite').disabled = state.busy; filled.push('제목'); }
+    const kws = [r.main, ...r.subs].filter(Boolean).slice(0, 8);
+    if (kws.length && !$('kw').value.trim()) { $('kw').value = kws.join(', '); filled.push('핵심 키워드'); }
+    $('outlineMsg').textContent = `소제목 ${r.sections.length}개를 읽었어요.` + (filled.length ? ` 채운 칸: ${filled.join(', ')}.` : ' (제목·키워드 칸은 이미 적혀 있어 그대로 뒀어요)');
+    outlineSummary(); scheduleDraftSave();
+  } catch (err) { $('outlineMsg').textContent = err.message; }
+};
 /* ---------- 네이버 지도 정보 가져오기: 복사한 글·캡처를 AI가 읽어 정리(네이버를 직접 긁어오지 않음) ---------- */
 const MAX_CAPTURES = 4;  // 서버 place_info.MAX_CAPTURES 와 같게
 state.captures = [];
@@ -783,7 +816,7 @@ $('btnPlaceInfo').onclick = async () => {
   finally { btn.disabled = false; }
 };
 const keywordList = () => $('kw').value.split(/[,，]/).map((s) => s.trim()).filter(Boolean);
-const commonBody = () => ({ kind: state.kind, memo: $('memo').value.trim(), place: currentPlace(), ratings: currentRatings(), guardrail: $('guardrail').checked, evidence_mode: $('evidence').value });
+const commonBody = () => ({ kind: state.kind, memo: $('memo').value.trim(), outline: state.kind === 'invest' ? '' : $('outline').value.trim(), place: currentPlace(), ratings: currentRatings(), guardrail: $('guardrail').checked, evidence_mode: $('evidence').value });
 
 /* ---------- 제목 후보 ---------- */
 async function makeTitles(regen) {
@@ -994,6 +1027,7 @@ $('btnCopy').onclick = copyArticle;
 function newArticle() {
   state.article = null; $('title').value = ''; $('memo').value = ''; $('kw').value = ''; state.news = []; renderNews();
   $('seriesName').value = ''; $('seriesPart').value = ''; $('seriesPrev').checked = false; $('candidates').classList.add('hidden');
+  $('outline').value = ''; outlineSummary(); $('outlineMsg').textContent = ''; $('outlineBox').open = false;
   $('placeQuery').value = ''; $('mCategory').value = ''; $('mAddress').value = ''; $('mPhone').value = ''; $('mLink').value = ''; $('mDetails').value = ''; $('mPaste').value = ''; state.captures = []; renderCaptures(); $('placeInfoMsg').textContent = ''; updateHints(); resetRatingRows(); state.photos = []; state.resultPhotos = []; renderPhotos(); state.videos = []; state.resultVideos = []; state.videoNotes = []; renderVideos(); $('photoNotes').innerHTML = ''; $('todoPanel').innerHTML = ''; state.adTerms = [];
   $('resultBox').innerHTML = '<div class="empty">원고 제목을 입력하세요.<br>원고를 생성하면 결과가 여기에 표시됩니다.</div>';
   $('actions').classList.add('hidden'); $('quality').innerHTML = ''; $('notes').textContent = ''; $('btnWrite').disabled = true; showError('');
@@ -1080,7 +1114,7 @@ loadStyle();
 state.draftPaused = false; var draftTimer = 0;  // var: 위쪽 함수(사진·기사 목록)가 먼저 불러도 오류 없게
 function collectDraft() {
   return {
-    kind: state.kind, title: $('title').value, kw: $('kw').value, memo: $('memo').value,
+    kind: state.kind, title: $('title').value, kw: $('kw').value, memo: $('memo').value, outline: $('outline').value,
     place: { q: $('placeQuery').value, cat: $('mCategory').value, addr: $('mAddress').value, phone: $('mPhone').value, link: $('mLink').value, details: $('mDetails').value, paste: $('mPaste').value },
     ratings: PLACE_KINDS.includes(state.kind) ? ratingRows[state.kind].map((r) => ({ label: r.label, score: r.score })) : [],
     news: state.news, photos: state.photos.map((p) => ({ url: p.url, name: p.name })),
@@ -1089,7 +1123,7 @@ function collectDraft() {
     series: { name: $('seriesName').value, part: $('seriesPart').value, prev: $('seriesPrev').checked },
   };
 }
-const draftEmpty = (d) => !d.title.trim() && !d.memo.trim() && !d.news.length && !d.photos.length && !(d.videos || []).length && !d.place.q.trim();
+const draftEmpty = (d) => !d.title.trim() && !d.memo.trim() && !(d.outline || '').trim() && !d.news.length && !d.photos.length && !(d.videos || []).length && !d.place.q.trim();
 function draftTime(t) { return t ? t.slice(5, 16).replace('-', '/') : ''; }
 async function saveDraft(manual) {
   clearTimeout(draftTimer);
@@ -1107,7 +1141,7 @@ async function saveDraft(manual) {
 function scheduleDraftSave() { if (state.draftPaused) return; clearTimeout(draftTimer); draftTimer = setTimeout(() => saveDraft(false), 3000); }
 function restoreDraft(d) {
   setKind(d.kind || 'info');
-  $('title').value = d.title || ''; $('kw').value = d.kw || ''; $('memo').value = d.memo || '';
+  $('title').value = d.title || ''; $('kw').value = d.kw || ''; $('memo').value = d.memo || ''; $('outline').value = d.outline || ''; outlineSummary();
   const p = d.place || {}; $('placeQuery').value = p.q || ''; $('mCategory').value = p.cat || ''; $('mAddress').value = p.addr || ''; $('mPhone').value = p.phone || ''; $('mLink').value = p.link || ''; $('mDetails').value = p.details || ''; $('mPaste').value = p.paste || '';
   if (PLACE_KINDS.includes(state.kind) && Array.isArray(d.ratings) && d.ratings.length) { ratingRows[state.kind] = d.ratings; renderRatings(); }
   state.news = d.news || []; renderNews();
