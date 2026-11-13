@@ -11,7 +11,7 @@ import adcheck
 import outline
 import register as reg
 from postprocess import (CHILD_BOX_HEAD, HASHTAG_RANGE, HEADING_RE, INFO_BOX_HEAD, MAP_LINE_MARK, MAX_HASHTAGS, MIN_HASHTAGS, RATING_HEAD, RELATED_MARK,
-                         SOURCE_HEAD, SUMMARY_HEAD, count_chars, find_hashtag_index, is_disclosure_paragraph, split_paragraphs, strip_tags)
+                         SOURCE_HEAD, SUMMARY_HEAD, count_chars, count_chars_ws, find_hashtag_index, is_disclosure_paragraph, split_paragraphs, strip_tags)
 
 GENERIC_WORDS = ["편안", "무난", "자연스럽", "부담", "좋았", "좋겠", "차분", "다양한", "효과적", "전반적으로"]
 FIRST_PERSON_RE = re.compile(r"^(저는|저도|제가|저의)")
@@ -166,7 +166,13 @@ def evaluate(kind: str, body: str, keywords: list[str], memo: str = "", title: s
                                  f"모든 문장의 어미를 {reg.LABELS[register]}로 맞출 것"))
             checks.append(_check("first_person", "'저는'으로 시작하는 문장", f"{first_p:.0%}", "35% 이하", first_p <= 0.35,
                                  "'저는/저도'로 시작하는 문장을 25% 이하로 줄일 것"))
-        elif kind in ("food", "hotel", "invest"):
+        elif kind in ("food", "hotel"):  # 홈판 규칙: 해요체 중심
+            checks.append(_check("endings", "말투(해요체 중심, 합니다체 20% 이하)", f"합니다체 {formal:.0%} / 해요·구어 {casual:.0%}", "합니다체 20% 이하",
+                                 formal <= 0.20 and casual >= 0.60,
+                                 "해요체 중심으로 쓰고 합니다체는 20% 이하로 줄일 것(~더라고요, ~거든요, ~잖아요 같은 구어 어미는 좋음)"))
+            checks.append(_check("first_person", "'저는'으로 시작하는 문장", f"{first_p:.0%}", "35% 이하", first_p <= 0.35,
+                                 "'저는/저도'로 시작하는 문장을 25% 이하로 줄일 것"))
+        elif kind == "invest":
             checks.append(_check("endings", "말투 섞임(합니다체 / 해요·구어)", f"{formal:.0%} / {casual:.0%}", "합니다체 30~70%", 0.30 <= formal <= 0.70 and casual >= 0.20,
                                  "합니다체를 약 50%, 해요체와 구어 어미(~더라고요, ~거든요, ~잖아요)를 약 50% 섞을 것"))
             checks.append(_check("first_person", "'저는'으로 시작하는 문장", f"{first_p:.0%}", "35% 이하", first_p <= 0.35,
@@ -195,10 +201,13 @@ def evaluate(kind: str, body: str, keywords: list[str], memo: str = "", title: s
                          f"해시태그를 핵심 키워드 중심으로 {t_lo}~{t_hi}개, 중복 없이 맞출 것"))
 
     # 8) 분량
-    lo, hi = {"food": (1900, 2700), "hotel": (2400, 3400), "invest": (1500, 3000)}.get(kind, (2000, 3200))
-    n = count_chars(body)
-    checks.append(_check("length", "분량(공백 제외)", f"{n:,}자", f"{lo:,}~{hi:,}자", lo <= n <= hi,
-                         "분량을 %s~%s자로 맞출 것(현재 %s자)" % (f"{lo:,}", f"{hi:,}", f"{n:,}")))
+    if kind in ("food", "hotel"):  # 홈판 규칙: 공백 포함 1,500자 안팎
+        lo, hi, n, basis = 1300, 1800, count_chars_ws(body), "공백 포함"
+    else:
+        lo, hi = {"invest": (1500, 3000)}.get(kind, (2000, 3200))
+        n, basis = count_chars(body), "공백 제외"
+    checks.append(_check("length", f"분량({basis})", f"{n:,}자", f"{lo:,}~{hi:,}자", lo <= n <= hi,
+                         "분량을 %s %s~%s자로 맞출 것(현재 %s자)" % (basis, f"{lo:,}", f"{hi:,}", f"{n:,}")))
 
     # 9) 메모 반영(휴리스틱)
     if memo and memo.strip():

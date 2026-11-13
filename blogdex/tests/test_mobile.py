@@ -26,8 +26,16 @@ class MobileReadabilityTest(unittest.TestCase):
         for kind in ("info", "food", "hotel"):
             s = prompts.build_system(kind, False, "strict")
             self.assertIn("문단은 1~2문장", s)
-            self.assertIn("{{bold}} 는 5~8번, {{color}} 는 2~4번", s)
-            self.assertIn("60~100자", prompts.KIND_SPECS[kind])
+        s = prompts.build_system("info", False, "strict")
+        self.assertIn("{{bold}} 는 5~8번, {{color}} 는 2~4번", s)
+        self.assertIn("60~100자", prompts.KIND_SPECS["info"])
+        for kind in ("food", "hotel"):  # 홈판 규칙: 강조는 핵심만, 문단 40~60자
+            s = prompts.build_system(kind, False, "strict")
+            self.assertIn("{{bold}} 는 2~4번", s)
+            self.assertIn("{{color}} 는 1~2번", s)
+            self.assertIn("공백 포함 40~60자", s)
+            self.assertNotIn("60~100자", s)
+            self.assertIn("40~60자", prompts.KIND_SPECS[kind])
         self.assertIn("📌 이 글 핵심 3줄", prompts.KIND_SPECS["info"])
         self.assertNotIn("📌 이 글 핵심 3줄", prompts.KIND_SPECS["food"])
         inv = prompts.build_system("invest", True, "strict")

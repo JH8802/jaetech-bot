@@ -37,7 +37,8 @@ class KeywordTest(unittest.TestCase):
         self.assertAlmostEqual(d, 1000 / len("타이거버스를탔다.좋았다."))  # 박스·해시태그 속 키워드는 세지 않음
         up = prompts.build_article_prompt("hotel", "t", ["타이거버스", "서울시티투어버스"], "m", None)
         self.assertIn("[핵심 키워드 목표 횟수", up)
-        self.assertIn("'타이거버스': 본문(박스·소제목·해시태그 제외)에 13회 이상", up)
+        self.assertIn("'타이거버스': 본문(박스·소제목·해시태그 제외)에 6회 이상", up)  # 호텔 목표 분량 공백 제외 약 1,200자
+        self.assertIn("에 13회 이상", prompts.build_article_prompt("info", "t", ["타이거버스"], "m", None))  # 정보글은 그대로
         self.assertNotIn("목표 횟수", prompts.build_article_prompt("invest", "t", [], "m", None))
 
     def test_keyword_fix_pass_accepts_only_improvement(self):

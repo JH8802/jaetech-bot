@@ -61,5 +61,37 @@ class HomepanPostprocessTest(unittest.TestCase):
         self.assertFalse(pp.is_disclosure_paragraph("부곡 로얄 호텔 가족탕이 궁금해서 다녀왔어요."))
 
 
+class HomepanDecisionTest(unittest.TestCase):
+    """사용자 결정(①분량 ②말투 ③해시태그 ④강조 ⑤문단 ⑦내 글 링크)이 맛집글·호텔에만 들어가는지"""
+
+    def test_prompt_variants_only_for_place_kinds(self):
+        for kind in ("food", "hotel"):
+            s = prompts.build_system(kind, False, "strict", 3)
+            self.assertIn("공백을 포함한 글자 수로 1,500자 안팎", s)
+            self.assertIn("해요체를 중심으로 씁니다(합니다체는 20% 이하)", s)
+            self.assertIn("10~15개(15개를 넘기지 않습니다)", s)
+            self.assertNotIn("합니다체와 해요체를 자연스럽게 섞습니다", s)
+            self.assertNotIn("2,300자", s)
+            self.assertNotIn("2,700자", s)
+        info = prompts.build_system("info", False, "strict", 3)
+        self.assertIn("합니다체와 해요체를 자연스럽게 섞습니다", info)
+        self.assertIn("5~10개(10개를 넘기지 않습니다)", info)
+        self.assertIn("2,700자 안팎", info)
+
+    def test_count_chars_ws(self):
+        body = "가 나다.\n라마\n\n<사진1>\n\n(플레이스 지도 삽입: 〈x〉)\n\n(관련 글 링크 삽입: 내 다른 글 1~2개)\n\n#a #b #c"
+        self.assertEqual(pp.count_chars_ws(body), len("가 나다.") + len("라마"))
+        self.assertGreater(pp.count_chars(body), pp.count_chars_ws(body))  # 기존 공백 제외 기준(자리 줄 포함)은 그대로
+
+    def test_hashtag_range(self):
+        self.assertEqual(pp.HASHTAG_RANGE["food"], (10, 15))
+        self.assertEqual(pp.HASHTAG_RANGE["hotel"], (10, 15))
+        self.assertNotIn("info", pp.HASHTAG_RANGE)
+
+    def test_expand_prompt_with_spaces_wording(self):
+        self.assertIn("공백을 포함한 글자 수가 1,000자", prompts.build_expand_prompt("food", "본문", 1000, 1500, "메모", None, with_spaces=True))
+        self.assertIn("공백을 뺀 글자 수가", prompts.build_expand_prompt("food", "본문", 1000, 1500, "메모", None))
+
+
 if __name__ == "__main__":
     unittest.main()

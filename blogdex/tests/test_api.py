@@ -61,7 +61,7 @@ class ApiTests(unittest.TestCase):
         self.assertIn("플레이스 지도 삽입", done["body"])           # 맛집글은 지도 줄이 들어감
         self.assertEqual(done["body"].count("{{highlight}}"), 2)   # 형광펜은 정확히 2곳
         tags = done["body"].split("\n\n")[-1]
-        self.assertTrue(5 <= tags.count("#") <= 10)  # 해시태그는 5~10개
+        self.assertTrue(10 <= tags.count("#") <= 15)  # 맛집글 해시태그는 10~15개(홈판 규칙)
         self.assertIn("checks", done["quality"])
         saved = self.c.get(f"/api/articles/{done['article_id']}").get_json()["article"]
         self.assertEqual(saved["kind"], "food")
@@ -206,14 +206,14 @@ class ApiTests(unittest.TestCase):
 
     def test_persona_in_both_kinds_and_new_hashtag_and_keyword_rules(self):
         import prompts
-        for kind in ("info", "food"):
+        for kind, tag_rule in (("info", "5~10개"), ("food", "10~15개")):  # 맛집글은 홈판 규칙 10~15개
             sysmsg = prompts.build_system(kind, False, "strict")
             self.assertIn("30대 직장인 부부", sysmsg)
             self.assertIn("딸 한 명", sysmsg)
             self.assertIn("유머", sysmsg)
             self.assertIn("긍정", sysmsg)
             self.assertIn("딸과 함께 갔다", sysmsg)         # 지어내기 금지 예시
-            self.assertIn("5~10개", sysmsg)                # 해시태그
+            self.assertIn(tag_rule, sysmsg)                # 해시태그
             self.assertNotIn("28~30개", sysmsg)
             self.assertIn("1,000자당 4~6회", sysmsg)       # 키워드
 
@@ -221,8 +221,9 @@ class ApiTests(unittest.TestCase):
         for kind, extra in (("food", {"place": {"name": "놉스 사당점", "address": "서울 동작구 동작대로5길 8"}}), ("info", {"place": {}})):
             _, events = self._stream(kind=kind, keywords=["놉스 사당점", "사당 스테이크"], **extra)
             tags = dict(events)["done"]["body"].split("\n\n")[-1].split()
-            self.assertLessEqual(len(tags), 10)
-            self.assertGreaterEqual(len(tags), 5)
+            lo, hi = (10, 15) if kind == "food" else (5, 10)  # 맛집글은 홈판 규칙
+            self.assertLessEqual(len(tags), hi)
+            self.assertGreaterEqual(len(tags), lo)
             self.assertIn("#놉스사당점", tags[:4])          # 핵심 키워드 태그가 앞쪽
             self.assertEqual(len(tags), len(set(tags)))
 
@@ -244,7 +245,7 @@ class ApiTests(unittest.TestCase):
         done = dict(events)["done"]
         self.assertIn("(플레이스 지도 삽입:", done["body"])
         tags = done["body"].split("\n\n")[-1].split()
-        self.assertTrue(5 <= len(tags) <= 10)
+        self.assertTrue(10 <= len(tags) <= 15)  # 홈판 규칙
         self.assertIn("#제주롯데호텔", tags[:4])
         self.assertEqual(self.c.get(f"/api/articles/{done['article_id']}").get_json()["article"]["kind"], "hotel")
 
@@ -366,7 +367,7 @@ class ApiTests(unittest.TestCase):
     def test_short_food_with_photos_gets_one_expansion_pass(self):
         _, events = self._stream(photos=[self.PIXEL, self.PIXEL])
         done = dict(events)["done"]
-        self.assertGreaterEqual(done["chars"], 2100)
+        self.assertGreaterEqual(done["chars_ws"], 1300)  # 홈판 규칙: 공백 포함 1,300자 미만이면 보강
         self.assertTrue(any("보강" in n for n in done["notes"]))
         self.assertEqual([p for p in done["body"].split("\n\n") if p.startswith("<사진")], ["<사진1>", "<사진2>"])  # 사진 자리 유지
         self.assertTrue(done["body"].split("\n\n")[-1].startswith("#"))  # 해시태그는 마지막
@@ -374,7 +375,7 @@ class ApiTests(unittest.TestCase):
     def test_no_expansion_when_material_is_thin(self):
         _, events = self._stream(memo="금요일 붐빔")  # 메모 짧고 사진 없음 → 늘리지 않는다
         done = dict(events)["done"]
-        self.assertLess(done["chars"], 1900)
+        self.assertLess(done["chars_ws"], 1300)
         self.assertFalse(any("보강" in n for n in done["notes"]))
 
     def test_expand_prompt_carries_keywords_and_blocks_new_feelings(self):

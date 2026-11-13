@@ -14,7 +14,7 @@ PHOTO_RE = re.compile(r"<\s*사진\s*(\d+)\s*>")
 VIDEO_RE = re.compile(r"<\s*동영상\s*(\d+)\s*>")  # 동영상 자리(사진과 다른 번호 체계)
 MAX_HASHTAGS = 10
 MIN_HASHTAGS = 5
-HASHTAG_RANGE = {"invest": (3, 5)}  # 글 종류별 (최소, 최대). 없으면 (MIN_HASHTAGS, MAX_HASHTAGS)
+HASHTAG_RANGE = {"invest": (3, 5), "food": (10, 15), "hotel": (10, 15)}  # 글 종류별 (최소, 최대). 없으면 (MIN_HASHTAGS, MAX_HASHTAGS). 맛집·호텔은 홈판 규칙
 RATING_HEAD = "★ 별점 한눈에 보기"
 ONE_LINER_RE = re.compile(r"^(한\s*줄\s*(평|정리)|오늘의\s*한\s*줄)\s*[:：]")
 SOURCE_HEAD = "📰 참고한 기사"
@@ -272,6 +272,19 @@ def count_chars(text: str) -> int:
     return len(re.sub(r"\s", "", "\n".join(paras)))
 
 
+def count_chars_ws(text: str) -> int:
+    """공백 포함 글자수(홈판 규칙 기준): 태그 제거, 해시태그 문단 제외. 사진·동영상·지도·관련 글 자리 줄은
+    네이버 에디터에서 글자가 아니므로 빼고, 줄바꿈은 세지 않습니다."""
+    paras = split_paragraphs(strip_tags(text))
+    idx = find_hashtag_index(paras)
+    if idx is not None:
+        paras.pop(idx)
+    lines = [ln for p in paras for ln in p.split("\n")
+             if ln.strip() and not PHOTO_RE.fullmatch(ln.strip()) and not VIDEO_RE.fullmatch(ln.strip())
+             and MAP_LINE_MARK not in ln and RELATED_MARK not in ln]
+    return sum(len(ln.strip()) for ln in lines)
+
+
 def region_of(place: dict | None) -> str:
     """주소에서 구 이름을 뽑습니다. (예: '서울 마포구 백범로' → '마포')"""
     m = re.search(r"([가-힣]{2,})구", (place or {}).get("address", ""))
@@ -393,10 +406,11 @@ def finalize(kind: str, raw: str, place: dict | None, keywords: list[str], title
     body, video_notes = normalize_videos(body, video_count)
     notes += video_notes
     body, hl = limit_highlights(body, 2)
+    hl_min = 1 if kind in ("food", "hotel") else 2  # 맛집·호텔(홈판 규칙): 형광펜 1~2곳
     if hl > 2:
         notes.append(f"형광펜 {hl}곳 중 2곳만 남겼어요.")
-    elif hl < 2:
-        notes.append(f"형광펜이 {hl}곳이에요(권장 2곳).")
+    elif hl < hl_min:
+        notes.append(f"형광펜이 {hl}곳이에요(권장 {'1~2' if hl_min == 1 else '2'}곳).")
 
     paras = split_paragraphs(body)
     must = []
@@ -432,6 +446,9 @@ def finalize(kind: str, raw: str, place: dict | None, keywords: list[str], title
             notes.append("글 끝의 '한 줄 평'이 없어요. 직접 한 줄 평을 써 넣어 주세요.")
     paras = _put_source_block(paras, news or [])
     paras = _put_related_line(paras, series)
+    if kind in ("food", "hotel") and not (series and series.get("name")):  # 홈판 규칙: 시리즈가 아니어도 끝에 내 글 링크 자리
+        idx = find_hashtag_index(paras)
+        paras.insert(idx if idx is not None else len(paras), f"({RELATED_MARK}: 내 다른 글 1~2개)")
     if kind == "invest":  # 투자 생각은 소제목 없이 쓰는 고정 문체: 남은 소제목 줄은 지움
         kept = [p for p in paras if not HEADING_RE.match(strip_tags(p))]
         if len(kept) < len(paras):
@@ -443,4 +460,4 @@ def finalize(kind: str, raw: str, place: dict | None, keywords: list[str], title
     if kind in ("food", "hotel"):
         body = insert_map_line(body, (place or {}).get("name", ""))
         body = add_place_link(body, (place or {}).get("link", ""))
-    return {"body": body, "chars": count_chars(body), "notes": notes}
+    return {"body": body, "chars": count_chars(body), "chars_ws": count_chars_ws(body), "notes": notes}

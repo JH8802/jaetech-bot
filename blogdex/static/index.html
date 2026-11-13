@@ -578,6 +578,14 @@ function countChars(text) {
   for (let i = ps.length - 1; i >= 0; i--) if (isTags(ps[i])) { ps.splice(i, 1); break; }
   return ps.join('\n').replace(/\s/g, '').length;
 }
+function countCharsWs(text) {
+  // 공백 포함(홈판 규칙 기준): 해시태그 문단, 사진·동영상·지도·관련 글 자리 줄은 빼고 줄바꿈은 세지 않음
+  const ps = paragraphs(stripTags(text));
+  for (let i = ps.length - 1; i >= 0; i--) if (isTags(ps[i])) { ps.splice(i, 1); break; }
+  return ps.flatMap((p) => p.split('\n')).map((l) => l.trim())
+    .filter((l) => l && !/^<\s*(사진|동영상)\s*\d+\s*>$/.test(l) && !l.includes('플레이스 지도 삽입') && !l.includes('관련 글 링크 삽입'))
+    .reduce((n, l) => n + l.length, 0);
+}
 
 function inline(par, counter, mode) {
   // mode: 'view' 은 화면용, 'copy' 는 네이버 붙여넣기용(형광펜은 굵게로 대체)
@@ -666,7 +674,7 @@ function renderResult(text, streaming, chars) {
     wrap = box.querySelector('.article');
   }
   wrap.innerHTML = renderBody(text);
-  $('counter').innerHTML = `글자수(공백 제외) <b>${(chars != null ? chars : countChars(text)).toLocaleString()}</b>자`;
+  $('counter').innerHTML = `글자수(공백 제외) <b>${(chars != null ? chars : countChars(text)).toLocaleString()}</b>자 · 공백 포함 <b>${countCharsWs(text).toLocaleString()}</b>자`;
   if (streaming) box.querySelector('.article').lastElementChild?.scrollIntoView?.({ block: 'nearest' });
 }
 function setStatus(msg, spin) { const el = $('statusText'); if (el) el.innerHTML = (spin ? '<span class="spinner"></span>' : '') + esc(msg || ''); }

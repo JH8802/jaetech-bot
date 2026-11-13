@@ -77,8 +77,11 @@ class HotelEvalTests(unittest.TestCase):
     def test_hotel_length_bounds_and_endings_use_review_rules(self):
         res = ev.evaluate("hotel", body(["객실이 넓었어요. 침구가 푹신했습니다. 조식은 붐볐어요."] * 5), ["객실"])
         length = next(c for c in res["checks"] if c["key"] == "length")
-        self.assertEqual(length["target"], "2,400~3,400자")
+        self.assertEqual(length["target"], "1,300~1,800자")  # 홈판 규칙: 공백 포함 1,500자 안팎
+        self.assertEqual(length["label"], "분량(공백 포함)")
         self.assertFalse(length["ok"])
+        endings = next(c for c in res["checks"] if c["key"] == "endings")
+        self.assertEqual(endings["target"], "합니다체 20% 이하")  # 해요체 중심
         self.assertTrue(any(c["key"] == "first_person" for c in res["checks"]))  # 후기형 점검 포함
 
 

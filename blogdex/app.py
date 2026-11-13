@@ -30,8 +30,8 @@ MAX_MEMO = 4000
 MAX_MEMO_BY_KIND = {"invest": 20000}  # 투자 생각: 못 읽은 기사 원문을 메모에 붙여 넣을 수 있게 넉넉히
 MAX_KEYWORDS = 8
 MAX_BODY = 60000
-EXPAND_MIN = {"food": 2100, "hotel": 2400}  # 맛집글이 이 글자수에 못 미치면 사진·메모 안에서 한 번 더 풀어 씁니다(목표 기준 2,100자)
-EXPAND_TARGET_EXTRA = 300  # 보강 시에는 모델이 덜 쓰는 경향을 감안해 기준보다 이만큼 더 쓰라고 요청
+EXPAND_MIN = {"food": 1300, "hotel": 1300}  # 맛집글·호텔·여행 후기가 공백 포함 이 글자수에 못 미치면 사진·메모 안에서 한 번 더 풀어 씁니다(홈판 규칙 1,500자 안팎)
+EXPAND_TARGET_EXTRA = 200  # 보강 목표 = 기준 + 200(공백 포함 1,500자)
 EVIDENCE_MODES = {"strict", "template"}
 
 app = Flask(__name__, static_folder="static", static_url_path="/static")
@@ -633,17 +633,18 @@ def _generate_events(*, kind, title, keywords, memo, place, guardrail, evidence_
                                                  len(video_notes or []))
         floor = EXPAND_MIN.get(kind)
         enough_material = len(re.sub(r"\s", "", memo or "")) >= 150 or bool(photo_notes)
-        if floor and fin["chars"] < floor and enough_material:
-            yield sse("status", {"text": f"분량이 {fin['chars']:,}자로 짧아서 메모와 사진을 더 풀어 쓰고 있어요."})
+        if floor and fin["chars_ws"] < floor and enough_material:  # 맛집·호텔: 공백 포함 기준
+            yield sse("status", {"text": f"분량이 공백 포함 {fin['chars_ws']:,}자로 짧아서 메모와 사진을 더 풀어 쓰고 있어요."})
             try:
                 ex_usage = {}
-                raw2 = llm.ask_text(system, prompts.build_expand_prompt(kind, fin["body"], fin["chars"], floor + EXPAND_TARGET_EXTRA, memo, photo_notes, keywords, ratings),
+                raw2 = llm.ask_text(system, prompts.build_expand_prompt(kind, fin["body"], fin["chars_ws"], floor + EXPAND_TARGET_EXTRA, memo, photo_notes, keywords, ratings,
+                                                                   with_spaces=True),
                                     max_tokens=9000, effort=llm.EFFORT, usage=ex_usage)
                 fin2 = postprocess.finalize(kind, raw2, place, keywords, title, len(photo_notes or []), ratings, news_list, series,
                                                  len(video_notes or []))
                 usage = llm.merge_usage(usage, ex_usage)
-                if fin2["chars"] > fin["chars"]:
-                    fin2["notes"].append(f"분량이 짧아 한 번 보강했어요({fin['chars']:,}자 → {fin2['chars']:,}자).")
+                if fin2["chars_ws"] > fin["chars_ws"]:
+                    fin2["notes"].append(f"분량이 짧아 한 번 보강했어요(공백 포함 {fin['chars_ws']:,}자 → {fin2['chars_ws']:,}자).")
                     fin = fin2
                 else:
                     fin["notes"].append("분량 보강을 시도했지만 늘지 않아 처음 글을 그대로 썼어요.")
@@ -676,6 +677,7 @@ def _generate_events(*, kind, title, keywords, memo, place, guardrail, evidence_
             body=fin["body"], chars=fin["chars"],
             quality=quality, model=usage.get("model") or llm.MODEL, parent_id=parent_id)
         yield sse("done", {"article_id": article_id, "title": title, "body": fin["body"], "chars": fin["chars"],
+                           "chars_ws": postprocess.count_chars_ws(fin["body"]),
                            "quality": quality, "notes": fin["notes"], "usage": usage, "photos": photo_notes or [],
                            "videos": video_notes})
     except Exception as e:  # 스트림 중 오류는 SSE 로 알려 줍니다.

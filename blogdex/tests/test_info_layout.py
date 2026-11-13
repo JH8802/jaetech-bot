@@ -48,7 +48,10 @@ class InfoLayoutTest(unittest.TestCase):
         self.assertEqual(paras[-2], "(관련 글 링크 삽입: 〈서울시티투어버스〉 다른 편)")
         self.assertIn("#서울시티투어버스", paras[-1])
         self.assertEqual(pp.finalize("hotel", body, {"name": "타이거버스"}, ["타이거버스"], series=s)["body"].count("관련 글 링크 삽입"), 1)
-        self.assertNotIn("관련 글 링크 삽입", pp.finalize("hotel", body, {"name": "타이거버스"}, ["타이거버스"])["body"])
+        plain = pp.finalize("hotel", body, {"name": "타이거버스"}, ["타이거버스"])["body"]  # 시리즈가 아니어도 홈판 규칙의 내 글 링크 자리
+        self.assertNotIn("다른 편)", plain)
+        self.assertEqual(pp.split_paragraphs(plain)[-2], "(관련 글 링크 삽입: 내 다른 글 1~2개)")
+        self.assertNotIn("관련 글 링크 삽입", pp.finalize("info", RAW, None, ["놉스"])["body"])  # 정보글은 그대로
 
     def test_prev_link_after_intro_from_part_two(self):
         s2 = {"name": "서울시티투어버스", "part": 2, "prev_link": True}
