@@ -10,8 +10,8 @@ import statistics as st
 import adcheck
 import outline
 import register as reg
-from postprocess import (HASHTAG_RANGE, HEADING_RE, INFO_BOX_HEAD, MAP_LINE_MARK, MAX_HASHTAGS, MIN_HASHTAGS, RATING_HEAD, RELATED_MARK,
-                         SOURCE_HEAD, SUMMARY_HEAD, count_chars, find_hashtag_index, split_paragraphs, strip_tags)
+from postprocess import (CHILD_BOX_HEAD, HASHTAG_RANGE, HEADING_RE, INFO_BOX_HEAD, MAP_LINE_MARK, MAX_HASHTAGS, MIN_HASHTAGS, RATING_HEAD, RELATED_MARK,
+                         SOURCE_HEAD, SUMMARY_HEAD, count_chars, find_hashtag_index, is_disclosure_paragraph, split_paragraphs, strip_tags)
 
 GENERIC_WORDS = ["편안", "무난", "자연스럽", "부담", "좋았", "좋겠", "차분", "다양한", "효과적", "전반적으로"]
 FIRST_PERSON_RE = re.compile(r"^(저는|저도|제가|저의)")
@@ -34,7 +34,9 @@ def _body_parts(body: str):
     tags = paras.pop(tag_i) if tag_i is not None else ""
     heads = [p for p in paras if HEADING_RE.match(p)]
     text_paras = [p for p in paras if not HEADING_RE.match(p) and MAP_LINE_MARK not in p and RELATED_MARK not in p
-                  and not p.startswith((RATING_HEAD, SOURCE_HEAD, SUMMARY_HEAD, INFO_BOX_HEAD)) and not re.fullmatch(r"(<)?(사진|동영상) ?\d+(>)?", p)]
+                  and not p.startswith((RATING_HEAD, SOURCE_HEAD, SUMMARY_HEAD, INFO_BOX_HEAD, CHILD_BOX_HEAD)) and not re.fullmatch(r"(<)?(사진|동영상) ?\d+(>)?", p)]
+    if text_paras and is_disclosure_paragraph(text_paras[0]):  # 맨 위 고지 문단은 인트로가 아니라서 첫 문단·문장 통계에서 뺌
+        text_paras = text_paras[1:]
     return text_paras, heads, tags
 
 

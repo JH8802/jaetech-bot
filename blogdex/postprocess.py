@@ -22,6 +22,9 @@ SUMMARY_HEAD = "📌 이 글 핵심 3줄"  # 정보글 상단 요약(줄마다 �
 INFO_BOX_HEAD = "📋"  # 인트로 뒤 정보 박스 첫 줄 앞머리('📋 업체 이름' 또는 정보글 '📋 한눈에 보기')
 RATING_REASON_HEAD = "[별점 이유]"  # AI가 쓰는 항목별 별점 이유 문단 → 코드가 별점 줄에 붙이고 지움
 RELATED_MARK = "관련 글 링크 삽입"  # 시리즈 글: 네이버 에디터에서 다른 편 링크를 넣을 자리
+CHILD_BOX_HEAD = "🧒"  # 맛집글·호텔·여행 후기: 아이 동반 박스 첫 줄 앞머리('🧒 아이와 함께')
+# 맛집글·호텔·여행 후기: 글 맨 위 고지 문단(내돈내산·협찬·제휴)을 알아보는 표현
+DISCLOSURE_RE = re.compile(r"내돈내산|협찬|제공받|원고료|제휴|수수료|광고|확인 필요: 고지")
 # 문장 끝(. ? !) 뒤 공백. 닫는 태그·따옴표·괄호가 붙어 있어도 문장 끝으로 본다(lookbehind 는 갈래마다 길이가 고정이어야 해서 나눠 씀)
 SENT_END_RE = re.compile(r"(?<=[.?!])\s+|(?<=[.?!][\"”’')\]])\s+|(?<=[.?!]\{\{/bold\}\})\s+|(?<=[.?!]\{\{/color\}\})\s+|(?<=[.?!]\{\{/highlight\}\})\s+")
 
@@ -342,8 +345,14 @@ def _put_source_block(paras: list[str], news: list[dict]) -> list[str]:
 def is_special_paragraph(par: str) -> bool:
     """소제목·해시태그·별점·참고 기사·사진·지도 줄처럼 문장 단위로 다루지 않는 문단"""
     plain = strip_tags(par).strip()
-    return bool(HEADING_RE.match(plain) or plain.startswith(("#", RATING_HEAD, SOURCE_HEAD, SUMMARY_HEAD, INFO_BOX_HEAD, RATING_REASON_HEAD, LINK_ICON))
+    return bool(HEADING_RE.match(plain) or plain.startswith(("#", RATING_HEAD, SOURCE_HEAD, SUMMARY_HEAD, INFO_BOX_HEAD, RATING_REASON_HEAD, LINK_ICON, CHILD_BOX_HEAD))
                 or PHOTO_RE.fullmatch(plain) or VIDEO_RE.fullmatch(plain) or MAP_LINE_MARK in plain or RELATED_MARK in plain)
+
+
+def is_disclosure_paragraph(par: str) -> bool:
+    """글 맨 위 고지 문단(짧은 한두 줄에 내돈내산·협찬·제휴 같은 표현)인지"""
+    plain = strip_tags(par).strip()
+    return bool(plain) and len(plain) <= 120 and bool(DISCLOSURE_RE.search(plain))
 
 
 def split_sentences(par: str) -> list[str]:
@@ -413,6 +422,8 @@ def finalize(kind: str, raw: str, place: dict | None, keywords: list[str], title
         if n_tags < tag_min:
             notes.append(f"해시태그가 {n_tags}개예요(권장 {tag_min}~{tag_max}개).")
     paras, reasons = take_rating_reasons(paras, ratings or [])  # '[별점 이유]' 문단은 별점 줄로 옮기고 지움
+    if kind in ("food", "hotel") and not (paras and is_disclosure_paragraph(paras[0])):
+        notes.append("글 맨 위에 고지(내돈내산·협찬·제휴) 문단이 없어요. 첫 줄에 직접 넣어 주세요.")
     if kind in ("food", "hotel"):
         paras, rn = _put_rating_block(paras, ratings or [], reasons)
         notes += rn
