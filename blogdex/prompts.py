@@ -320,6 +320,7 @@ PLACE_TAG_RULES = _swap(_swap(TAG_RULES,
     "{{highlight}} 는 글 전체에서 1~2번, {{bold}} 는 2~4번(가게·장소 이름, 가격처럼 핵심 용어만), {{color}} 는 1~2번 씁니다"),
     "핵심 키워드 중심으로 5~10개(10개를 넘기지 않습니다)", "핵심 키워드 중심으로 10~15개(15개를 넘기지 않습니다)")
 PLACE_WRITING_RULES = _swap(WRITING_RULES, "문단은 1~2문장(공백 포함 60~100자, 모바일 화면 3~5줄)", "문단은 1~2문장(공백 포함 40~60자, 모바일 화면 2~3줄)")
+PLACE_SEO_RULES = _swap(SEO_RULES, "(2,000자 글이면 8~12회)", "(이 글은 짧아서 키워드마다 4~6회, 그보다 많이 넣지 않음)")
 PLACE_PERSONA = _swap(PERSONA, "- 합니다체와 해요체를 자연스럽게 섞습니다.", "- 해요체를 중심으로 씁니다(합니다체는 20% 이하).")
 
 
@@ -360,7 +361,7 @@ def build_system(kind: str, guardrail: bool, evidence_mode: str, photo_count: in
     parts = [BASE_ROLE, PLACE_PERSONA if place else PERSONA]
     if style_sample and style_sample.strip():
         parts.append(STYLE_SAMPLE_HEAD + style_sample.strip()[:MAX_STYLE_SAMPLE] + STYLE_SAMPLE_TAIL)
-    parts += [KIND_SPECS[kind], PLACE_TAG_RULES if place else TAG_RULES, PLACE_WRITING_RULES if place else WRITING_RULES, SEO_RULES]
+    parts += [KIND_SPECS[kind], PLACE_TAG_RULES if place else TAG_RULES, PLACE_WRITING_RULES if place else WRITING_RULES, PLACE_SEO_RULES if place else SEO_RULES]
     if kind in PLACE_KINDS:
         parts.append(RATING_RULES)
     parts.append(EVIDENCE_STRICT if evidence_mode == "strict" else EVIDENCE_TEMPLATE)
@@ -604,7 +605,7 @@ def build_article_prompt(kind: str, title: str, keywords: list[str], memo: str, 
     if keywords:
         parts.append("[핵심 키워드]\n" + ", ".join(keywords))
         if kind in KEYWORD_TARGET_CHARS:
-            parts.append(keyword_count_block(keywords, KEYWORD_TARGET_CHARS[kind]))
+            parts.append(keyword_count_block(keywords, KEYWORD_TARGET_CHARS[kind], kind))
     pb = _place_block(place)
     if pb:
         parts.append(pb)
@@ -715,20 +716,27 @@ def build_guard_fix_prompt(body: str, hits: list[dict]) -> str:
 KEYWORD_TARGET_CHARS = {"food": 1200, "hotel": 1200, "info": 2700}  # 맛집·호텔은 공백 포함 1,500자 ≈ 공백 제외 1,200자
 
 
-def keyword_target(chars: int) -> int:
+PLACE_KEYWORD_TARGET = 4  # 맛집글·호텔·여행 후기(홈판 규칙): 본문 약 900자 × 1,000자당 4.5회 ≈ 4회. 짧은 글에서 6회는 과다
+PLACE_KEYWORD_MAX = 6
+
+
+def keyword_target(chars: int, kind: str = "") -> int:
+    if kind in PLACE_KINDS:
+        return PLACE_KEYWORD_TARGET
     return max(6, -(-int(chars) * 45 // 10000))  # 1,000자당 4.5회, 올림
 
 
-def keyword_count_block(keywords: list[str], chars: int) -> str:
-    n = keyword_target(chars)
-    lines = [f"- '{k}': 본문(박스·소제목·해시태그 제외)에 {n}회 이상, 문단마다 고르게" for k in keywords[:2]]
+def keyword_count_block(keywords: list[str], chars: int, kind: str = "") -> str:
+    n = keyword_target(chars, kind)
+    span = f"{n}~{PLACE_KEYWORD_MAX}회(그보다 많이 넣지 않습니다)" if kind in PLACE_KINDS else f"{n}회 이상"
+    lines = [f"- '{k}': 본문(박스·소제목·해시태그 제외)에 {span}, 문단마다 고르게" for k in keywords[:2]]
     return ("[핵심 키워드 목표 횟수 - 반드시 지킬 것]\n" + "\n".join(lines)
             + "\n- 줄이거나 바꾸지 않은 그대로의 문구로 쓰고, 한 문장에 두 번 넣지 않습니다. 모자라기 쉬우니 쓰고 나서 세어 보고 채웁니다.")
 
 
-def build_keyword_fix_prompt(body: str, keywords: list[str], chars: int, counts: dict) -> str:
+def build_keyword_fix_prompt(body: str, keywords: list[str], chars: int, counts: dict, kind: str = "") -> str:
     """핵심 키워드가 1,000자당 4회에 못 미칠 때, 같은 글에서 키워드만 자연스럽게 더 넣게 하는 지시."""
-    n = keyword_target(chars)
+    n = keyword_target(chars, kind)
     want = "\n".join(f"- '{k}': 지금 {counts.get(k, 0)}회 → {n}회 이상" for k in keywords[:2])
     return "\n\n".join([
         "[키워드 보강]",

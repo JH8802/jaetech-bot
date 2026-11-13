@@ -93,5 +93,26 @@ class HomepanDecisionTest(unittest.TestCase):
         self.assertIn("공백을 뺀 글자 수가", prompts.build_expand_prompt("food", "본문", 1000, 1500, "메모", None))
 
 
+class HomepanQualityCheckTest(unittest.TestCase):
+    """품질 점검 재검토: 키워드 목표 4회·업종어 제외, 문장 길이 평균 15~45·편차 6 이상(맛집·호텔만)"""
+
+    def test_keyword_target_and_generic_tokens(self):
+        self.assertEqual(prompts.keyword_target(1200, "food"), 4)
+        self.assertEqual(prompts.keyword_target(2700, "info"), 13)
+        self.assertEqual(eval_style.keyword_tokens(["부곡 로얄 호텔"], "hotel"), ["부곡", "로얄"])
+        self.assertEqual(eval_style.keyword_tokens(["부곡 로얄 호텔"], "info"), ["부곡", "로얄", "호텔"])
+        self.assertEqual(eval_style.keyword_tokens(["제주 호텔"], "hotel"), ["제주"])
+        self.assertEqual(eval_style.keyword_tokens(["호텔 맛집"], "hotel"), ["호텔", "맛집"])  # 업종어뿐이면 그대로
+        self.assertIn("4~6회", prompts.build_system("food", False, "strict"))
+        self.assertIn("(2,000자 글이면 8~12회)", prompts.build_system("info", False, "strict"))
+
+    def test_sentence_length_target_by_kind(self):
+        body = "\n\n".join(["객실은 깔끔했어요.\n침구가 포근했어요."] * 6) + "\n\n#a #b #c #d #e"
+        food = next(c for c in eval_style.evaluate("food", body, [])["checks"] if c["key"] == "sent_len")
+        info = next(c for c in eval_style.evaluate("info", body, [])["checks"] if c["key"] == "sent_len")
+        self.assertEqual(food["target"], "평균 15~45 · 편차 6 이상")
+        self.assertEqual(info["target"], "평균 18~55 · 편차 8 이상")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -511,18 +511,18 @@ KEYWORD_MIN_DENSITY = 4.0
 
 def _enforce_keywords(fin, system, usage, kind, place, keywords, title, ratings, news_list, series, photo_notes, video_count=0):
     """키워드 밀도가 기준(1,000자당 4회)보다 낮으면 AI에게 키워드만 보강하게 한 번 요청합니다. fin 을 고쳐 씁니다."""
-    dens = eval_style.keyword_density(fin["body"], keywords)
+    dens = eval_style.keyword_density(fin["body"], keywords, kind)
     if dens is not None and dens < KEYWORD_MIN_DENSITY:
         yield sse("status", {"text": f"핵심 키워드가 1,000자당 {dens:.1f}회로 적어서 자연스럽게 보강하고 있어요."})
         try:
             k_usage = {}
             plain = postprocess.strip_tags(fin["body"])
             counts = {k: plain.count(k) for k in keywords[:2]}
-            raw = llm.ask_text(system, prompts.build_keyword_fix_prompt(fin["body"], keywords, fin["chars"], counts),
+            raw = llm.ask_text(system, prompts.build_keyword_fix_prompt(fin["body"], keywords, fin["chars"], counts, kind),
                                max_tokens=12000, effort="low", usage=k_usage)
             fixed = postprocess.finalize(kind, raw, place, keywords, title, len(photo_notes or []), ratings, news_list, series, video_count)
             usage = llm.merge_usage(usage, k_usage)
-            new = eval_style.keyword_density(fixed["body"], keywords) or 0
+            new = eval_style.keyword_density(fixed["body"], keywords, kind) or 0
             if fixed["chars"] >= fin["chars"] * 0.95 and new > dens:  # 엉뚱하거나 줄어든 응답은 받지 않음
                 fin["body"], fin["chars"] = fixed["body"], fixed["chars"]
                 fin["notes"].append(f"핵심 키워드를 보강했어요(1,000자당 {dens:.1f}회 → {new:.1f}회).")

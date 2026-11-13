@@ -48,21 +48,29 @@ def is_info_line(s: str) -> bool:
     return bool(INFO_LINE_RE.search(s.strip()))
 
 
-def keyword_tokens(keywords: list[str]) -> list[str]:
+# 맛집글·호텔·여행 후기: 본문에 자연스럽게 자주 나오는 업종어는 키워드 밀도 계산에서 뺌(밀도가 부풀려지지 않게)
+GENERIC_KEYWORD_TOKENS = {"호텔", "맛집", "카페", "여행", "후기", "추천", "리뷰", "방문", "숙소", "식당", "가볼만한곳", "나들이"}
+
+
+def keyword_tokens(keywords: list[str], kind: str = "") -> list[str]:
     tokens = []
     for k in keywords[:2]:
         for t in k.split():
             if len(t) >= 2 and t not in tokens:
                 tokens.append(t)
+    if kind in ("food", "hotel"):
+        specific = [t for t in tokens if t not in GENERIC_KEYWORD_TOKENS]
+        if specific:  # 업종어뿐이면 원래대로 셈
+            tokens = specific
     return tokens
 
 
-def keyword_density(body: str, keywords: list[str]) -> float | None:
+def keyword_density(body: str, keywords: list[str], kind: str = "") -> float | None:
     """핵심 키워드(앞 2개, 단어 단위) 평균 등장 횟수(1,000자당). 박스·소제목·해시태그는 빼고 본문만 셈."""
     paras, _, _ = _body_parts(body)
     text = "\n".join(paras)
     plain_len = len(re.sub(r"\s", "", text))
-    tokens = keyword_tokens(keywords)
+    tokens = keyword_tokens(keywords, kind)
     if not tokens or not plain_len:
         return None
     return sum(text.count(t) * 1000 / plain_len for t in tokens) / len(tokens)
@@ -127,7 +135,7 @@ def evaluate(kind: str, body: str, keywords: list[str], memo: str = "", title: s
                              "핵심 키워드(%s)를 첫 문단 안에 넣을 것" % ", ".join(keywords[:3])))
 
     # 2) 키워드 밀도(단어 단위, 1,000자당)
-    tokens = keyword_tokens(keywords) if seo else []
+    tokens = keyword_tokens(keywords, kind) if seo else []
     if tokens and plain_len:
         dens = [text.count(t) * 1000 / plain_len for t in tokens]
         avg = sum(dens) / len(dens)
@@ -149,9 +157,11 @@ def evaluate(kind: str, body: str, keywords: list[str], memo: str = "", title: s
         else:
             # 모바일용으로 문장을 짧게 쓰는 지금 기준: 짧은 문장은 좋고, 길이가 모두 같아 단조로운 것만 주의.
             # ('라벨: 값'·①②·동선 줄은 문장이 아니라서 위에서 뺌)
-            ok = 18 <= mean <= 55 and sd >= 8
+            # 맛집·호텔(홈판 규칙: 문단 1~2문장 40~60자)은 문장이 고르게 짧아지는 게 정상이라 기준을 낮춤
+            m_lo, m_hi, sd_min = (15, 45, 6) if kind in ("food", "hotel") else (18, 55, 8)
+            ok = m_lo <= mean <= m_hi and sd >= sd_min
             checks.append(_check("sent_len", "문장 길이 변화", f"평균 {mean:.0f}자 · 편차 {sd:.1f} · 짧은 문장 {short:.0%}",
-                                 "평균 18~55 · 편차 8 이상", ok,
+                                 f"평균 {m_lo}~{m_hi} · 편차 {sd_min} 이상", ok,
                                  "문장 길이가 너무 균일하거나 김. 20자 안팎의 짧은 문장과 40~50자 문장을 섞을 것"))
 
     # 4) 종결어미 / 1인칭
