@@ -700,7 +700,7 @@ if st.session_state.drafts:
             with st.expander("🚦 발행 준비 체크리스트 전체 보기"):
                 for name, state, detail in rows:
                     st.write(f"{icon[state]} **{name}** — {detail}")
-                st.caption("⛔ = 발행 전 반드시 해결 · ⚠️ = 확인 권장 · 다음 단계(워드프레스 자동 업로드)는 ⛔가 0개일 때만 열려.")
+                st.caption("⛔ = 발행 전 반드시 해결 · ⚠️ = 확인 권장 · ⛔가 0개가 되면 아래 HTML을 복사해서 발행하면 돼.")
 
             if review["overlap"]:
                 st.warning(
