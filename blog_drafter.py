@@ -59,6 +59,12 @@ PLATFORM_STYLE_HINTS = {
 
 
 # AI 글에서 흔한 말버릇 — 초안을 쓸 때부터 피하게 한다 (점검은 blog_reviewer.AI_PATTERNS)
+CARD_RULE_MEMO = """
+   - 원문 카드: 위 출처 중 "원문: https://…"가 붙은 출처를 본문에서 핵심 근거로 쓴 문단이 있으면,
+     그 문단 바로 다음에 독립된 줄로 [원문 카드: 출처 번호] 를 넣어 (예: [원문 카드: 출처 2]).
+     독자가 눌러서 원문을 볼 수 있는 링크 박스가 그 자리에 들어가. 같은 출처는 한 번만,
+     글 전체에서 최대 3개. 링크(원문:)가 없는 출처에는 넣지 마. 주소를 본문에 직접 쓰지는 마."""
+
 AI_HABITS_RULE = """- AI 글에서 흔한 말버릇은 한 글에 1번 이하로만 써: "~라는 얘기다/이야기다",
   "~인 셈이다", "~하는 이유다", "솔직히", "짚어야 한다/짚어볼", "핵심은/중요한 건",
   "~는 점이다", "물론". 그리고 "~라고 할 수 있다", "~것이 중요하다", "살펴보자/알아보자",
@@ -137,7 +143,7 @@ def draft_post(topic, key_points, personal_take="", platform="네이버 블로�
     keyword_text = target_keyword or "(지정 안 함 — 주제에서 사람들이 실제로 검색할 법한 검색어 하나를 골라서 그걸 기준으로 써)"
 
     if sources:
-        sources_text = "\n".join(f"- {s}" for s in sources)
+        sources_text = "\n".join(f"[출처 {i}] {s}" for i, s in enumerate(sources, start=1))
         sources_block = f"""
 참고 자료/출처 (근거로 인용할 것 — 목록에 없는 기관·문서·수치를 출처로 지어내지 마):
 {sources_text}
@@ -220,7 +226,7 @@ def draft_post(topic, key_points, personal_take="", platform="네이버 블로�
      "식약처 ○○ 고시에 따르면"처럼 자연스럽게 출처를 밝혀줘 (각주나 링크
      목록 형식 말고 문장 안에서). 규제·효능·수치처럼 근거가 꼭 필요한
      주장인데 제공된 출처가 없으면, 출처를 지어내지 말고 그 문장 바로 뒤에
-     [출처 필요: 어떤 근거가 필요한지] 라고 표시해줘.
+     [출처 필요: 어떤 근거가 필요한지] 라고 표시해줘.{CARD_RULE_MEMO if sources else ""}
 {AI_HABITS_RULE}
    - 기준일: 규제·기준·가격·통계처럼 시간이 지나면 바뀔 수 있는 정보를
      다룬다면, 그 정보가 처음 나오는 문단에 "{today} 기준"이라고 자연스럽게
@@ -246,7 +252,7 @@ def revise_draft(draft, issues, key_points, sources=None, personal_take="",
     author_note: 이번에 추가로 알려주는 사실/의견 (선택) — 이것도 사실로 써도 됨
     """
     points_text = "\n".join(f"- {p}" for p in key_points)
-    sources_text = "\n".join(f"- {s}" for s in (sources or [])) or "(없음)"
+    sources_text = "\n".join(f"[출처 {i}] {s}" for i, s in enumerate(sources or [], start=1)) or "(없음)"
     issues_text = "\n".join(f"- {i}" for i in issues) or "(자동 점검 지적 없음 — 아래 저자 메모만 반영)"
     style_hint = PLATFORM_STYLE_HINTS.get(platform, PLATFORM_STYLE_HINTS["네이버 블로그"])
 
@@ -306,7 +312,7 @@ def revise_draft(draft, issues, key_points, sources=None, personal_take="",
 - [검수] 표시는 저자가 직접 확인할 자리라 지우지 말고 그대로 둬.
 - 형식은 현재 초안과 똑같이 유지해: [제목], [제목 후보](있으면), [카테고리], [메타설명],
   [주소], 본문 안의 [소제목]/[요약]…[요약 끝]/[표]…[표 끝]/"- " 목록/[사진 제안]/
-  [그래프 제안]/[지도 제안]/[내부링크 제안]/[검수], 마지막 [태그].
+  [그래프 제안]/[지도 제안]/[내부링크 제안]/[검수]/[원문 카드: …], 마지막 [태그].
   마크다운 기호(#, * 등)는 쓰지 마. 분량도 비슷하게.
 - 수정본 전체만 출력해. 설명이나 변경 내역은 붙이지 마."""
 

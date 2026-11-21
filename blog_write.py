@@ -12,7 +12,7 @@ from blog_reviewer import (scan_cliches, scan_structure, scan_seo, scan_health_c
                            scan_experience_claims, scan_sections, own_texts,
                            review_draft, ai_issue, AI_REVIEW_LABELS)
 from blog_sources import resolve_sources, is_bare_url
-from blog_utils import parse_draft_metadata, load_past_titles, find_keyword_overlap, body_to_html, body_to_gutenberg, write_draft_file, DRAFTS_DIR
+from blog_utils import parse_draft_metadata, load_past_titles, find_keyword_overlap, body_to_html, body_to_gutenberg, write_draft_file, DRAFTS_DIR, source_cards
 from datetime import datetime
 import os
 
@@ -254,7 +254,8 @@ if __name__ == "__main__":
         if platform in ("티스토리", "워드프레스"):
             html_filename = filename.replace(".txt", ".html")
             with open(html_filename, "w", encoding="utf-8") as f:
-                f.write(body_to_gutenberg(meta["body"]) if platform == "워드프레스" else body_to_html(meta["body"]))
+                cards = source_cards(inputs)
+                f.write(body_to_gutenberg(meta["body"], cards) if platform == "워드프레스" else body_to_html(meta["body"], cards))
             print(f"🧩 HTML 버전: {html_filename}")
             print("   (메모장으로 열어 전체 복사 → 티스토리 HTML 모드 / 워드프레스 코드 편집기에 붙여넣기."
                   " 소제목이 제목(H2) 서식으로 들어가 있음)")

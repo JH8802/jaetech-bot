@@ -25,3 +25,5 @@ Thumbs.db
 # 내 문체 샘플 (개인 글, 저장소에 올리지 않음)
 my_style.txt
 site_settings.json
+_backup/
+_update_tmp/

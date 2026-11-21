@@ -1,0 +1,15 @@
+# update.py가 받아서 교체하는 프로그램 파일 목록 (이 목록에 없는 파일은 절대 건드리지 않음)
+# .env, my_style.txt, site_settings.json, drafts/ 같은 개인 파일은 여기에 넣지 않는다
+blog_app.py
+blog_drafter.py
+blog_factcheck.py
+blog_materials.py
+blog_reviewer.py
+blog_sources.py
+blog_style_guide.py
+blog_utils.py
+blog_write.py
+test_blog_draft.py
+requirements_blog.txt
+blog_files.txt
+update.py

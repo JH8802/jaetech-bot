@@ -1,5 +1,5 @@
 import anthropic
-from blog_utils import extract_text, has_keyword, load_settings, find_placeholders
+from blog_utils import extract_text, has_keyword, load_settings, find_placeholders, source_cards, card_numbers
 from dotenv import load_dotenv
 import os
 import json
@@ -455,6 +455,10 @@ def readiness(review, body, inputs, settings, platform):
         ("표시광고 표현", "warn" if review.get("claims") else "ok",
          "확인 필요 (설명 문맥이면 괜찮음)" if review.get("claims") else "걸리는 표현 없음"),
         ("AI 점검", "warn" if ai_problems else "ok", ", ".join(ai_problems) if ai_problems else "문제 없음"),
+        ("원문 카드 (독자가 눌러 원문을 보는 링크 박스)",
+         "warn" if source_cards(inputs) and not set(card_numbers(body)) & set(source_cards(inputs)) else "ok",
+         "링크 있는 출처가 있는데 본문에 카드가 없음" if source_cards(inputs)
+         and not set(card_numbers(body)) & set(source_cards(inputs)) else "문제 없음"),
         ("사진 자리", "warn" if photos else "ok",
          f"{len(photos)}곳 — 에디터에서 사진을 넣고 📌 줄 삭제" if photos else "없음"),
     ]

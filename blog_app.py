@@ -30,7 +30,7 @@ from blog_utils import (parse_draft_metadata, load_past_titles, find_keyword_ove
                         write_draft_file, read_draft_file, list_saved_drafts,
                         load_style_sample, save_style_sample, STYLE_SAMPLE_MAX,
                         load_autosave, save_autosave, DATA_DIR, DRAFTS_DIR,
-                        load_settings, save_settings, publish_tail)
+                        load_settings, save_settings, publish_tail, source_cards, card_numbers)
 
 st.set_page_config(page_title="블로그 초안 생성기", page_icon="✍️")
 
@@ -806,15 +806,16 @@ if st.session_state.drafts:
             settings = load_settings()
             tail = publish_tail(inputs, settings, written_date(st.session_state.filenames.get(platform)))
             publish_body = meta["body"] + ("\n\n" + tail if tail else "")
+            cards = source_cards(inputs)
             if platform in ("티스토리", "워드프레스"):
                 if platform == "티스토리":
                     where = "티스토리 에디터 오른쪽 위 '기본모드'를 HTML로 바꾼 뒤"
                     html_title = "🧩 HTML 버전 — 소제목·표·목록·요약 박스가 서식으로 이미 들어가 있음"
-                    html_code = body_to_html(publish_body)
+                    html_code = body_to_html(publish_body, cards)
                 else:
                     where = "워드프레스 편집 화면 오른쪽 위 ⋮ 메뉴 → '코드 편집기'에서"
                     html_title = "🧩 블록 에디터용 HTML — 소제목·문단·표·목록·요약 박스가 각각 블록으로 바로 만들어짐"
-                    html_code = body_to_gutenberg(publish_body)
+                    html_code = body_to_gutenberg(publish_body, cards)
                 with st.expander(html_title, expanded=not items):
                     if items:
                         st.warning(f"아직 채우지 않은 항목 {len(items)}개가 노란 표시로 들어가 있어. 위에서 채우거나 지운 뒤 복사해줘.")
@@ -827,6 +828,12 @@ if st.session_state.drafts:
                                    "📌 노란 블록 자리에 이미지 블록을 넣고 그 노란 블록은 지워.")
                     if tail:
                         st.caption("맨 끝에 '참고 자료'(원문 링크)와 '글쓴이' 박스가 자동으로 붙어 있어 — 본문 칸에는 안 보여.")
+                    used = [n for n in card_numbers(meta["body"]) if n in cards]
+                    if used:
+                        st.caption(f"📰 본문 속 원문 카드 {len(used)}개 → '원문 보기' 버튼이 있는 링크 박스로 바뀌어 있어.")
+                    elif cards:
+                        st.caption("📰 링크가 있는 출처가 있는데 본문에 원문 카드가 없어. 넣고 싶은 문단 다음 줄에 "
+                                   "[원문 카드: 번호]를 적고 💾 저장하면 돼 (번호는 자료 노트의 [자료 N] / 출처 칸의 줄 순서).")
                     st.code(html_code, language="html")
 
             # ── 점검 결과 ──

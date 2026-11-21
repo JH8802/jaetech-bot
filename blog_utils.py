@@ -167,6 +167,7 @@ _INLINE_TAG_RE = re.compile(r"\[(?:출처 필요|추가 필요|검수)[^\]\n]*\]
 _LINK_LINE_RE = re.compile(r"^\[링크:\s*(.*?)\s*\|\s*(https?://\S+)\s*\]$")
 _IMAGE_LINE_RE = re.compile(r"^\[이미지:\s*(https?://\S+)\s*\|\s*(.*?)\s*\]$")
 _BULLET_RE = re.compile(r"^[-•·]\s+")
+_CARD_RE = re.compile(r"^\[원문 카드\s*[:：]\s*(?:자료|출처)?\s*(\d+)\s*\]$")
 _NUMBERED_RE = re.compile(r"^\d{1,2}[.)]\s+")
 NOTICE_PREFIXES = VISUAL_TAGS + ("[내부링크 제안]", "[추가 필요", "[검수")
 SUMMARY_TITLE = "한눈에 보기"
@@ -220,6 +221,9 @@ def parse_body_blocks(body):
                     items.append(_BULLET_RE.sub("", lines[i].strip()))
                 i += 1
             blocks.append(("summary", items))
+        elif _CARD_RE.match(s):
+            flush()
+            blocks.append(("card", int(_CARD_RE.match(s).group(1))))
         elif s.startswith(("[참고 자료]", "[저자 소개]")):
             flush()
             kind = "refs" if s.startswith("[참고 자료]") else "author"
@@ -288,11 +292,55 @@ def _table_html(data):
     return f"<table>{thead}{tbody}</table>"
 
 
-def body_to_html(body):
+def _card_html(card):
+    url = html.escape(card["url"])
+    meta = " · ".join(x for x in (card.get("site"), card.get("date")) if x)
+    desc = f'<p style="margin:0 0 10px;color:#555;font-size:14px;">{html.escape(card["desc"])}</p>' if card.get("desc") else ""
+    return (
+        '<div style="border:1px solid #e3e6ea;border-radius:10px;padding:14px 18px;margin:18px 0;background:#f8f9fb;">'
+        f'<p style="margin:0 0 4px;color:#888;font-size:13px;">📰 {html.escape(meta)}</p>'
+        f'<p style="margin:0 0 6px;font-weight:bold;"><a href="{url}" target="_blank" rel="noopener" '
+        f'style="color:inherit;text-decoration:none;">{html.escape(card["title"])}</a></p>{desc}'
+        f'<p style="margin:0;"><a href="{url}" target="_blank" rel="noopener" '
+        'style="display:inline-block;padding:6px 14px;border-radius:6px;background:#2f6fde;color:#fff;'
+        'text-decoration:none;font-size:14px;">원문 보기 →</a></p></div>'
+    )
+
+
+def _card_gutenberg(card):
+    url = html.escape(card["url"])
+    meta = " · ".join(x for x in (card.get("site"), card.get("date")) if x)
+    parts = [
+        _wp("paragraph", f"<p>📰 {html.escape(meta)}</p>"),
+        _wp("paragraph", f'<p><strong><a href="{url}" target="_blank" rel="noreferrer noopener">'
+                         f'{html.escape(card["title"])}</a></strong></p>'),
+    ]
+    if card.get("desc"):
+        parts.append(_wp("paragraph", f"<p>{html.escape(card['desc'])}</p>"))
+    parts.append(_wp("buttons", '<div class="wp-block-buttons">' + _wp(
+        "button", f'<div class="wp-block-button"><a class="wp-block-button__link wp-element-button" href="{url}" '
+                  'target="_blank" rel="noreferrer noopener">원문 보기 →</a></div>') + "</div>"))
+    return _wp(
+        "group",
+        '<div class="wp-block-group has-background" style="background-color:#f8f9fb;'
+        'padding-top:16px;padding-right:20px;padding-bottom:16px;padding-left:20px">'
+        + "\n\n".join(parts) + "</div>",
+        '{"style":{"color":{"background":"#f8f9fb"},"spacing":{"padding":{"top":"16px",'
+        '"bottom":"16px","left":"20px","right":"20px"}}},"layout":{"type":"constrained"}}',
+    )
+
+
+def body_to_html(body, cards=None):
     """티스토리 HTML 모드에 붙여넣을 일반 HTML.
-    소제목 → <h2>, 요약 박스·표·목록 포함. 아직 안 채운 항목은 노란 표시로 남김."""
+    소제목 → <h2>, 요약 박스·표·목록·원문 카드 포함. 아직 안 채운 항목은 노란 표시로 남김.
+    cards: source_cards() 결과 — [원문 카드: N] 자리에 넣을 원문 정보"""
+    cards = cards or {}
     out = []
     for kind, data in parse_body_blocks(body):
+        if kind == "card":
+            if data in cards:
+                out.append(_card_html(cards[data]))
+            continue
         if kind == "p":
             out.append("<p>" + "<br>\n".join(_inline(x) for x in data) + "</p>")
         elif kind == "h2":
@@ -339,12 +387,17 @@ def _wp_list(kind, items):
     return _wp("list", f'<{tag} class="wp-block-list">{lis}</{tag}>', attrs)
 
 
-def body_to_gutenberg(body):
+def body_to_gutenberg(body, cards=None):
     """워드프레스 블록 에디터(구텐베르크)의 '코드 편집기'에 붙여넣을 블록 HTML.
-    소제목·문단·목록·표·요약 박스가 각각 블록으로 바로 만들어진다.
+    소제목·문단·목록·표·요약 박스·원문 카드가 각각 블록으로 바로 만들어진다.
     (워드프레스 공식 블록 라이브러리로 '정상 블록'으로 인식되는 형식인지 검증한 형식)"""
+    cards = cards or {}
     out = []
     for kind, data in parse_body_blocks(body):
+        if kind == "card":
+            if data in cards:
+                out.append(_card_gutenberg(cards[data]))
+            continue
         if kind == "p":
             out.append(_wp("paragraph", "<p>" + "<br>".join(_inline(x) for x in data) + "</p>"))
         elif kind == "h2":
@@ -692,3 +745,51 @@ def publish_tail(inputs, settings, written=""):
             lines.append(settings["disclosure"].strip())
         parts.append("[저자 소개]\n" + "\n".join(lines) + "\n[저자 소개 끝]")
     return "\n\n".join(parts)
+
+
+
+def source_cards(inputs):
+    """원문 링크가 있는 출처를 '원문 카드' 데이터로 만든다 (번호 → 정보).
+    번호: 자료로 쓰기 = [자료 N]의 N, 메모로 쓰기 = 출처 칸의 줄 순서(1부터).
+    카드 내용(주소·매체·제목)은 AI가 아니라 이 프로그램이 출처에서 그대로 가져온다 — 링크를 지어낼 수 없게."""
+    cards = {}
+    if inputs.get("mode") == "materials":
+        for block in inputs.get("sources", []):
+            header, _, rest = block.partition("\n")
+            m = re.match(r"^\[자료 (\d+)\]\s*(\S+)", header)
+            if not m or not re.match(r"https?://", m.group(2)):
+                continue
+            src = next((l for l in rest.split("\n") if l.strip().startswith("출처:")), "")
+            fields = [f.strip() for f in src.split(":", 1)[1].split("/")] if src else []
+            first_fact = next((l.strip()[2:].strip() for l in rest.split("\n") if l.strip().startswith("- ")), "")
+            cards[int(m.group(1))] = {
+                "url": m.group(2),
+                "site": fields[0] if fields else _domain(m.group(2)),
+                "title": fields[1] if len(fields) > 1 else (fields[0] if fields else m.group(2)),
+                "date": fields[2] if len(fields) > 2 else "",
+                "desc": first_fact[:120],
+            }
+    else:
+        for i, line in enumerate(inputs.get("sources", []), start=1):
+            url = re.search(r"원문:\s*(https?://\S+)", line)
+            if not url:
+                continue
+            parts = [p.strip() for p in re.split(r"\s+—\s+", line) if not p.strip().startswith("원문:")]
+            cards[i] = {
+                "url": url.group(1),
+                "site": _domain(url.group(1)),
+                "title": (parts[0] if parts else url.group(1))[:80],
+                "date": "",
+                "desc": (parts[1] if len(parts) > 1 else "")[:120],
+            }
+    return cards
+
+
+def _domain(url):
+    m = re.match(r"https?://(?:www\.)?([^/]+)", url)
+    return m.group(1) if m else url
+
+
+def card_numbers(body):
+    """본문에 들어간 [원문 카드: N] 번호들."""
+    return [int(m.group(1)) for m in (_CARD_RE.match(l.strip()) for l in body.split("\n")) if m]
