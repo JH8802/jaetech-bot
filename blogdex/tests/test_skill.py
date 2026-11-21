@@ -42,7 +42,7 @@ class SkillBuildTest(unittest.TestCase):
         zp = make_skill.build(out, "test123")
         names = zipfile.ZipFile(zp).namelist()
         for n in ("SKILL.md", "references/rules.md", "scripts/check.py", "scripts/eval_style.py", "scripts/postprocess.py",
-                  "scripts/adcheck.py", "scripts/outline.py", "scripts/register.py"):
+                  "scripts/adcheck.py", "scripts/register.py"):
             self.assertIn("blogdex-draft/" + n, names)
         root = os.path.join(out, "blogdex-draft")
         skill = open(os.path.join(root, "SKILL.md"), encoding="utf-8").read()

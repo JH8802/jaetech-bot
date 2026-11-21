@@ -18,7 +18,6 @@ import invest_guard
 import llm
 import market
 import news
-import outline
 import postprocess
 import place_info
 import prompts
@@ -133,14 +132,6 @@ def read_common(data: dict) -> dict:
         "guardrail": True if kind == "invest" else bool(data.get("guardrail", False)),  # 투자 글 가드레일은 끌 수 없음
         "evidence_mode": evidence,
     }
-
-
-def read_outline(data: dict, kind: str) -> str:
-    """글 구성(목차) 칸. 투자 생각 글에는 쓰지 않습니다."""
-    text = str(data.get("outline") or "").replace("\r\n", "\n").strip() if kind != "invest" else ""
-    if len(text) > outline.MAX_OUTLINE:
-        raise ValueError(f"글 구성은 {outline.MAX_OUTLINE:,}자 이내로 줄여 주세요.")
-    return text
 
 
 def read_series(data: dict, kind: str) -> dict | None:
@@ -356,16 +347,6 @@ def news_preview():
         raise ValueError(str(e))
 
 
-@app.post("/api/outline/parse")
-def outline_parse():
-    """글 구성 칸을 읽어 제목·키워드 칸에 채울 값을 돌려줍니다(AI 호출 없음)."""
-    text = str((request.get_json(silent=True) or {}).get("text", "")).strip()[:outline.MAX_OUTLINE]
-    p = outline.parse(text)
-    if not (p["topic"] or p["main"] or p["sections"]):
-        raise ValueError("글 구성에서 주제·메인 키워드·소제목(1. 2. 3. …)을 찾지 못했어요. 형식을 확인해 주세요.")
-    return jsonify(**p)
-
-
 @app.post("/api/place-info")
 def place_info_read():
     """네이버 지도에서 복사한 글·화면 캡처를 AI가 읽어 매장 정보로 정리합니다(네이버 지도를 직접 긁어오지 않음)."""
@@ -459,19 +440,21 @@ def titles():
     exclude = [str(x)[:MAX_TITLE] for x in (data.get("exclude") or [])][:15]
     system = prompts.INVEST_ROLE + "\n\n" + prompts.INVEST_PRINCIPLES if c["kind"] == "invest" else prompts.BASE_ROLE
     user = prompts.build_title_prompt(c["kind"], keyword, c["memo"], c["place"], exclude, c["guardrail"])
-    ol = outline.parse(read_outline(data, c["kind"]))
-    if ol["main"] or ol["needs"]:  # 글 구성의 메인 키워드·검색자 니즈를 제목 짓기에 참고
-        user += ("\n\n[글 구성 참고]" + (f"\n- 메인 키워드(검색형 제목은 이 문구를 앞쪽에 그대로): {ol['main']}" if ol["main"] else "")
-                 + (f"\n- 검색자 니즈: {ol['needs']}" if ol["needs"] else ""))
     # 모델이 답하기 전에 생각(thinking)하는 토큰도 max_tokens 에 포함되므로 넉넉히(작으면 생각만 하다 잘림)
     text = llm.ask_text(system, user, max_tokens=8000, effort="low")
-    result = [t for t in (clean_title(l) for l in text.splitlines()) if t]
+    lines, plan = prompts.split_title_plan(text) if c["kind"] != "invest" else (text.splitlines(), {"main": "", "subs": [], "needs": ""})
+    result = [t for t in (clean_title(l) for l in lines) if t]
     if c["kind"] == "invest":  # 권유·보장·단정 표현이 든 제목 후보는 버림(7개를 받아 5개까지 남김)
         result = [t for t in result if not invest_guard.violations("", t)]
         if not result:
             raise ValueError("투자 글 원칙(권유·보장·단정 금지)에 맞는 제목 후보를 만들지 못했어요. 제목 다시 생성(⟳)을 눌러 주세요.")
     result = result[:5]
-    return jsonify(titles=result, keywords=prompts.derive_keywords(c["kind"], keyword, c["place"]))
+    base = prompts.derive_keywords(c["kind"], keyword, c["place"])
+    planned = [plan["main"], *plan["subs"]]
+    # 맛집·호텔은 장소 이름이 먼저(검색 노출 핵심), 정보글은 AI가 정한 메인 키워드가 먼저
+    order = (base[:2] + planned + base[2:]) if c["kind"] in prompts.PLACE_KINDS else (planned + base)
+    keywords = list(dict.fromkeys(k.strip() for k in order if k and k.strip()))[:MAX_KEYWORDS]
+    return jsonify(titles=result, keywords=keywords, plan=plan if (plan["main"] or plan["needs"]) else None)
 
 
 # ---------- 원고 ----------
@@ -584,7 +567,7 @@ def _enforce_invest_guard(fin, system, usage, kind, place, keywords, title, rati
 
 def _generate_events(*, kind, title, keywords, memo, place, guardrail, evidence_mode, build_prompt,
                      photos=None, photo_notes=None, parent_id=None, title_input=None, ratings=None, photo_names=None, news_list=None,
-                     flow="", series=None, videos=None, video_notes=None, outline_text=""):
+                     flow="", series=None, videos=None, video_notes=None, plan=None):
     """원고를 스트리밍으로 만들고, 후처리·점검·저장 후 SSE 이벤트를 흘려보냅니다.
     photos(사진 원본)가 있으면 먼저 사진을 살펴보고, photo_notes(이미 분석된 결과)가 있으면 그대로 씁니다."""
     parts, usage, photo_usage = [], {}, {}
@@ -598,7 +581,7 @@ def _generate_events(*, kind, title, keywords, memo, place, guardrail, evidence_
                 raw = llm.ask_vision(prompts.vision_system(kind), prompts.build_photo_analysis_prompt(kind, title, place, len(chunk), start + 1),
                                      chunk, usage=part_usage, start=start + 1)
                 photo_usage = llm.merge_usage(photo_usage, part_usage)
-                photo_notes += llm.parse_photo_notes(raw, len(chunk), start + 1, text_max=400 if kind == "invest" else 100)
+                photo_notes += llm.parse_photo_notes(raw, len(chunk), start + 1, text_max=400)
         for note in photo_notes or []:
             idx = note.get("n", 0) - 1
             if photo_names and 0 <= idx < len(photo_names) and photo_names[idx]:
@@ -666,14 +649,17 @@ def _generate_events(*, kind, title, keywords, memo, place, guardrail, evidence_
             usage = fin.pop("_usage", usage)
             if flow in prompts.INVEST_FLOWS:
                 fin["notes"].insert(0, f"이번 글 흐름: {prompts.INVEST_FLOWS[flow][0]}" + (" (메모를 보고 AI가 고름)" if flow_by_ai else ""))
-        quality = eval_style.evaluate(kind, fin["body"], keywords, memo, title=title, ad_check=guardrail, register=register,
-                                      outline_heads=outline.headings(outline_text))
+        if plan:  # 결과 화면 맨 위 안내: 이번 글이 무엇을 기준으로 구성됐는지
+            n_heads = sum(1 for p in postprocess.split_paragraphs(fin["body"]) if postprocess.HEADING_RE.match(postprocess.strip_tags(p)))
+            fin["notes"].insert(0, f"이번 글 구성: 소제목 {n_heads}개" + (f" · 검색자 니즈: {plan['needs']}" if plan.get("needs") else "")
+                                + (f" · 메인 키워드: {plan['main']}" if plan.get("main") else ""))
+        quality = eval_style.evaluate(kind, fin["body"], keywords, memo, title=title, ad_check=guardrail, register=register)
         yield sse("replace", {"text": fin["body"]})
         article_id = storage.save_article(
             kind=kind, title_input=title_input or title, title_final=title, memo=memo, place=place, keywords=keywords,
             options={"guardrail": guardrail, "evidence_mode": evidence_mode, "usage": usage, "photos": photo_notes or [], "videos": video_notes, "ratings": ratings or [],
                      "news": news_list or [], "flow": flow, "register": register, "series": series,
-                     "outline": outline_text},
+                     "plan": plan},
             body=fin["body"], chars=fin["chars"],
             quality=quality, model=usage.get("model") or llm.MODEL, parent_id=parent_id)
         yield sse("done", {"article_id": article_id, "title": title, "body": fin["body"], "chars": fin["chars"],
@@ -708,7 +694,7 @@ def article_stream():
     flow = pick_invest_flow(str(data.get("invest_flow", "auto"))) if c["kind"] == "invest" else ""
     series = read_series(data, c["kind"])
     title = series_title(title, series)
-    outline_text = read_outline(data, c["kind"])
+    plan = prompts.read_plan(data.get("plan")) if c["kind"] != "invest" else None
     if c["kind"] == "invest":
         bad = invest_guard.violations("", title)
         if bad:
@@ -716,9 +702,9 @@ def article_stream():
     return sse_response(_generate_events(
         kind=c["kind"], title=title, keywords=keywords, memo=c["memo"], place=c["place"],
         guardrail=c["guardrail"], evidence_mode=c["evidence_mode"], photos=photos, ratings=ratings,
-        photo_names=read_photo_names(data), news_list=news_list, flow=flow, series=series, videos=videos, outline_text=outline_text,
+        photo_names=read_photo_names(data), news_list=news_list, flow=flow, series=series, videos=videos, plan=plan,
         build_prompt=lambda notes, fl, vn: prompts.build_article_prompt(c["kind"], title, keywords, c["memo"], c["place"], notes, ratings, news_list,
-                                                                        fl, series, vn, outline_text)))
+                                                                        fl, series, vn, plan)))
 
 
 @app.post("/api/articles/<int:article_id>/rewrite")
@@ -736,9 +722,9 @@ def article_rewrite(article_id: int):
         guardrail=bool(opts.get("guardrail")), evidence_mode=opts.get("evidence_mode", "strict"),
         photo_notes=notes, parent_id=article_id, title_input=art["title_input"], ratings=opts.get("ratings") or [],
         news_list=opts.get("news") or [], flow=opts.get("flow", ""), series=opts.get("series"), video_notes=opts.get("videos") or [],
-        outline_text=opts.get("outline", ""),
+        plan=opts.get("plan"),
         build_prompt=lambda n, fl, vn: prompts.build_rewrite_prompt(art["kind"], art["body"], issues, art["keywords"], n, opts.get("ratings") or [],
-                                                                opts.get("news") or [], vn, opts.get("outline", ""))))
+                                                                opts.get("news") or [], vn, opts.get("plan"))))
 
 
 @app.get("/api/articles")
@@ -767,8 +753,7 @@ def articles_update_body(article_id: int):
         raise ValueError("본문이 너무 길어요.")
     quality = eval_style.evaluate(art["kind"], body, art["keywords"], art["memo"], title=art["title"],
                                   ad_check=bool((art["options"] or {}).get("guardrail")),
-                                  register=(art["options"] or {}).get("register", ""),
-                                  outline_heads=outline.headings((art["options"] or {}).get("outline", "")))
+                                  register=(art["options"] or {}).get("register", ""))
     chars = postprocess.count_chars(body)
     storage.update_body(article_id, body, chars, quality)
     return jsonify(chars=chars, quality=quality)

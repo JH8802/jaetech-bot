@@ -118,7 +118,8 @@ def ask_text(system: str, user: str, max_tokens: int = 1024, effort: str = "low"
             return user.split("[기존 원고]\n", 1)[1].rsplit("\n\n설명 없이", 1)[0]
         if "[가드레일 위반 문장]" in user:  # 샘플: 고치지 않고 그대로 돌려줌(코드 삭제 단계가 처리)
             return user.split("[기존 원고]\n", 1)[1].rsplit("\n\n설명 없이", 1)[0]
-        return "\n".join(_mock_titles(user))
+        plan = "\n\n메인 키워드: 샘플 메인 키워드\n세부 키워드: 샘플 세부 1, 샘플 세부 2\n검색자 니즈: 샘플 검색자가 알고 싶은 것" if "검색자 니즈" in user else ""
+        return "\n".join(_mock_titles(user)) + plan
     kwargs = _kwargs(system, user, max_tokens, effort)
     client = get_client()
     if _use_fallbacks():

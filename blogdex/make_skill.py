@@ -19,7 +19,7 @@ sys.path.insert(0, HERE)
 import prompts  # noqa: E402
 
 SKILL_NAME = "blogdex-draft"
-CHECK_MODULES = ["postprocess.py", "eval_style.py", "adcheck.py", "outline.py", "register.py"]
+CHECK_MODULES = ["postprocess.py", "eval_style.py", "adcheck.py", "register.py"]
 
 
 def rules_markdown(version: str) -> str:

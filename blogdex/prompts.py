@@ -5,8 +5,6 @@
 """
 import re
 
-import outline
-
 KINDS = {
     "info": {"label": "정보글"},
     "food": {"label": "맛집글"},
@@ -279,7 +277,7 @@ INFO_LAYOUT_RULES = """[정보 정리 형식 - 첫 화면에서 답을 주고, �
      평일·주말처럼 시간이 다르면 줄을 나눕니다(예: '⏰ 평일 12:00~20:00' 다음 줄 '⏰ 주말 10:30~20:30'). 성인·어린이처럼 요금이 여러 개면 '🎫 성인 29,000원', '🎫 18~36개월 20,300원'처럼 줄마다 하나씩 씁니다.
      휴무 줄의 날짜·요일 부분만 {{color}}로 강조합니다(예: '🗓️ 휴무 {{color}}매주 월요일{{/color}}').
    - 정보글: 첫 줄은 '📋 한눈에 보기' 그대로, 그 아래 줄마다 '라벨: 값' 한 줄씩 3~6줄. 주제의 핵심 사실(예: 대상, 기간, 금액, 방법, 확인할 곳) 중 재료가 있는 것
-   - 값은 메모·업체 정보·사진·참고 자료에 있는 것만 씁니다. 맛집·숙소·여행지의 위치와 영업(운영) 시간은 재료가 없으면 '📍 [확인 필요: 위치]'처럼 남기고, 그 밖에 재료가 없는 항목(전화, 휴무, 편의시설 등)은 줄을 만들지 않습니다. 확인되지 않은 편의시설(수유실, 기저귀갈이대 등)은 쓰지 않습니다.
+   - 값은 메모·업체 정보·사진·참고 자료에 있는 것만 씁니다. 같은 항목의 값이 서로 다르면 ① 작성자 메모 ② 작성자 사진 속 글자(메뉴판·안내문·영수증) ③ 업체 정보·네이버 지도 정보 순서로 앞의 것을 씁니다. 맛집·숙소·여행지의 위치와 영업(운영) 시간은 재료가 없으면 '📍 [확인 필요: 위치]'처럼 남기고, 그 밖에 재료가 없는 항목(전화, 휴무, 편의시설 등)은 줄을 만들지 않습니다. 확인되지 않은 편의시설(수유실, 기저귀갈이대 등)은 쓰지 않습니다.
    - 박스에 쓴 값은 본문에서 같은 문장으로 다시 나열하지 않습니다. 본문에서는 그 정보에 얽힌 경험이나 팁만 씁니다.
 2) 실용 정보 라벨 줄: 휴무, 우천 시, 주차, 대기, 예약, 준비물 같은 실용 정보가 메모에 있으면 해당 섹션 안에 '라벨: 값' 줄로 정리합니다(한 문단에 2~5줄, 줄마다 하나). 라벨은 2~6자 명사로 쓰고 강조 태그를 붙이지 않습니다.
 3) 순서와 동선: 예약·신청·이용 순서처럼 단계가 있으면 '① ', '② ', '③ ' 으로 시작하는 줄로 씁니다(한 문단, 줄마다 한 단계). '1. ' 형식은 소제목과 헷갈리니 단계에 쓰지 않습니다. 여러 장소를 도는 코스·동선은 'A ➡ B ➡ C' 한 줄로 씁니다. 메모에 순서나 장소가 있을 때만 씁니다.
@@ -408,14 +406,14 @@ def derive_keywords(kind: str, title: str, place: dict | None) -> list[str]:
 def _place_block(place: dict | None) -> str:
     if not place or not place.get("name"):
         return ""
-    lines = ["[업체 정보 - 지도 검색 결과이므로 사실로 사용 가능]"]
+    lines = ["[업체 정보 - 작성자가 입력. 사실로 사용 가능하나, 메모·사진 속 글자와 다르면 메모·사진을 우선]"]
     for label, key in (("상호", "name"), ("업종", "category"), ("주소", "address"), ("전화", "phone")):
         if place.get(key):
             lines.append(f"- {label}: {place[key]}")
     if place.get("details"):
         lines.append("\n[네이버 지도 정보 - 작성자가 네이버 지도에서 가져와 확인한 정보. 한눈에 보기 박스와 본문의 사실로 사용 가능]\n"
                      + place["details"]
-                     + "\n- 메모·메뉴판 사진과 값이 다르면(가격 인상 등) 메모·메뉴판 사진(방문 당시 정보)을 우선합니다."
+                     + "\n- 네이버 정보는 갱신되지 않아 틀린 경우가 많습니다. 메모·사진 속 글자와 값이 다르면(가격 인상, 영업시간 변경 등) 메모·사진(방문 당시 정보)을 씁니다."
                      + "\n- 여기 있는 메뉴를 먹었다고 쓰지 않습니다. 먹은 메뉴와 맛은 메모·사진에 있는 것만 씁니다.")
     return "\n".join(lines)
 
@@ -459,7 +457,7 @@ def build_photo_analysis_prompt(kind: str, title: str, place: dict | None, count
         f"글 제목: {title}",
         pb,
         f"사진 {count}장을 보냅니다(번호 {first}~{first + count - 1}). 각 사진 앞에 '[사진 N]' 표시가 있습니다. n 에는 그 번호를 그대로 쓰고, 사진마다 아래 형식의 JSON 객체를 만들어 배열로 출력하세요.",
-        '{"n": 번호, "category": "' + cats + ' 중 하나", "desc": "보이는 것을 한두 문장(60자 안팎)으로", "text": "사진 속에서 또렷이 읽히는 글자(없으면 빈 문자열)", "dish": "음식 사진일 때 요리 이름(아니면 빈 문자열)", "dish_confidence": "확실 | 추정 | 모름", "caption": "사진 아래에 달 짧은 설명(8~22자)", "thumb": 대표 사진 적합도 1~5}',
+        '{"n": 번호, "category": "' + cats + ' 중 하나", "desc": "보이는 것을 한두 문장(60자 안팎)으로", "text": "사진 속에서 또렷이 읽히는 글자(없으면 빈 문자열). 메뉴판·가격표·영업시간 안내문·영수증이면 메뉴 이름과 가격, 요금, 영업·운영 시간, 브레이크타임, 휴무를 빠짐없이 옮겨 적기(최대 400자)", "dish": "음식 사진일 때 요리 이름(아니면 빈 문자열)", "dish_confidence": "확실 | 추정 | 모름", "caption": "사진 아래에 달 짧은 설명(8~22자)", "thumb": 대표 사진 적합도 1~5}',
     ] if x)
 
 
@@ -588,19 +586,9 @@ def flow_block(flow: str) -> str:
     return "\n".join(lines)
 
 
-OUTLINE_RULES = """[글 구성 사용 규칙 - 구성은 설계도이지 사실 자료가 아닙니다]
-- 소제목: '소제목 목차'의 순서와 뜻 그대로 씁니다. 적힌 문구를 최대한 살리고, 공백 포함 40자를 넘으면 뜻을 유지한 채 줄입니다. '[비교 1]' 같은 앞머리 표시는 그대로 둡니다. 목차에 없는 소제목을 새로 만들거나 빼지 않습니다.
-- 소제목 아래 '·' 항목은 그 섹션에서 다룰 내용 가이드입니다. 메모·사진·업체 정보에 재료가 있는 것만 씁니다.
-- 경험(아이 반응, 가장 좋았던 곳, 대기·주차 경험, 한 줄 평 등)은 메모·사진에 있을 때만 씁니다. 구성에만 있고 재료가 없으면 지어내지 말고 '[확인 필요: 무엇]'으로 남깁니다.
-- 구성에 적힌 숫자(요금, 공제율, 한도, 기간, 거리, 시간 등)는 그대로 사실로 쓰지 않습니다. 메모·업체 정보·사진에도 같은 값이 있을 때만 쓰고, 아니면 '[확인 필요: 대중교통 공제율]'처럼 남깁니다. 링크는 지어내지 않고 '(예약 링크 삽입)'처럼 자리만 남깁니다.
-- '검색자 니즈'는 인트로와 각 섹션이 답해야 할 질문입니다. 인트로에서 독자의 고민을 짚고, 글이 그 답을 준다는 것을 보여 줍니다.
-- 키워드는 [핵심 키워드] 규칙을 따릅니다. 세부 키워드는 해당 섹션에 자연스럽게 한 번씩 녹이고 억지로 반복하지 않습니다.
-- 목차에 요약·정리 섹션(예: '3줄 요약', '체크리스트')이 있으면 앞쪽 '📌 이 글 핵심 3줄'과 같은 문장을 반복하지 말고, 실천 항목을 '① ', '② ', '③ ' 줄로 씁니다."""
-
-
 def build_article_prompt(kind: str, title: str, keywords: list[str], memo: str, place: dict | None,
                          photo_notes: list[dict] | None = None, ratings: list[dict] | None = None, news: list[dict] | None = None,
-                         flow: str = "", series: dict | None = None, video_notes: list[dict] | None = None, outline_text: str = "") -> str:
+                         flow: str = "", series: dict | None = None, video_notes: list[dict] | None = None, plan: dict | None = None) -> str:
     parts = [f"[글 제목]\n{title}"]
     if keywords:
         parts.append("[핵심 키워드]\n" + ", ".join(keywords))
@@ -622,8 +610,8 @@ def build_article_prompt(kind: str, title: str, keywords: list[str], memo: str, 
         parts.append(news_block(news))
     if kind == "invest" and flow in INVEST_FLOWS:
         parts.append(flow_block(flow))
-    if outline_text and kind != "invest":
-        parts.append(outline.to_block(outline_text) + "\n\n" + OUTLINE_RULES)
+    if plan and kind != "invest":
+        parts.append(plan_block(plan))
     if series and series.get("name"):
         part = f" {series['part']}편" if series.get("part") else ""
         parts.append(f"[시리즈]\n이 글은 '{series['name']}' 시리즈{part}입니다. 인트로에서 시리즈의 몇 번째 글인지 한 번 자연스럽게 밝힙니다. "
@@ -678,13 +666,66 @@ def build_title_prompt(kind: str, keyword: str, memo: str, place: dict | None, e
     ]
     if guardrail:
         rules.append("- 효능·치료·개선·노화 방지 등을 단정하거나 암시하는 단어(효능, 효과, 개선, 치료, 예방) 금지")
+    rules += [
+        "",
+        "제목 5줄 다음에 빈 줄 하나를 두고, 이 글의 검색 기획을 아래 3줄로 출력하세요(라벨 그대로, 제목과 섞지 않기).",
+        f"{PLAN_LABELS['main']}: 검색자가 네이버에 실제로 칠 2~5단어 문구 하나(주제·메모 기준, 지역·장소 이름이 있으면 포함)",
+        f"{PLAN_LABELS['subs']}: 함께 검색될 세부 문구 2~4개(쉼표로 구분, 메모에 근거가 있는 것만)",
+        f"{PLAN_LABELS['needs']}: 이 글을 찾는 사람이 알고 싶어 하는 것 한 문장(60자 이내)",
+    ]
     parts.append("\n" + "\n".join(rules))
     return "\n".join(parts)
 
 
+PLAN_LABELS = {"main": "메인 키워드", "subs": "세부 키워드", "needs": "검색자 니즈"}
+
+
+def split_title_plan(text: str) -> tuple[list[str], dict]:
+    """제목 생성 응답 → (제목 줄 목록, 검색 기획 {main, subs, needs}). 기획 줄은 제목에서 뺍니다."""
+    plan, lines = {"main": "", "subs": [], "needs": ""}, []
+    for line in text.splitlines():
+        m = re.match(r"^\s*[-*]?\s*\**\s*(메인 키워드|세부 키워드|검색자 니즈)\s*\**\s*[:：]\s*(.*)$", line)
+        if not m:
+            lines.append(line)
+            continue
+        val = m.group(2).strip().strip("'\"`")
+        if m.group(1) == "메인 키워드":
+            plan["main"] = val[:60]
+        elif m.group(1) == "세부 키워드":
+            plan["subs"] = [x.strip(" '\"`") for x in re.split(r"[,，]", val) if x.strip(" '\"`")][:4]
+        else:
+            plan["needs"] = val[:120]
+    return lines, plan
+
+
+def read_plan(raw) -> dict | None:
+    """화면이 돌려보낸 검색 기획. 비어 있으면 None."""
+    if not isinstance(raw, dict):
+        return None
+    plan = {"main": str(raw.get("main") or "").strip()[:60],
+            "subs": [str(x).strip()[:60] for x in (raw.get("subs") or []) if str(x).strip()][:4] if isinstance(raw.get("subs"), list) else [],
+            "needs": str(raw.get("needs") or "").strip()[:120]}
+    return plan if (plan["main"] or plan["needs"]) else None
+
+
+def plan_block(plan: dict | None) -> str:
+    if not plan:
+        return ""
+    lines = ["[검색 기획 - 제목을 지을 때 메모를 보고 정한 방향]"]
+    if plan.get("main"):
+        lines.append(f"- {PLAN_LABELS['main']}: {plan['main']}")
+    if plan.get("subs"):
+        lines.append(f"- {PLAN_LABELS['subs']}: {', '.join(plan['subs'])}")
+    if plan.get("needs"):
+        lines.append(f"- {PLAN_LABELS['needs']}: {plan['needs']}")
+    lines.append("- 인트로에서 검색자 니즈를 짚고, 소제목들이 차례로 그 답이 되게 구성합니다. 세부 키워드는 어울리는 섹션에 한 번씩 자연스럽게 넣습니다(억지 반복 금지)."
+                 " 기획은 방향일 뿐 사실 자료가 아니니, 메모·사진에 없는 경험·숫자는 쓰지 않습니다.")
+    return "\n".join(lines)
+
+
 def build_rewrite_prompt(kind: str, body: str, issues: list[str], keywords: list[str], photo_notes: list[dict] | None = None,
                          ratings: list[dict] | None = None, news: list[dict] | None = None, video_notes: list[dict] | None = None,
-                         outline_text: str = "") -> str:
+                         plan: dict | None = None) -> str:
     return "\n\n".join([
         "아래 원고를 같은 주제와 같은 사실을 유지한 채 다시 쓰세요. 아래 '고칠 점'을 모두 반영합니다.",
         "[고칠 점]\n" + "\n".join(f"- {i}" for i in issues),
@@ -693,7 +734,7 @@ def build_rewrite_prompt(kind: str, body: str, issues: list[str], keywords: list
         video_block(video_notes) + "\n- 기존 원고의 <동영상N> 줄은 번호를 바꾸지 말고 그대로 둡니다." if video_notes else "",
         rating_block(ratings),
         news_block(news),
-        (outline.to_block(outline_text) + "\n\n" + OUTLINE_RULES) if outline_text and kind != "invest" else "",
+        plan_block(plan) if kind != "invest" else "",
         "[기존 원고]\n" + body,
         "'📰 참고한 기사' 문단은 시스템이 다시 넣으니 빼도 됩니다." if news else "",
         "'★ 별점 한눈에 보기' 문단은 항목 옆 이유까지 그대로 둡니다. '📋 한눈에 보기' 박스와 '라벨: 값' 줄, ①② 단계 줄도 형식을 유지합니다. '한 줄 평:'(또는 '한 줄 정리:') 문단은 해시태그 바로 앞의 마지막 본문 문단으로 유지합니다.",

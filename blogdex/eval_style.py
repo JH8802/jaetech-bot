@@ -8,7 +8,6 @@ import re
 import statistics as st
 
 import adcheck
-import outline
 import register as reg
 from postprocess import (CHILD_BOX_HEAD, HASHTAG_RANGE, HEADING_RE, INFO_BOX_HEAD, MAP_LINE_MARK, MAX_HASHTAGS, MIN_HASHTAGS, RATING_HEAD, RELATED_MARK,
                          SOURCE_HEAD, SUMMARY_HEAD, count_chars, count_chars_ws, find_hashtag_index, is_disclosure_paragraph, split_paragraphs, strip_tags)
@@ -118,7 +117,7 @@ def _memo_coverage(memo: str, body_plain: str) -> tuple[float, int]:
 
 
 def evaluate(kind: str, body: str, keywords: list[str], memo: str = "", title: str = "", ad_check: bool = False,
-             register: str = "", outline_heads: list[str] | None = None) -> dict:
+             register: str = "") -> dict:
     paras, heads, tags = _body_parts(body)
     text = "\n".join(paras)
     plain_len = len(re.sub(r"\s", "", text))
@@ -249,14 +248,6 @@ def evaluate(kind: str, body: str, keywords: list[str], memo: str = "", title: s
     shown = ", ".join(f"'{t}'" for t in typos[:3])
     checks.append(_check("typo", "조사·어미 오류 의심", "없음" if not typos else f"{len(typos)}곳 ({shown})", "0곳", not typos,
                          f"깨진 조사·어미({shown})가 있는 문장을 자연스럽게 고칠 것"))
-
-    # 13) 글 구성(목차) 소제목 반영: 구성 칸을 쓴 글만
-    if outline_heads:
-        missing = outline.coverage(outline_heads, [strip_tags(h) for h in heads])
-        shown = ", ".join(f"'{h[:20]}'" for h in missing[:3])
-        checks.append(_check("outline", "글 구성 소제목 반영", f"{len(outline_heads) - len(missing)}/{len(outline_heads)}개",
-                             f"{len(outline_heads)}/{len(outline_heads)}개", not missing,
-                             f"글 구성의 소제목({shown})을 목차 순서대로 소제목으로 넣을 것"))
 
     issues = [c["advice"] for c in checks if not c["ok"] and c["advice"]]
     return {"checks": checks, "issues": issues, "ok_count": sum(c["ok"] for c in checks), "total": len(checks), "headings": len(heads)}

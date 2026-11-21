@@ -62,7 +62,7 @@ class PlaceLinkPostprocessTest(unittest.TestCase):
         b = prompts._place_block({"name": "놉스", "details": "영업시간: 평일 11:00~22:00"})
         self.assertIn("[네이버 지도 정보", b)
         self.assertIn("영업시간: 평일 11:00~22:00", b)
-        self.assertIn("메뉴판 사진(방문 당시 정보)을 우선", b)
+        self.assertIn("메모·사진(방문 당시 정보)을 씁니다", b)
         self.assertNotIn("네이버 지도 정보", prompts._place_block({"name": "놉스"}))
 
 
