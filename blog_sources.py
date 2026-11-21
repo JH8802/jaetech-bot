@@ -250,7 +250,8 @@ def resolve_sources(lines, topic=""):
                 summary = summarize_document(body, "application/pdf", title, topic)
             else:
                 summary = summarize_source(line, title, body, topic)
-            summary = _check_summary(summary)
+            # 원문 주소를 줄 끝에 남겨 둔다 → 발행 HTML의 '참고 자료'에서 원문 링크로 쓰임
+            summary = f"{_check_summary(summary)} — 원문: {line}"
             resolved.append(summary)
             report.append({"url": line, "ok": True, "message": summary})
         except Exception as e:

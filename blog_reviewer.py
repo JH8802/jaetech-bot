@@ -1,5 +1,5 @@
 import anthropic
-from blog_utils import extract_text, has_keyword
+from blog_utils import extract_text, has_keyword, load_settings, find_placeholders
 from dotenv import load_dotenv
 import os
 import json
@@ -87,6 +87,7 @@ AI_REVIEW_LABELS = {
     "specificity": "사실 구체성",
     "differentiation": "차별화(뻔한 내용 여부)",
     "keyword_clarity": "SEO 키워드 명확성",
+    "intent_answer": "검색 의도 충족(소제목마다 답했나)",
 }
 
 
@@ -145,6 +146,72 @@ def scan_health_claims(draft):
     return found
 
 
+# 태그 개수 권장 범위 (플랫폼별)
+TAG_RANGE = {"워드프레스": (2, 4), "티스토리": (3, 7), "네이버 블로그": (3, 10)}
+
+# 저자 경험을 주장하는 표현 — 이런 문장은 내가 준 메모·의견에 근거가 있어야 함
+EXPERIENCE_MARKERS = [
+    "실무에서", "현장에서", "현업에서", "업무에서", "업무상", "일하면서", "담당하면서", "검수하면서",
+    "점검하면서", "직접 확인", "직접 봤", "직접 본", "직접 먹", "직접 써", "직접 사용", "직접 검사",
+    "내가 본", "제가 본", "본 적이", "봐 왔", "봐왔", "경험상", "경험으로", "겪어 보", "겪어보",
+    "먹어 보", "먹어보", "써 보니", "써보니", "확인해 보니", "확인해보니", "해 보니", "해보니",
+]
+_EXPERIENCE_RE = re.compile("|".join(re.escape(m) for m in EXPERIENCE_MARKERS))
+
+
+def _bigrams(text):
+    chars = re.sub(r"[^0-9A-Za-z가-힣]", "", text)
+    return {chars[i:i + 2] for i in range(len(chars) - 1)}
+
+
+def scan_experience_claims(body, own_texts, threshold=0.35):
+    """메모·의견에 근거 없는 '저자 경험' 주장 문장을 찾는다 (구글이 중시하는 '경험'을 지어내는 것 방지).
+    own_texts: 저자가 직접 준 글 (경험 메모·의견·다듬기 메모·직접 입력) — 출처 자료는 포함하지 않음.
+    경험 표현이 들어간 문장과 저자 글의 글자 조각(2글자) 겹침 비율이 낮으면 지적."""
+    own = _bigrams(" ".join(own_texts))
+    found = []
+    text = re.sub(r"\[[^\]]*\]", " ", body)
+    for sentence in re.split(r"(?<=[.!?])\s+|\n+", text):
+        sentence = sentence.strip()
+        if not sentence or not _EXPERIENCE_RE.search(sentence):
+            continue
+        content = _bigrams(_EXPERIENCE_RE.sub(" ", sentence))
+        if not content:
+            continue
+        overlap = len(content & own) / len(content)
+        if overlap < threshold:
+            found.append(sentence[:120])
+    return found
+
+
+UNCERTAIN_RE = re.compile(r"모르겠|모른다|알 수 없|확인하지 못|찾지 못했|답을 찾지|정해진 기준이 없|알려진 바 없")
+
+
+def scan_sections(body):
+    """검색 의도 점검 — 소제목 아래 내용이 그 소제목에 실제로 답하는지 (규칙 기반).
+    너무 짧은 섹션, '모르겠다'로만 끝나는 섹션을 찾는다."""
+    issues = []
+    sections, title, buf = [], None, []
+    for line in body.split("\n"):
+        if line.strip().startswith("[소제목]"):
+            if title is not None:
+                sections.append((title, "\n".join(buf)))
+            title, buf = line.strip()[len("[소제목]"):].strip(), []
+        elif title is not None:
+            buf.append(line)
+    if title is not None:
+        sections.append((title, "\n".join(buf)))
+
+    for title, content in sections:
+        text = re.sub(r"\[[^\]]*\][^\n]*", " ", content).strip()
+        if UNCERTAIN_RE.search(text) and not re.search(r"\d", text):
+            issues.append(f"'{title}' 섹션이 '모르겠다'류로 끝나고 구체적 정보(수치 등)가 없음 — 검색한 사람이 답을 못 얻고 "
+                          "나감. 소제목을 내용에 맞게 바꾸거나(예: '기준이 없을 때 확인할 것') 근거를 보강")
+        elif len(text) < 120:
+            issues.append(f"'{title}' 섹션이 너무 짧음 ({len(text)}자) — 소제목이 약속한 내용을 충분히 다루지 못함")
+    return issues
+
+
 def scan_seo(meta, platform, target_keyword=""):
     """규칙 기반 SEO 점검 — 구글 기준(티스토리/워드프레스)은 더 엄격하게 본다.
     meta는 parse_draft_metadata()의 반환값."""
@@ -170,8 +237,13 @@ def scan_seo(meta, platform, target_keyword=""):
         issues.append(f"제목 {title_len}자 — 검색결과에서 뒷부분이 잘릴 수 있음 (30자 안팎 권장)")
 
     tags = [t.strip() for t in re.split(r"[,，]", meta.get("tags", "")) if t.strip()]
-    if not 3 <= len(tags) <= 10:
-        issues.append(f"태그 {len(tags)}개 — 5~7개 권장")
+    low, high = TAG_RANGE.get(platform, (3, 7))
+    if not low <= len(tags) <= high:
+        why = " (워드프레스는 태그마다 목록 페이지가 생겨서, 많으면 얇은 페이지가 쌓임)" if platform == "워드프레스" else ""
+        issues.append(f"태그 {len(tags)}개 — {low}~{high}개 권장{why}")
+    categories = load_settings()["categories"]
+    if categories and meta.get("category", "").strip() not in categories:
+        issues.append(f"카테고리 '{meta.get('category', '')}'가 내 카테고리 목록에 없음 — 목록 중에서 골라야 사이트 구조가 흐트러지지 않음")
     flat_tags = [t.replace(" ", "").lower() for t in tags]
     if len(set(flat_tags)) < len(flat_tags):
         issues.append("중복된 태그가 있음")
@@ -232,6 +304,10 @@ def collect_issues(review):
     issues += [f"[검색 최적화] {i}" for i in review.get("seo", [])]
     issues += [f"[표시광고 표현 확인] {i}" for i in review.get("claims", [])]
     issues += [f"[AI 말투] {i}" for i in review.get("ai_patterns", [])]
+    issues += [f"[검색 의도] {i}" for i in review.get("sections", [])]
+    for sentence in review.get("experience", []):
+        issues.append(f"[지어낸 경험] '{sentence}' — 저자 메모·의견에 근거가 없는 경험 주장. 경험 표현을 빼고 "
+                      "사실 서술로 바꾸거나, 근거 없는 내용이면 삭제해야 함")
     for row in review.get("copied", []):
         issues.append(f"[원문과 거의 같은 문장] '{row['sentence']}' ({row['source']}) — 자료 문장을 거의 그대로 "
                       "옮김. 같은 뜻을 블로그 문체로 완전히 새로 써야 함 (저작권)")
@@ -248,7 +324,7 @@ def collect_issues(review):
 
 def review_draft(draft):
     """AI 기반 점검 (문장 리듬 / 저자 의견 / 사실 구체성 / 차별화 / SEO 키워드) — Haiku로 저비용 호출."""
-    prompt = f"""아래는 블로그 초안이야. 다음 5개 기준으로 점검해줘.
+    prompt = f"""아래는 블로그 초안이야. 다음 6개 기준으로 점검해줘.
 각 기준마다 "문제가 있는지(problem: true/false)"를 먼저 판정하고, 문제가 있을 때만
 detail에 원문 문장을 그대로 짧게 인용해서 무엇이 문제인지 적어줘.
 문제가 없으면 problem을 false로 하고 detail은 빈 문자열("")로 둬 — 문제 없다는
@@ -264,13 +340,16 @@ detail에 원문 문장을 그대로 짧게 인용해서 무엇이 문제인지 
    대한 글인지" 검색하는 사람 입장에서 바로 알 수 있는가. 제목이나
    도입부가 모호하거나 핵심 키워드 없이 겉돈다면 true
    (키워드를 억지로 많이 넣으라는 뜻이 아니라, 명확성 문제만 봐줘)
+6. intent_answer: 각 [소제목]을 검색어로 친 사람이 그 아래 내용만 읽고 원하던 답을 얻는가.
+   소제목이 질문·약속을 하는데 아래 내용이 답을 안 주거나 빙빙 돌면 true
 
 반드시 아래 JSON 형식으로만 답해. 다른 설명 없이 JSON만 출력해.
 {{"sentence_rhythm": {{"problem": false, "detail": ""}},
  "opinion": {{"problem": false, "detail": ""}},
  "specificity": {{"problem": false, "detail": ""}},
  "differentiation": {{"problem": false, "detail": ""}},
- "keyword_clarity": {{"problem": false, "detail": ""}}}}
+ "keyword_clarity": {{"problem": false, "detail": ""}},
+ "intent_answer": {{"problem": false, "detail": ""}}}}
 
 초안:
 {draft}"""
@@ -336,3 +415,47 @@ def _parse_review_json(text):
         if pm:
             result[key] = _normalize({"problem": pm.group(1).lower() == "true", "detail": pm.group(2)})
     return result if len(result) == len(keys) else {}
+
+
+
+def own_texts(inputs):
+    """저자가 직접 준 글 (경험 주장 대조용) — 출처 자료는 제외."""
+    return (list(inputs.get("key_points", [])) + [inputs.get("personal_take", "")]
+            + list(inputs.get("notes", [])) + list(inputs.get("user_additions", [])))
+
+
+def readiness(review, body, inputs, settings, platform):
+    """발행 준비 상태. 반환: [(항목, 상태, 설명)] — 상태: "ok" | "block"(발행 전 반드시 해결) | "warn"(확인 권장)"""
+    items = find_placeholders(body)
+    pending = [i for i in items if i["kind"] in ("source", "add", "review", "link")]
+    photos = [i for i in items if i["kind"] == "visual"]
+    facts_missing = [r for r in review.get("facts", []) if not r["found_in"]]
+    has_own = any(t.strip() for t in own_texts(inputs))
+    ai = review.get("ai") or {}
+    ai_problems = [AI_REVIEW_LABELS[k] for k in AI_REVIEW_LABELS if ai_issue(ai.get(k))]
+    google = platform in ("티스토리", "워드프레스")
+
+    rows = [
+        ("남은 항목([출처 필요]·[추가 필요]·[검수]·[내부링크 제안])",
+         "block" if pending else "ok", f"{len(pending)}개 남음" if pending else "모두 처리됨"),
+        ("근거 없는 숫자", "block" if facts_missing else "ok",
+         f"{len(facts_missing)}개" if facts_missing else "없음"),
+        ("원문과 거의 같은 문장 (저작권)", "block" if review.get("copied") else "ok",
+         f"{len(review.get('copied', []))}개" if review.get("copied") else "없음"),
+        ("지어낸 경험 (메모에 없는 실무 경험 주장)", "block" if review.get("experience") else "ok",
+         f"{len(review.get('experience', []))}개" if review.get("experience") else "없음"),
+        ("저자 의견·경험 입력", "ok" if has_own else "block",
+         "있음" if has_own else "없음 — 자료만 다시 정리한 글은 구글이 가치 낮게 봄"),
+        ("저자 소개 (사이드바에서 저장)", "ok" if settings.get("author_bio", "").strip() else ("block" if google else "warn"),
+         "있음" if settings.get("author_bio", "").strip() else "없음 — 누가 쓴 글인지 보여줘야 신뢰도가 올라감"),
+        ("검색 의도 (섹션마다 답을 주는지)", "warn" if review.get("sections") else "ok",
+         f"{len(review.get('sections', []))}개 섹션 확인 필요" if review.get("sections") else "문제 없음"),
+        ("검색 최적화 (키워드·태그·카테고리 등)", "warn" if review.get("seo") else "ok",
+         f"{len(review.get('seo', []))}건" if review.get("seo") else "문제 없음"),
+        ("표시광고 표현", "warn" if review.get("claims") else "ok",
+         "확인 필요 (설명 문맥이면 괜찮음)" if review.get("claims") else "걸리는 표현 없음"),
+        ("AI 점검", "warn" if ai_problems else "ok", ", ".join(ai_problems) if ai_problems else "문제 없음"),
+        ("사진 자리", "warn" if photos else "ok",
+         f"{len(photos)}곳 — 에디터에서 사진을 넣고 📌 줄 삭제" if photos else "없음"),
+    ]
+    return rows

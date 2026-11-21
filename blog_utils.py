@@ -170,6 +170,17 @@ _BULLET_RE = re.compile(r"^[-•·]\s+")
 _NUMBERED_RE = re.compile(r"^\d{1,2}[.)]\s+")
 NOTICE_PREFIXES = VISUAL_TAGS + ("[내부링크 제안]", "[추가 필요", "[검수")
 SUMMARY_TITLE = "한눈에 보기"
+REFS_TITLE = "참고 자료"
+AUTHOR_TITLE = "글쓴이"
+
+
+def _ref_item(item):
+    """'이름 | 주소' → 링크, '이름'만 있으면 글자만."""
+    name, _, url = item.partition(" | ")
+    url = url.strip()
+    if re.match(r"https?://\S+$", url):
+        return f'<a href="{html.escape(url)}" target="_blank" rel="noopener">{html.escape(name.strip())}</a>'
+    return html.escape(item.strip())
 
 
 def parse_body_blocks(body):
@@ -209,6 +220,17 @@ def parse_body_blocks(body):
                     items.append(_BULLET_RE.sub("", lines[i].strip()))
                 i += 1
             blocks.append(("summary", items))
+        elif s.startswith(("[참고 자료]", "[저자 소개]")):
+            flush()
+            kind = "refs" if s.startswith("[참고 자료]") else "author"
+            end = "[참고 자료 끝]" if kind == "refs" else "[저자 소개 끝]"
+            items = []
+            i += 1
+            while i < len(lines) and not lines[i].strip().startswith(end):
+                if lines[i].strip():
+                    items.append(_BULLET_RE.sub("", lines[i].strip()))
+                i += 1
+            blocks.append((kind, items))
         elif s.startswith("[표]"):
             flush()
             caption = s[s.index("]") + 1:].strip() if "]" in s else ""
@@ -292,6 +314,14 @@ def body_to_html(body):
         elif kind == "image":
             url, alt = data
             out.append(f'<p><img src="{html.escape(url)}" alt="{html.escape(alt)}"></p>')
+        elif kind == "refs":
+            out.append(f"<h2>{REFS_TITLE}</h2>\n<ul>" + "".join(f"<li>{_ref_item(x)}</li>" for x in data) + "</ul>")
+        elif kind == "author":
+            out.append(
+                '<div style="background:#f5f5f5;padding:16px 20px;border-radius:8px;">'
+                f"<p><strong>{AUTHOR_TITLE}</strong></p>"
+                + "".join(f"<p>{_inline(x)}</p>" for x in data) + "</div>"
+            )
         elif kind == "notice":
             out.append(f'<p style="background:#fff3cd;padding:8px;">📌 {html.escape(data)}</p>')
     return "\n\n".join(out)
@@ -341,6 +371,23 @@ def body_to_gutenberg(body):
             title, url = data
             out.append(_wp("paragraph",
                            f'<p>👉 함께 보면 좋은 글: <a href="{html.escape(url)}">{html.escape(title)}</a></p>'))
+        elif kind == "refs":
+            out.append(_wp("heading", f'<h2 class="wp-block-heading">{REFS_TITLE}</h2>'))
+            lis = "\n\n".join(_wp("list-item", f"<li>{_ref_item(x)}</li>") for x in data)
+            out.append(_wp("list", f'<ul class="wp-block-list">{lis}</ul>'))
+        elif kind == "author":
+            inner = "\n\n".join(
+                [_wp("paragraph", f"<p><strong>{AUTHOR_TITLE}</strong></p>")]
+                + [_wp("paragraph", f"<p>{_inline(x)}</p>") for x in data]
+            )
+            out.append(_wp(
+                "group",
+                '<div class="wp-block-group has-background" style="background-color:#f5f5f5;'
+                'padding-top:20px;padding-right:20px;padding-bottom:20px;padding-left:20px">'
+                f"{inner}</div>",
+                '{"style":{"color":{"background":"#f5f5f5"},"spacing":{"padding":{"top":"20px",'
+                '"bottom":"20px","left":"20px","right":"20px"}}},"layout":{"type":"constrained"}}',
+            ))
         elif kind == "image":
             url, alt = data
             out.append(_wp("image",
@@ -552,3 +599,96 @@ def save_autosave(data):
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
     os.replace(tmp, AUTOSAVE_PATH)
+
+
+# ─────────────────────────────────────────────
+# 사이트 설정 (저자 소개·카테고리 목록) — 두 PC가 같이 쓰도록 데이터 폴더에 저장
+# ─────────────────────────────────────────────
+SETTINGS_PATH = os.path.join(DATA_DIR, "site_settings.json")
+SETTINGS_DEFAULTS = {
+    "author_bio": "",        # 저자 소개 (2~4줄)
+    "disclosure": "",        # 이해관계 고지 (예: 업체와 금전적 관계 없음)
+    "disclose_ai": True,     # AI 도구 도움 사실을 글 끝에 밝힐지
+    "categories": [],        # 내 블로그 카테고리 목록 (비우면 AI가 자유롭게)
+}
+
+
+def load_settings():
+    try:
+        with open(SETTINGS_PATH, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        data = {}
+    return {k: data.get(k, v) for k, v in SETTINGS_DEFAULTS.items()}
+
+
+def save_settings(data):
+    os.makedirs(DATA_DIR, exist_ok=True)
+    with open(SETTINGS_PATH, "w", encoding="utf-8") as f:
+        json.dump({k: data.get(k, v) for k, v in SETTINGS_DEFAULTS.items()}, f, ensure_ascii=False, indent=2)
+
+
+def load_past_tags(platform, drafts_dir=DRAFTS_DIR, limit=30):
+    """같은 플랫폼 지난 원고에서 많이 쓴 태그 순으로 (태그 재사용 → 얇은 태그 페이지 방지)."""
+    counts = {}
+    if not os.path.isdir(drafts_dir):
+        return []
+    for name in os.listdir(drafts_dir):
+        if not name.endswith(".txt"):
+            continue
+        try:
+            info = read_draft_file(os.path.join(drafts_dir, name))
+        except (OSError, UnicodeDecodeError):
+            continue
+        if info["platform"] != platform:
+            continue
+        for tag in re.split(r"[,，]", parse_draft_metadata(info["draft"])["tags"]):
+            tag = tag.strip()
+            if tag:
+                counts[tag] = counts.get(tag, 0) + 1
+    return [t for t, _ in sorted(counts.items(), key=lambda kv: -kv[1])][:limit]
+
+
+def extract_references(inputs):
+    """입력 재료에서 '참고 자료' 목록을 만든다. 반환: ['이름 | 주소' 또는 '이름']"""
+    refs = []
+    if inputs.get("mode") == "materials":
+        for block in inputs.get("sources", []):
+            header, _, rest = block.partition("\n")
+            label = re.sub(r"^\[자료 \d+\]\s*", "", header).strip()
+            source_line = next((l for l in rest.split("\n") if l.strip().startswith("출처:")), "")
+            name = source_line.split(":", 1)[1].strip() if source_line else label
+            name = re.sub(r"\s*/\s*", " · ", name)
+            refs.append(f"{name} | {label}" if re.match(r"https?://", label) else name)
+    else:
+        for line in inputs.get("sources", []):
+            url = re.search(r"원문:\s*(https?://\S+)", line)
+            name = re.split(r"\s+—\s+", line)[0].strip()
+            if re.match(r"https?://", name):
+                continue
+            refs.append(f"{name[:80]} | {url.group(1)}" if url else name[:80])
+    seen, unique = set(), []
+    for r in refs:
+        if r and r not in seen:
+            seen.add(r)
+            unique.append(r)
+    return unique
+
+
+def publish_tail(inputs, settings, written=""):
+    """발행용 HTML 끝에 붙일 '참고 자료' + '글쓴이' 블록 (본문 칸에는 넣지 않고 출력할 때만 붙임)."""
+    parts = []
+    refs = extract_references(inputs)
+    if refs:
+        parts.append("[참고 자료]\n" + "\n".join(f"- {r}" for r in refs) + "\n[참고 자료 끝]")
+    lines = [l.strip() for l in settings.get("author_bio", "").split("\n") if l.strip()]
+    if lines:
+        basis = "공개 자료" if inputs.get("mode") == "materials" else "공개 자료와 필자의 실무 경험"
+        note = f"이 글은 {written + ' 기준 ' if written else ''}{basis}를 바탕으로 작성했습니다."
+        if settings.get("disclose_ai"):
+            note += " 초안 정리에 AI 도구의 도움을 받았고, 내용 확인과 최종 판단은 필자가 했습니다."
+        lines.append(note)
+        if settings.get("disclosure", "").strip():
+            lines.append(settings["disclosure"].strip())
+        parts.append("[저자 소개]\n" + "\n".join(lines) + "\n[저자 소개 끝]")
+    return "\n\n".join(parts)

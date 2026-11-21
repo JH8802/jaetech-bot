@@ -16,7 +16,8 @@ from datetime import datetime
 import anthropic
 from dotenv import load_dotenv
 
-from blog_drafter import (AI_HABITS_RULE, OPENING_STYLES, PLATFORM_STYLE_HINTS, _style_block)
+from blog_drafter import (AI_HABITS_RULE, OPENING_STYLES, PLATFORM_STYLE_HINTS, _style_block,
+                          category_rule, tag_rule)
 from blog_sources import (fetch_url, IMAGE_TYPES, MAX_IMAGE_BYTES, MAX_PDF_BYTES, _HWP_HINT)
 from blog_style_guide import STYLE_GUIDE
 from blog_utils import create_text, load_style_sample
@@ -201,7 +202,7 @@ def draft_from_materials(notes_text, topic, target_keyword="", audience="", tone
 출력 순서와 형식 (마크다운 기호 #, *, ** 는 쓰지 마):
 1. [제목] 타깃 키워드를 자연스럽게 한 번 넣은 제목 (20~30자, 낚시성 과장 금지)
 2. [제목 후보] 다른 각도의 제목 후보 — 이 줄을 2번 (한 줄에 하나씩)
-3. [카테고리] 카테고리 1개 (글 내용과 모순되는 분류는 피해 — 예: "기능성 원료로 인정 안 됐다"는 글을 "건강기능식품"에 넣지 마)
+3. [카테고리] {category_rule()}
 4. [메타설명] 검색결과 설명용 1~2문장, 120~155자, 타깃 키워드 포함
 5. [주소] 영문 슬러그 (소문자 단어 3~6개, 하이픈 연결)
 6. 본문:
@@ -212,6 +213,9 @@ def draft_from_materials(notes_text, topic, target_keyword="", audience="", tone
      - 핵심 포인트 3~4개 (한 줄씩, 숫자가 있으면 넣어서)
      [요약 끝]
    - [소제목] 3~5개. 각 소제목은 사람들이 실제로 검색할 법한 질문·키워드를 담고, 그 아래가 바로 답이 되게.
+     자료로 답할 수 없는 질문은 소제목으로 쓰지 말고, 자료로 답할 수 있는 형태로 바꿔.
+   - 저자의 경험("실무에서 보면", "직접 확인해 보니" 등)은 위 '저자의 의견·실무 경험' 칸에 있는 것만 써.
+     자료 속 사례를 저자가 겪은 일처럼 쓰지 마.
      자료를 순서대로 요약하지 말고, 독자가 이해하기 쉬운 흐름(문제 → 근거 → 판단 기준 → 정리)으로 재배치해.
    - 표: 비교할 대상이 2개 이상이고 자료에 수치·특징이 있으면 표로 정리해. 형식:
      [표] 표 제목 (근거 자료 번호)
@@ -225,7 +229,7 @@ def draft_from_materials(notes_text, topic, target_keyword="", audience="", tone
    - [사진 제안] 1~2개, 어울리는 자리에 독립된 줄로:
      [사진 제안] 어떤 사진인지 / ALT: "이미지에 실제로 보이는 것 설명" / 파일명: english-file-name.jpg
 {links_rule}
-7. [태그] 5~7개 쉼표 구분 (첫 태그 = 타깃 키워드, 나머지는 실제 검색어 변형·본문 핵심 개념, 너무 넓은 단어·중복 금지)
+7. [태그] {tag_rule(platform)}
 
 재작성·근거 규칙 (가장 중요):
 - 자료 문장을 그대로 옮기지 마. 같은 내용을 블로그 문체로 새로 써 (저작권). 직접 인용이 꼭 필요하면

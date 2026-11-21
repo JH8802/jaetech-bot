@@ -22,13 +22,15 @@ from blog_factcheck import check_numbers, build_references, unverified, find_cop
 from blog_materials import (make_material_note, suggest_topics, draft_from_materials,
                             count_materials, split_notes, AUDIENCES, TONES, LENGTHS)
 from blog_reviewer import (scan_cliches, scan_structure, scan_seo, scan_health_claims, scan_ai_patterns,
+                           scan_experience_claims, scan_sections, readiness, own_texts,
                            review_draft, collect_issues, ai_issue, AI_REVIEW_LABELS)
 from blog_sources import resolve_sources, resolve_files, is_bare_url
 from blog_utils import (parse_draft_metadata, load_past_titles, find_keyword_overlap, body_to_html,
                         body_to_gutenberg, find_placeholders, apply_placeholders, compose_draft,
                         write_draft_file, read_draft_file, list_saved_drafts,
                         load_style_sample, save_style_sample, STYLE_SAMPLE_MAX,
-                        load_autosave, save_autosave, DATA_DIR, DRAFTS_DIR)
+                        load_autosave, save_autosave, DATA_DIR, DRAFTS_DIR,
+                        load_settings, save_settings, publish_tail)
 
 st.set_page_config(page_title="블로그 초안 생성기", page_icon="✍️")
 
@@ -101,6 +103,11 @@ def init_state():
         st.session_state.mat_raw = saved.get("mat_raw") if isinstance(saved.get("mat_raw"), dict) else {}
         st.session_state.mat_done = saved.get("mat_done") if isinstance(saved.get("mat_done"), list) else []
         st.session_state.style_sample_text = load_style_sample()
+        settings = load_settings()
+        st.session_state.set_author_bio = settings["author_bio"]
+        st.session_state.set_disclosure = settings["disclosure"]
+        st.session_state.set_disclose_ai = bool(settings["disclose_ai"])
+        st.session_state.set_categories = "\n".join(settings["categories"])
         st.session_state.autosave_loaded = True
 
     for key in INPUT_DEFAULTS:
@@ -215,6 +222,22 @@ def pick_idea_cb(i):
     set_input("kw_input", idea["keyword"])
 
 
+def save_settings_cb():
+    save_settings({
+        "author_bio": st.session_state.set_author_bio.strip(),
+        "disclosure": st.session_state.set_disclosure.strip(),
+        "disclose_ai": st.session_state.set_disclose_ai,
+        "categories": lines_of(st.session_state.set_categories),
+    })
+    st.session_state.reviews = {}  # 카테고리·저자 소개가 바뀌면 점검을 다시 하게
+
+
+def written_date(path):
+    """원고 파일 이름(YYYYMMDD_...)에서 작성일을 '2026년 11월 21일' 형태로."""
+    m = re.match(r"(\d{4})(\d{2})(\d{2})_", os.path.basename(path or ""))
+    return f"{m.group(1)}년 {int(m.group(2))}월 {int(m.group(3))}일" if m else ""
+
+
 def save_style_cb():
     save_style_sample(st.session_state.style_sample_text)
 
@@ -278,6 +301,32 @@ with st.sidebar:
         st.success(f"저장됨 ({len(saved_sample):,}자) — 모든 초안·다듬기에 반영 중")
     else:
         st.caption("저장된 샘플 없음 — 기본 문체로 작성 중")
+
+    st.divider()
+    st.header("👤 저자 소개·사이트 설정")
+    st.caption("저장하면 모든 글의 발행용 HTML 끝에 '참고 자료'와 '글쓴이' 박스가 자동으로 붙어. "
+               "누가, 어떤 근거로 썼는지 보여주는 게 구글이 보는 신뢰 신호야.")
+    st.text_area(
+        "저자 소개 (2~4줄)", key="set_author_bio", height=110,
+        placeholder="예) 식품공학을 전공하고 홈쇼핑 품질관리 업무를 ○년째 하고 있습니다. "
+                    "건강기능식품 표시·광고 검토와 수입식품 서류 검토를 담당합니다.",
+        help="회사 이름은 넣지 않는 걸 권장. 전공·경력·담당 업무처럼 전문성을 보여주는 내용 위주로.",
+    )
+    st.text_input("이해관계 고지 (선택)", key="set_disclosure",
+                  placeholder="예) 이 글에 나온 업체·제품과 금전적 관계가 없습니다.")
+    st.checkbox("AI 도구 도움을 받았다고 글 끝에 밝히기", key="set_disclose_ai",
+                help="구글은 AI 사용 여부를 독자가 궁금해할 만한 곳에 밝히는 걸 권장해 왔어. 끄면 문구가 빠져.")
+    st.text_area(
+        "내 블로그 카테고리 목록 (한 줄에 하나)", key="set_categories", height=110,
+        placeholder="예)\n건강기능식품 표시·광고\n식품 안전·이슈\n재테크",
+        help="적어두면 AI가 이 중에서만 고르고, 목록에 없는 카테고리는 점검에서 지적해. 비우면 AI가 자유롭게 정해.",
+    )
+    st.button("💾 저자 소개·설정 저장", on_click=save_settings_cb)
+    saved_settings = load_settings()
+    if saved_settings["author_bio"].strip():
+        st.success("저자 소개 저장됨 — 발행용 HTML에 자동으로 붙어")
+    else:
+        st.warning("저자 소개가 비어 있어 — 티스토리·워드프레스 글은 '발행 준비'에서 막혀.")
 
     st.divider()
     st.header("📂 저장된 원고")
@@ -628,6 +677,8 @@ if st.session_state.drafts:
                         "ai_patterns": scan_ai_patterns(meta["body"]),
                         "facts": check_numbers(meta["body"], build_references(inputs)),
                         "copied": find_copied_sentences(meta["body"], inputs.get("material_raw", {})),
+                        "experience": scan_experience_claims(meta["body"], own_texts(inputs)),
+                        "sections": scan_sections(meta["body"]),
                         "ai": review_draft(draft),
                         "overlap": find_keyword_overlap(
                             platform, st.session_state.target_keyword,
@@ -635,6 +686,21 @@ if st.session_state.drafts:
                         ),
                     }
             review = st.session_state.reviews[platform]
+
+            rows = readiness(review, meta["body"], inputs, load_settings(), platform)
+            blocks = [r for r in rows if r[1] == "block"]
+            warns = [r for r in rows if r[1] == "warn"]
+            icon = {"ok": "✅", "block": "⛔", "warn": "⚠️"}
+            if blocks:
+                st.error(f"🚦 **발행 준비 안 됨 — 해결할 항목 {len(blocks)}개**\n"
+                         + "\n".join(f"- ⛔ {name}: {detail}" for name, _, detail in blocks))
+            else:
+                st.success("🚦 **발행 준비 완료** — 반드시 해결할 항목 없음"
+                           + (f" (확인 권장 {len(warns)}개는 아래 참고)" if warns else ""))
+            with st.expander("🚦 발행 준비 체크리스트 전체 보기"):
+                for name, state, detail in rows:
+                    st.write(f"{icon[state]} **{name}** — {detail}")
+                st.caption("⛔ = 발행 전 반드시 해결 · ⚠️ = 확인 권장 · 다음 단계(워드프레스 자동 업로드)는 ⛔가 0개일 때만 열려.")
 
             if review["overlap"]:
                 st.warning(
@@ -736,16 +802,19 @@ if st.session_state.drafts:
             else:
                 st.success("✅ 채울 항목 없음 — 아래 HTML을 복사해서 바로 발행하면 돼.")
 
-            # ── HTML ──
+            # ── HTML ── (본문 + 참고 자료 + 글쓴이 박스)
+            settings = load_settings()
+            tail = publish_tail(inputs, settings, written_date(st.session_state.filenames.get(platform)))
+            publish_body = meta["body"] + ("\n\n" + tail if tail else "")
             if platform in ("티스토리", "워드프레스"):
                 if platform == "티스토리":
                     where = "티스토리 에디터 오른쪽 위 '기본모드'를 HTML로 바꾼 뒤"
                     html_title = "🧩 HTML 버전 — 소제목·표·목록·요약 박스가 서식으로 이미 들어가 있음"
-                    html_code = body_to_html(meta["body"])
+                    html_code = body_to_html(publish_body)
                 else:
                     where = "워드프레스 편집 화면 오른쪽 위 ⋮ 메뉴 → '코드 편집기'에서"
                     html_title = "🧩 블록 에디터용 HTML — 소제목·문단·표·목록·요약 박스가 각각 블록으로 바로 만들어짐"
-                    html_code = body_to_gutenberg(meta["body"])
+                    html_code = body_to_gutenberg(publish_body)
                 with st.expander(html_title, expanded=not items):
                     if items:
                         st.warning(f"아직 채우지 않은 항목 {len(items)}개가 노란 표시로 들어가 있어. 위에서 채우거나 지운 뒤 복사해줘.")
@@ -756,6 +825,8 @@ if st.session_state.drafts:
                     if platform == "워드프레스":
                         st.caption("붙여넣은 뒤 ⋮ 메뉴 → '비주얼 편집기'로 돌아오면 블록으로 보여. "
                                    "📌 노란 블록 자리에 이미지 블록을 넣고 그 노란 블록은 지워.")
+                    if tail:
+                        st.caption("맨 끝에 '참고 자료'(원문 링크)와 '글쓴이' 박스가 자동으로 붙어 있어 — 본문 칸에는 안 보여.")
                     st.code(html_code, language="html")
 
             # ── 점검 결과 ──
@@ -811,6 +882,21 @@ if st.session_state.drafts:
                         hide_index=True,
                     )
                     st.caption("'1', '2' 같은 흔한 작은 숫자는 재료 어딘가에 거의 항상 있어서 확인됨으로 나올 수 있어. 숫자만 보고, 기관명 같은 고유명사는 확인하지 않아.")
+
+            experience = review.get("experience", [])
+            if experience:
+                st.error(
+                    f"**지어낸 경험 의심 {len(experience)}개** (저자 메모·의견에 근거가 없는 '실무에서 보면', "
+                    "'직접 확인해 보니' 같은 경험 주장 — 실제 경험이면 메모에 적고 다듬기, 아니면 빼야 해)\n"
+                    + "\n".join(f"- {e}" for e in experience)
+                )
+            else:
+                st.success("경험 주장: 메모·의견에 근거 없는 경험 주장 없음")
+
+            if review.get("sections"):
+                st.warning("**검색 의도 (섹션마다 답을 주는지)**\n" + "\n".join(f"- {i}" for i in review["sections"]))
+            else:
+                st.success("검색 의도: 섹션마다 내용이 충분함")
 
             copied = review.get("copied", [])
             if copied:

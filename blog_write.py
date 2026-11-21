@@ -9,6 +9,7 @@
 from blog_drafter import draft_post, suggest_questions
 from blog_factcheck import check_numbers, build_references, unverified
 from blog_reviewer import (scan_cliches, scan_structure, scan_seo, scan_health_claims, scan_ai_patterns,
+                           scan_experience_claims, scan_sections, own_texts,
                            review_draft, ai_issue, AI_REVIEW_LABELS)
 from blog_sources import resolve_sources, is_bare_url
 from blog_utils import parse_draft_metadata, load_past_titles, find_keyword_overlap, body_to_html, body_to_gutenberg, write_draft_file, DRAFTS_DIR
@@ -132,7 +133,12 @@ def print_review(draft, meta, platform, target_keyword, inputs=None):
         for issue in ai_patterns:
             print(f"   - {issue}")
 
+    for issue in scan_sections(meta["body"]):
+        print(f"⚠️ 검색 의도: {issue}")
+
     if inputs:
+        for sentence in scan_experience_claims(meta["body"], own_texts(inputs)):
+            print(f"⚠️ 지어낸 경험 의심 (메모에 근거 없음): {sentence}")
         missing = unverified(check_numbers(meta["body"], build_references(inputs)))
         if missing:
             print("⚠️ 숫자 대조: 메모·출처 어디에도 없는 숫자 (원문과 확인 필요)")
