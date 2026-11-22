@@ -119,6 +119,8 @@ def read_common(data: dict) -> dict:
     if kind not in prompts.KINDS:
         raise ValueError("알 수 없는 글 종류입니다.")
     memo = str(data.get("memo", "")).strip()
+    if kind in prompts.PLACE_KINDS:
+        memo = prompts.clean_kid_memo(memo)  # 아이와 방문 체크 양식의 빈 칸은 지움(추측해서 채우지 않게)
     limit = MAX_MEMO_BY_KIND.get(kind, MAX_MEMO)
     if len(memo) > limit:
         raise ValueError(f"메모는 {limit:,}자 이내로 입력해 주세요.")
@@ -147,6 +149,24 @@ def read_series(data: dict, kind: str) -> dict | None:
     except (TypeError, ValueError):
         part = 0
     return {"name": name, "part": part if 1 <= part <= 99 else 0, "prev_link": bool(raw.get("prev_link"))}
+
+
+def series_others(series: dict | None) -> list[dict]:
+    """같은 시리즈로 이미 쓴 다른 편 [{part, title}] (편마다 가장 최근 원고, 편 순서). 인트로 뒤 '다른 편' 목록용."""
+    if not series:
+        return []
+    by_part: dict = {}
+    for a in storage.list_articles():  # 최신 글부터
+        ser = a.get("series") or {}
+        if ser.get("name") != series["name"]:
+            continue
+        part = int(ser.get("part") or 0)
+        if part and part == series.get("part"):
+            continue
+        key = part or a["title"]
+        if key not in by_part:
+            by_part[key] = {"part": part, "title": re.sub(r"\s*\(\s*\d+\s*편\s*\)\s*$", "", a["title"])}
+    return sorted(by_part.values(), key=lambda o: (o["part"] or 99, o["title"]))[:10]
 
 
 def series_title(title: str, series: dict | None) -> str:
@@ -300,6 +320,24 @@ def style_put():
         raise ValueError(f"말투 샘플은 {prompts.MAX_STYLE_SAMPLE:,}자 이내로 적어 주세요.")
     updated = storage.set_setting(_style_key(scope), text)
     return jsonify(scope=scope, style_sample=text, updated_at=updated)
+
+
+BLOG_INTRO_RATE = 0.35  # 블로그 소개(정체성)를 원고에 드러내는 비율(약 3편에 1편)
+
+
+@app.get("/api/blog-intro")
+def blog_intro_get():
+    text, updated = storage.get_setting("blog_intro")
+    return jsonify(blog_intro=text, updated_at=updated, max_chars=prompts.MAX_BLOG_INTRO)
+
+
+@app.put("/api/blog-intro")
+def blog_intro_put():
+    """블로그 소개 한 줄(정체성). 맛집·호텔·여행·정보글 원고에 가끔(약 3편에 1편) 자연스럽게 드러납니다. 투자 생각 글에는 안 씀."""
+    text = re.sub(r"\s+", " ", str((request.get_json(silent=True) or {}).get("blog_intro", ""))).strip()
+    if len(text) > prompts.MAX_BLOG_INTRO:
+        raise ValueError(f"블로그 소개는 {prompts.MAX_BLOG_INTRO}자 이내로 적어 주세요.")
+    return jsonify(blog_intro=text, updated_at=storage.set_setting("blog_intro", text))
 
 
 MAX_DRAFT_BYTES = 30 * 1024 * 1024  # 임시저장 한도(사진 포함)
@@ -595,10 +633,12 @@ def _generate_events(*, kind, title, keywords, memo, place, guardrail, evidence_
             photo_usage = llm.merge_usage(photo_usage, v_usage)
         video_notes = video_notes or []
         style_sample = style_for(kind)
+        intro = storage.get_setting("blog_intro")[0].strip() if kind != "invest" else ""
+        use_intro = bool(intro) and random.random() < BLOG_INTRO_RATE  # 매번 넣으면 틀에 박혀 보여서 가끔만
         register = "plain" if kind == "invest" else ""  # 투자 생각: 고정 문체(분석 칼럼형)는 한다체
         system = prompts.build_system(kind, guardrail, evidence_mode, len(photo_notes or []),
                                       style_sample=style_sample, has_news=bool(news_list), register=register,
-                                      video_count=len(video_notes))
+                                      video_count=len(video_notes), blog_intro=intro if use_intro else "")
         flow_by_ai = False
         if flow == "ai":
             yield sse("status", {"text": "메모를 읽고 어울리는 글 흐름을 고르고 있어요."})
@@ -693,6 +733,9 @@ def article_stream():
     news_list = news.read_news_list(data.get("news")) if c["kind"] == "invest" else []  # 참고 기사는 투자 생각 글 전용
     flow = pick_invest_flow(str(data.get("invest_flow", "auto"))) if c["kind"] == "invest" else ""
     series = read_series(data, c["kind"])
+    others = series_others(series)
+    if others:  # 이미 쓴 다른 편이 있을 때만(인트로 뒤 '다른 편' 목록)
+        series["others"] = others
     title = series_title(title, series)
     plan = prompts.read_plan(data.get("plan")) if c["kind"] != "invest" else None
     if c["kind"] == "invest":
@@ -705,6 +748,45 @@ def article_stream():
         photo_names=read_photo_names(data), news_list=news_list, flow=flow, series=series, videos=videos, plan=plan,
         build_prompt=lambda notes, fl, vn: prompts.build_article_prompt(c["kind"], title, keywords, c["memo"], c["place"], notes, ratings, news_list,
                                                                         fl, series, vn, plan)))
+
+
+@app.post("/api/hub/stream")
+def hub_stream():
+    """총정리 글: 이미 쓴 원고 여러 편(선택한 순서)을 한 편으로 묶는 안내 글을 만듭니다. 섹션마다 그 편 링크 자리가 들어갑니다."""
+    data = request.get_json(silent=True) or {}
+    try:
+        ids = [int(x) for x in (data.get("ids") or [])]
+    except (TypeError, ValueError):
+        ids = []
+    ids = list(dict.fromkeys(ids))
+    if not 2 <= len(ids) <= prompts.MAX_HUB_ITEMS:
+        raise ValueError(f"총정리할 글을 2~{prompts.MAX_HUB_ITEMS}편 골라 주세요.")
+    arts = [storage.get_article(i) for i in ids]
+    if any(a is None for a in arts):
+        raise ValueError("고른 원고 중 찾을 수 없는 글이 있어요. 목록을 새로고침해 주세요.")
+    if any(a["kind"] == "invest" for a in arts):
+        raise ValueError("투자 생각 글은 총정리에 넣을 수 없어요.")
+    items = []
+    for a in arts:
+        ser = (a["options"] or {}).get("series") or {}
+        items.append({"title": re.sub(r"\s*\(\s*\d+\s*편\s*\)\s*$", "", a["title"]), "part": ser.get("part") or 0,
+                      "series": ser.get("name", ""), "place": a["place"] or {}, "body": a["body"], "kind": a["kind"]})
+    kinds = [it["kind"] for it in items]
+    kind = max(set(kinds), key=kinds.count)  # 가장 많은 글 종류의 규칙으로
+    names = {it["series"] for it in items}
+    common = names.pop() if len(names) == 1 else ""
+    title = str(data.get("title", "")).strip()[:MAX_TITLE] or (f"{common} 총정리" if common else "")
+    if not title:
+        raise ValueError("총정리 글 제목을 입력해 주세요.")
+    keywords = [str(k).strip()[:40] for k in (data.get("keywords") or []) if str(k).strip()][:MAX_KEYWORDS]
+    if not keywords:
+        keywords = list(dict.fromkeys(([common] if common else []) + prompts.derive_keywords(kind, title, None)))[:MAX_KEYWORDS]
+    series = {"name": common, "hub": True, "hub_titles": [it["title"] for it in items]}
+    memo = "\n".join(f"- {it['title']}" for it in items)  # 저장용(어떤 글을 묶었는지)
+    return sse_response(_generate_events(
+        kind=kind, title=title, keywords=keywords, memo=memo, place={}, guardrail=bool(data.get("guardrail", False)),
+        evidence_mode="strict", photos=[], ratings=[], series=series,
+        build_prompt=lambda notes, fl, vn: prompts.build_hub_prompt(title, keywords, items)))
 
 
 @app.post("/api/articles/<int:article_id>/rewrite")

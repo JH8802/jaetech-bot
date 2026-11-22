@@ -352,7 +352,7 @@ def _build_invest_system(style_sample: str, has_news: bool = False, photo_count:
 
 
 def build_system(kind: str, guardrail: bool, evidence_mode: str, photo_count: int = 0, style_sample: str = "",
-                 has_news: bool = False, register: str = "", video_count: int = 0) -> str:
+                 has_news: bool = False, register: str = "", video_count: int = 0, blog_intro: str = "") -> str:
     if kind == "invest":
         return _build_invest_system(style_sample, has_news, photo_count, register)
     place = kind in PLACE_KINDS  # 맛집글·호텔·여행 후기는 홈판 규칙 변형을 씀
@@ -372,6 +372,8 @@ def build_system(kind: str, guardrail: bool, evidence_mode: str, photo_count: in
         parts.append(HOMEPAN_PLACE_RULES)
     if has_news:
         parts.append(NEWS_RULES)
+    if blog_intro and blog_intro.strip():
+        parts.append(blog_intro_block(blog_intro))
     if guardrail:
         parts.append(GUARDRAIL)
     return "\n\n".join(parts)
@@ -670,7 +672,8 @@ def build_title_prompt(kind: str, keyword: str, memo: str, place: dict | None, e
         "",
         "제목 5줄 다음에 빈 줄 하나를 두고, 이 글의 검색 기획을 아래 3줄로 출력하세요(라벨 그대로, 제목과 섞지 않기).",
         f"{PLAN_LABELS['main']}: 검색자가 네이버에 실제로 칠 2~5단어 문구 하나(주제·메모 기준, 지역·장소 이름이 있으면 포함)",
-        f"{PLAN_LABELS['subs']}: 함께 검색될 세부 문구 2~4개(쉼표로 구분, 메모에 근거가 있는 것만)",
+        f"{PLAN_LABELS['subs']}: 함께 검색될 세부 문구 2~4개(쉼표로 구분, 메모에 근거가 있는 것만). 장소 이름 + 실용 질문 형태를 우선합니다"
+        "(예: '오션월드 겨울', '오션월드 실내', '오션월드 준비물', '○○ 주차', '○○ 예약'). 메모에 아이와 간 이야기가 있으면 '아이와', '유모차', '키즈' 같은 말을 붙인 문구를 1개 이상 넣습니다",
         f"{PLAN_LABELS['needs']}: 이 글을 찾는 사람이 알고 싶어 하는 것 한 문장(60자 이내)",
     ]
     parts.append("\n" + "\n".join(rules))
@@ -816,3 +819,76 @@ def build_expand_prompt(kind: str, body: str, chars: int, target_min: int, memo:
     parts.append("'★ 별점 한눈에 보기' 문단은 항목 옆 이유까지 그대로 둡니다. '📋 한눈에 보기' 박스와 '라벨: 값' 줄, ①② 단계 줄도 형식을 유지합니다. '한 줄 평:'(또는 '한 줄 정리:') 문단은 해시태그 바로 앞의 마지막 본문 문단으로 유지합니다.")
     parts.append("설명 없이 보강한 원고 본문만 출력합니다.")
     return "\n\n".join(parts)
+
+
+# ---------- 총정리(허브) 글 ----------
+HUB_RULES = """[총정리 글 쓰기 규칙 - 이미 쓴 글 여러 편을 한 편으로 묶는 안내 글]
+목적: 한 편으로 들어온 독자가 전체 그림을 보고 다른 편으로 이어서 읽게 만드는 글입니다. 각 편의 내용을 다시 다 쓰는 글이 아닙니다.
+- 재료는 아래 '[묶을 글]'뿐입니다. 거기 없는 장소·가격·시간·경험·가족 사연은 쓰지 않습니다. 묶을 글끼리 값이 다르면 더 최근 글의 값을 씁니다.
+- 구성
+  1) 인트로(2~3문단): 이 묶음이 어떤 여행·나들이·주제인지, 누구에게 도움이 되는지. 첫 문장은 장면이나 질문으로 시작합니다.
+  2) 한눈에 보기 박스: 첫 줄 '📋 한눈에 보기', 그 아래 '라벨: 값' 3~6줄(예: '일정: 1박 2일', '동선: 오션월드 ➡ 객실 ➡ 앤트월드', '추천: 6~8세 아이 가족'). 재료에 있는 것만.
+  3) 본문: 묶을 글마다 소제목 하나씩, 묶을 글 순서대로('N. ' 소제목). 각 섹션은 그 글의 핵심 2~4가지(꼭 알아야 할 정보·팁·느낌)를 3~6문장으로 요약하고, 섹션 마지막 줄에 단독으로 '(관련 글 링크 삽입: 〈그 글 제목〉)'을 씁니다.
+  4) 마지막 소제목: 전체 총평과 '이런 가족·사람에게 추천' 2~3줄(라벨 줄 가능).
+  5) '한 줄 평: '으로 시작하는 한 문장, 그다음 해시태그 문단.
+- 각 편의 문장을 그대로 길게 옮기지 말고 새로 요약합니다. 같은 정보를 섹션마다 반복하지 않습니다.
+- 사진 자리(<사진N>)와 별점 줄은 쓰지 않습니다(작성자가 각 편 대표 사진을 직접 넣습니다).
+- 분량: 공백 제외 1,800~2,600자."""
+
+MAX_HUB_ITEMS = 10
+HUB_EXCERPT = 1800
+
+
+def hub_excerpt(body: str) -> str:
+    """묶을 글 본문에서 사진·동영상 자리, 링크 자리, 해시태그를 빼고 앞부분만."""
+    out = []
+    for par in re.split(r"\n\s*\n", body or ""):
+        plain = re.sub(r"\{\{/?\w+\}\}", "", par).strip()
+        if (not plain or re.fullmatch(r"<\s*(사진|동영상)\s*\d+\s*>", plain) or "링크 삽입" in plain or "지도 삽입" in plain
+                or (plain.startswith("#") and plain.count("#") >= 3)):
+            continue
+        out.append(plain)
+    return "\n".join(out)[:HUB_EXCERPT]
+
+
+def build_hub_prompt(title: str, keywords: list[str], items: list[dict]) -> str:
+    """items: [{'title', 'part', 'place', 'body'}] (묶을 순서대로)"""
+    parts = [f"[글 제목]\n{title}", HUB_RULES]
+    if keywords:
+        parts.append("[핵심 키워드]\n" + ", ".join(keywords))
+    blocks = []
+    for i, it in enumerate(items, 1):
+        head = f"[묶을 글 {i}] {it['title']}" + (f" ({it['part']}편)" if it.get("part") and f"{it['part']}편" not in it["title"] else "")
+        place = it.get("place") or {}
+        info = " / ".join(x for x in [place.get("name"), place.get("address")] if x)
+        blocks.append(head + (f"\n(장소: {info})" if info else "") + "\n" + hub_excerpt(it.get("body", "")))
+    parts.append("\n\n".join(blocks))
+    parts.append("위 재료로 총정리 글을 쓰세요. 첫 줄부터 바로 본문을 시작하고 제목 줄은 쓰지 않습니다.")
+    return "\n\n".join(parts)
+
+
+# ---------- 아이와 방문 체크(메모 양식) ----------
+KID_TEMPLATE_HEAD = "[아이와 방문 체크 - 현장에서 확인한 것만 적기, 빈 칸은 글에 안 씀]"
+KID_FIELDS = ["아이 나이", "유아의자", "유아 식기", "키즈 메뉴", "유모차 진입", "수유실·기저귀갈이대", "놀이 공간", "아이 반응", "주차", "대기"]
+
+
+def clean_kid_memo(memo: str) -> str:
+    """메모의 '아이와 방문 체크' 양식에서 값이 비어 있는 줄을 지웁니다(빈 항목을 AI가 추측해 채우지 않게). 다 비었으면 머리줄도 지움."""
+    labels = "|".join(re.escape(f) for f in KID_FIELDS)
+    text = re.sub(rf"^[ \t]*[-•]?[ \t]*(?:{labels})[ \t]*[:：][ \t]*$\n?", "", memo or "", flags=re.M)
+    head = re.escape(KID_TEMPLATE_HEAD)
+    if not re.search(rf"{head}\n[ \t]*[-•]?[ \t]*(?:{labels})[ \t]*[:：]", text):
+        text = re.sub(rf"^{head}[ \t]*$\n?", "", text, flags=re.M)
+    return text.strip()
+
+
+# ---------- 블로그 소개 한 줄(정체성) ----------
+MAX_BLOG_INTRO = 80
+
+
+def blog_intro_block(intro: str) -> str:
+    return ("[블로그 정체성 - 이번 글에서만 한 번]\n"
+            f"작성자의 블로그 소개: {intro.strip()[:MAX_BLOG_INTRO]}\n"
+            "- 인트로 또는 맺음 중 한 곳에서, 이 정체성이 드러나는 문장을 한 번만 자연스럽게 씁니다(예: '아이 손 잡고 다니는 아빠 입장에서 보면 ~').\n"
+            "- 소개 문구를 그대로 옮기거나 자기소개·인사말('안녕하세요 ~입니다')로 쓰지 않습니다. 블로그 이름·닉네임은 쓰지 않습니다.\n"
+            "- 메모에 없는 가족 사연·동행은 지어내지 않습니다.")

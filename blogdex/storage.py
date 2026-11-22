@@ -69,6 +69,11 @@ def save_article(*, kind, title_input, title_final, memo, place, keywords, optio
 
 def _row(r: sqlite3.Row, full: bool) -> dict:
     d = {"id": r["id"], "kind": r["kind"], "title": r["title_final"], "chars": r["chars"], "created_at": r["created_at"]}
+    try:  # 목록에서도 시리즈 이름·편을 보여 주고 총정리 글 재료를 고를 수 있게
+        ser = (json.loads(r["options_json"] or "{}") or {}).get("series") or {}
+    except ValueError:
+        ser = {}
+    d["series"] = {"name": ser.get("name", ""), "part": ser.get("part") or 0} if ser.get("name") else None
     if full:
         d.update({
             "title_input": r["title_input"], "memo": r["memo"], "body": r["body"], "model": r["model"], "parent_id": r["parent_id"],

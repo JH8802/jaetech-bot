@@ -160,6 +160,16 @@
     </div>
   </details>
 
+  <details class="card stylecard" id="introCard">
+    <summary><b>블로그 소개 한 줄</b> <span class="hint" style="margin:0 0 0 8px" id="introSummary">(선택 · 원고에 가끔 내 정체성이 드러나게)</span></summary>
+    <p class="hint">적어 두면 맛집·호텔·여행·정보글 원고 <b>약 3편에 1편</b>꼴로, 인트로나 맺음에 이 정체성이 한 문장 자연스럽게 드러나요(문구를 그대로 옮기거나 자기소개 인사로 쓰지 않아요). 투자 생각 글에는 쓰지 않아요.</p>
+    <input type="text" id="blogIntro" maxlength="80" placeholder="예) 아이 손 잡고 다니며 직접 확인한 곳만 기록하는 서울 아빠" autocomplete="off">
+    <div class="row" style="margin-top:8px;align-items:center">
+      <button class="btn" id="btnIntroSave" type="button" style="height:36px">저장</button>
+      <span class="hint" id="introStatus" style="margin:0"></span>
+    </div>
+  </details>
+
   <div class="card" id="writeCard">
     <h2>새 원고 만들기</h2>
     <div id="draftBanner" class="hidden" style="border:1px solid #ffd43b;background:#fff9db;border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:13px">
@@ -237,6 +247,10 @@
     </div>
 
     <label class="cap" for="memo" id="memoCap">메모</label>
+    <div id="kidTplRow" class="hidden" style="margin-bottom:6px">
+      <button class="btn ghost" id="btnKidTpl" type="button" style="height:32px;font-size:12px">🧒 아이와 방문 체크 넣기</button>
+      <span class="hint" style="margin:0 0 0 6px">현장에서 확인한 칸만 채우세요. 빈 칸은 글에 쓰지 않아요.</span>
+    </div>
     <div id="memoTplRow" class="hidden" style="margin-bottom:6px">
       <div class="row" style="align-items:center;gap:6px;flex-wrap:wrap">
         <button class="btn ghost" id="btnMarket" type="button" style="height:32px;font-size:12px">📈 오늘 시황 불러오기</button>
@@ -327,6 +341,16 @@
 </section>
 
 <section id="viewList" class="hidden">
+  <div class="card" id="hubCard">
+    <h2>📚 총정리 글 만들기</h2>
+    <p class="hint" style="margin-top:0">아래 목록에서 묶을 글을 <b>체크한 순서대로</b> 2~10편 고르세요(예: 같은 여행의 1~4편). 각 편을 요약하고, 섹션마다 그 글로 가는 <b>링크 자리</b>를 넣은 안내 글을 만들어요. 한 편으로 들어온 독자가 다른 편으로 이어서 읽게 하는 글이에요.</p>
+    <div id="hubPicked" class="hint" style="margin:6px 0">고른 글 없음</div>
+    <div class="row" style="align-items:center">
+      <input type="text" id="hubTitle" maxlength="200" placeholder="총정리 글 제목 (예: 비발디파크 1박 2일 총정리, 아이와 오션월드·앤트월드 동선)" autocomplete="off" style="flex:1">
+      <button class="btn" id="btnHub" type="button" style="height:44px">총정리 만들기</button>
+    </div>
+    <p class="hint">같은 시리즈 글만 고르면 제목이 비어 있을 때 '시리즈 이름 총정리'로 채워요. 각 편 대표 사진은 네이버 에디터에서 직접 넣어 주세요.</p>
+  </div>
   <div class="card"><h2>내 원고</h2><div id="listBox"><div class="empty">불러오는 중...</div></div></div>
 </section>
 </main>
@@ -435,6 +459,7 @@ function setKind(kind) {
   const invest = kind === 'invest';
   $('guardrailName').textContent = invest ? '투자 표현 가드레일' : '표시·광고 가드레일';
   $('guardrailSmall').textContent = invest ? '(매수·매도 권유·수익 보장·전망 단정 표현 제한, 개인 의견 안내 문장 포함)' : '(효능 단정·암시 표현 제한)';
+  $('kidTplRow').classList.toggle('hidden', !PLACE_KINDS.includes(kind));
   $('kwBox').classList.toggle('hidden', invest); $('seriesBox').classList.toggle('hidden', invest); if (invest && state.plan) setPlan(null);
   $('photoCap').textContent = invest ? '이미지 자료' : '사진'; $('photoHint').innerHTML = invest ? PHOTO_HINT_INVEST : PHOTO_HINT; $('memoTplRow').classList.toggle('hidden', !invest);
   $('newsBox').classList.toggle('hidden', !NEWS_KINDS.includes(kind));
@@ -460,6 +485,12 @@ function insertMemoTemplate(tpl) {
   m.focus(); updateHints(); scheduleDraftSave();
 }
 $('btnMemoTpl').onclick = () => insertMemoTemplate(INVEST_MEMO_TEMPLATE);
+const KID_TEMPLATE_HEAD = '[아이와 방문 체크 - 현장에서 확인한 것만 적기, 빈 칸은 글에 안 씀]';  // 서버 prompts.KID_TEMPLATE_HEAD 와 같게
+const KID_FIELDS = ['아이 나이', '유아의자', '유아 식기', '키즈 메뉴', '유모차 진입', '수유실·기저귀갈이대', '놀이 공간', '아이 반응', '주차', '대기'];
+$('btnKidTpl').onclick = () => {
+  if ($('memo').value.includes(KID_TEMPLATE_HEAD)) { $('memo').focus(); return; }
+  insertMemoTemplate(KID_TEMPLATE_HEAD + '\n' + KID_FIELDS.map((f) => `${f}: `).join('\n'));
+};
 $('btnMemoTplShort').onclick = () => insertMemoTemplate(INVEST_MEMO_SHORT);
 /* ---------- 참고 기사 / 오늘 시황 ---------- */
 function renderNews() {
@@ -621,7 +652,7 @@ function renderBody(text) {
     }
     if (p.includes('플레이스 지도 삽입')) return `<p class="mapline">${esc(p)}</p>`;
     if (p.startsWith(SOURCE_HEAD)) return `<p class="sourcebox">${esc(p).replace(/\n/g, '<br>')}</p>`;
-    if (p.includes(RELATED_MARK)) return `<p class="mapline">${esc(p)}</p>`;
+    if (p.includes(RELATED_MARK)) return `<p class="mapline">${br(esc(p))}</p>`;
     if (isTags(p)) return `<p class="tags">${markAd(esc(p))}</p>`;
     const mark = (h) => h.replace(/\[확인 필요[^\]]*\]/g, '<span class="todo">$&</span>');  // 발행 전 직접 확인할 자리
     if (p.startsWith(INFO_BOX_HEAD) || p.startsWith(SUMMARY_HEAD)) return `<p class="ratingbox">${mark(boxLines(p, counter, 'view'))}</p>`;
@@ -1039,6 +1070,23 @@ function showView(name) {
 }
 $('tabWrite').onclick = () => showView('write'); $('tabList').onclick = () => showView('list');
 
+state.hubPick = [];  // 총정리에 넣을 글(체크한 순서)
+function renderHubPicked() {
+  $('hubPicked').innerHTML = state.hubPick.length ? state.hubPick.map((a, i) => `${i + 1}. ${esc(a.title)}`).join('<br>') : '고른 글 없음';
+  const names = [...new Set(state.hubPick.map((a) => (a.series && a.series.name) || ''))];
+  $('hubTitle').placeholder = names.length === 1 && names[0] ? `비워 두면 '${names[0]} 총정리'` : '총정리 글 제목 (예: 비발디파크 1박 2일 총정리, 아이와 오션월드·앤트월드 동선)';
+}
+$('btnHub').onclick = () => {
+  if (state.busy) return;
+  if (state.hubPick.length < 2) { alert('총정리할 글을 2편 이상 체크해 주세요.'); return; }
+  const kinds = state.hubPick.map((a) => a.kind);
+  const kind = kinds.sort((x, y) => kinds.filter((k) => k === y).length - kinds.filter((k) => k === x).length)[0];
+  const ids = state.hubPick.map((a) => a.id);
+  showView('write'); setKind(kind); state.resultPhotos = []; state.resultVideos = [];
+  $('resultCard').scrollIntoView({ behavior: 'smooth' });
+  runStream('/api/hub/stream', { ids, title: $('hubTitle').value.trim(), guardrail: $('guardrail').checked });
+  state.hubPick = []; $('hubTitle').value = ''; renderHubPicked();
+};
 async function loadList() {
   const box = $('listBox');
   try {
@@ -1047,12 +1095,15 @@ async function loadList() {
     box.innerHTML = '';
     articles.forEach((a) => {
       const row = document.createElement('div'); row.className = 'li-row';
+      const ck = document.createElement('input'); ck.type = 'checkbox'; ck.title = '총정리에 넣기'; ck.style.cssText = 'width:18px;height:18px;flex:none;margin:0 6px 0 2px';
+      ck.disabled = a.kind === 'invest'; ck.checked = state.hubPick.some((h) => h.id === a.id);
+      ck.onchange = () => { state.hubPick = ck.checked ? [...state.hubPick, a] : state.hubPick.filter((h) => h.id !== a.id); renderHubPicked(); };
       const b = document.createElement('button'); b.className = 'list-item';
-      b.innerHTML = `<b>${esc(a.title)}</b><span><i class="badge ${a.kind}" style="font-style:normal">${KIND_LABEL[a.kind] || a.kind}</i>${esc(a.created_at)} · ${a.chars.toLocaleString()}자</span>`;
+      b.innerHTML = `<b>${esc(a.title)}</b><span><i class="badge ${a.kind}" style="font-style:normal">${KIND_LABEL[a.kind] || a.kind}</i>${a.series ? `📚 ${esc(a.series.name)}${a.series.part ? ' ' + a.series.part + '편' : ''} · ` : ''}${esc(a.created_at)} · ${a.chars.toLocaleString()}자</span>`;
       b.onclick = async () => { const { article } = await api('/api/articles/' + a.id); showView('write'); if (!state.article || state.article.id !== article.id) state.resultPhotos = []; showArticle(article); $('resultCard').scrollIntoView({ behavior: 'smooth' }); };
       const x = document.createElement('button'); x.className = 'x'; x.textContent = '×'; x.title = '삭제';
       x.onclick = async () => { if (!confirm('이 원고를 삭제할까요?')) return; await api('/api/articles', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: [a.id] }) }); loadList(); };
-      row.append(b, x); box.append(row);
+      row.append(ck, b, x); box.append(row);
     });
   } catch (e) { box.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
 }
@@ -1103,6 +1154,19 @@ $('btnStyleSave').onclick = async () => {
   $('btnStyleSave').disabled = false;
 };
 loadStyle();
+/* ---------- 블로그 소개 한 줄(정체성): 원고에 가끔 드러남 ---------- */
+function showIntro(text, updated) {
+  $('blogIntro').value = text || '';
+  $('introStatus').textContent = text ? `저장됨${updated ? ' · ' + updated : ''}` : '아직 비어 있어요';
+  $('introSummary').textContent = text ? `· ${text}` : '(선택 · 원고에 가끔 내 정체성이 드러나게)';
+}
+(async () => { try { const d = await api('/api/blog-intro'); showIntro(d.blog_intro, d.updated_at); } catch (e) { /* 옛 서버면 무시 */ } })();
+$('btnIntroSave').onclick = async () => {
+  try {
+    const d = await api('/api/blog-intro', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ blog_intro: $('blogIntro').value }) });
+    showIntro(d.blog_intro, d.updated_at);
+  } catch (e) { $('introStatus').textContent = e.message; }
+};
 
 /* ---------- 임시저장(원고 생성 전 입력 재료) ---------- */
 // 브라우저가 아니라 서버(내 컴퓨터의 원고 DB)에 하나만 보관. 새로고침·창 닫기·브라우저 캐시 삭제에도 남음.

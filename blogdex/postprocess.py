@@ -378,19 +378,49 @@ def one_sentence_per_line(paras: list[str]) -> list[str]:
     return [p if is_special_paragraph(p) else "\n".join(s for line in p.split("\n") for s in split_sentences(line)) for p in paras]
 
 
+CIRCLED = "①②③④⑤⑥⑦⑧⑨⑩"
+
+
+def _intro_end(p: str) -> bool:
+    plain = strip_tags(p)
+    return bool(HEADING_RE.match(plain) or plain.startswith((SUMMARY_HEAD, INFO_BOX_HEAD)) or PHOTO_RE.fullmatch(plain.strip()))
+
+
+def _put_hub_links(paras: list[str], titles: list[str]) -> list[str]:
+    """총정리 글: 앞에서부터 묶은 글 수만큼의 소제목 섹션 끝에 '(관련 글 링크 삽입: 〈제목〉)' 줄이 없으면 넣습니다."""
+    heads = [i for i, p in enumerate(paras) if HEADING_RE.match(strip_tags(p))]
+    end = find_hashtag_index(paras)
+    end = end if end is not None else len(paras)
+    for k in range(min(len(titles), len(heads)) - 1, -1, -1):  # 뒤에서부터 넣어야 앞쪽 번호가 안 밀림
+        lo, hi = heads[k], (heads[k + 1] if k + 1 < len(heads) else end)
+        if any(RELATED_MARK in strip_tags(paras[j]) for j in range(lo + 1, hi)):
+            continue
+        while hi - 1 > lo and ONE_LINER_RE.match(strip_tags(paras[hi - 1])):  # 마지막 섹션이면 한 줄 평 앞
+            hi -= 1
+        paras.insert(hi, f"({RELATED_MARK}: 〈{titles[k]}〉)")
+    return paras
+
+
 def _put_related_line(paras: list[str], series: dict | None) -> list[str]:
     """시리즈 글이면 해시태그 바로 앞에 '관련 글 링크 삽입' 자리 줄을 둡니다(이미 있던 줄은 지우고 다시).
     series['prev_link'] 이고 2편 이상이면 인트로 바로 뒤에도 '이전 편' 자리를 둡니다."""
+    if series and series.get("hub"):  # 총정리 글: 섹션마다 그 편의 링크 자리(AI가 빠뜨린 것만 채움)
+        return _put_hub_links(paras, series.get("hub_titles") or [])
     paras = [p for p in paras if RELATED_MARK not in strip_tags(p)]
     if not (series and series.get("name")):
         return paras
     idx = find_hashtag_index(paras)
     paras.insert(idx if idx is not None else len(paras), f"({RELATED_MARK}: 〈{series['name']}〉 다른 편)")
+    others = [o for o in (series.get("others") or []) if o.get("title")]
+    if others:  # 이미 쓴 다른 편이 있으면 인트로 바로 뒤에 '다른 편' 목록(줄마다 링크를 넣을 자리)
+        cut = next((i for i, p in enumerate(paras) if i > 0 and _intro_end(p)), min(1, len(paras)))
+        lines = [f"📚 〈{series['name']}〉 다른 편도 있어요 ({RELATED_MARK}: 줄마다 해당 글 링크)"]
+        lines += [f"{CIRCLED[k] if k < len(CIRCLED) else '-'} {o['part']}편 {o['title']}" if o.get("part") else f"{CIRCLED[k] if k < len(CIRCLED) else '-'} {o['title']}"
+                  for k, o in enumerate(others[:10])]
+        paras.insert(cut, "\n".join(lines))
+        return paras
     if series.get("prev_link") and int(series.get("part") or 0) != 1:  # 1편에는 이전 편이 없음
-        def intro_end(p):
-            plain = strip_tags(p)
-            return bool(HEADING_RE.match(plain) or plain.startswith((SUMMARY_HEAD, INFO_BOX_HEAD)) or PHOTO_RE.fullmatch(plain.strip()))
-        cut = next((i for i, p in enumerate(paras) if i > 0 and intro_end(p)), min(1, len(paras)))
+        cut = next((i for i, p in enumerate(paras) if i > 0 and _intro_end(p)), min(1, len(paras)))
         paras.insert(cut, f"({RELATED_MARK}: 〈{series['name']}〉 이전 편)")
     return paras
 
@@ -446,7 +476,7 @@ def finalize(kind: str, raw: str, place: dict | None, keywords: list[str], title
             notes.append("글 끝의 '한 줄 평'이 없어요. 직접 한 줄 평을 써 넣어 주세요.")
     paras = _put_source_block(paras, news or [])
     paras = _put_related_line(paras, series)
-    if kind in ("food", "hotel") and not (series and series.get("name")):  # 홈판 규칙: 시리즈가 아니어도 끝에 내 글 링크 자리
+    if kind in ("food", "hotel") and not (series and (series.get("name") or series.get("hub"))):  # 홈판 규칙: 시리즈가 아니어도 끝에 내 글 링크 자리
         idx = find_hashtag_index(paras)
         paras.insert(idx if idx is not None else len(paras), f"({RELATED_MARK}: 내 다른 글 1~2개)")
     if kind == "invest":  # 투자 생각은 소제목 없이 쓰는 고정 문체: 남은 소제목 줄은 지움
