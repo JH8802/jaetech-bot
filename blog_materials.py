@@ -32,6 +32,34 @@ TONES = {
     "중간 (전문적이되 쉽게)": "전문성은 유지하되 일반인이 바로 이해할 수 있게 쉽게 풀어 쓰는 톤.",
 }
 LENGTHS = [2000, 3000, 4000, 5000]
+
+# 저자 경험 입력 항목 (화면 칸 key → 질문). 빈 칸 하나보다 질문이 나뉘어 있어야 경험이 더 잘 나온다
+EXPERIENCE_FIELDS = {
+    "exp_seen": "실무에서 본 것 (구체적인 사례·수치·장면)",
+    "exp_myth": "소비자가 흔히 하는 오해 (그리고 실제로는 어떤지)",
+    "exp_criteria": "내가 고르는·판단하는 기준 (왜 그 기준인지)",
+}
+EXPERIENCE_MIN_TOTAL = 200   # 세 칸 합계 최소 글자 수
+EXPERIENCE_MIN_FIELDS = 2    # 최소 몇 칸을 채워야 하는지
+EXPERIENCE_FIELD_MAX = 600   # 칸별 최대 글자 수
+
+
+def format_experience(values):
+    """경험 칸들을 프롬프트·저장용 하나의 글로 합친다. values: {칸 key: 내용}"""
+    parts = [f"[{EXPERIENCE_FIELDS[k].split(' (')[0]}] {v.strip()}"
+             for k, v in values.items() if k in EXPERIENCE_FIELDS and v and v.strip()]
+    return "\n".join(parts)
+
+
+def experience_problem(values):
+    """경험 입력이 부족하면 이유 문자열, 충분하면 빈 문자열."""
+    filled = [v for k, v in values.items() if k in EXPERIENCE_FIELDS and v and v.strip()]
+    total = sum(len(v.strip()) for v in filled)
+    if len(filled) < EXPERIENCE_MIN_FIELDS:
+        return f"경험 칸을 {EXPERIENCE_MIN_FIELDS}개 이상 채워줘 (지금 {len(filled)}개)"
+    if total < EXPERIENCE_MIN_TOTAL:
+        return f"경험을 합계 {EXPERIENCE_MIN_TOTAL}자 이상 적어줘 (지금 {total}자)"
+    return ""
 NOTE_MAX_CHARS = 1800
 
 _NOTE_RULES = """정리 규칙:
@@ -127,20 +155,27 @@ def split_notes(notes_text):
     return [p.strip() for p in parts if p.strip()]
 
 
-def suggest_topics(notes_text, audience=""):
-    """자료 노트를 보고 쓸 만한 글 주제 3~5개를 제안한다.
-    반환: [{"title", "keyword", "angle", "materials"}] (실패하면 빈 목록)"""
+def suggest_topics(notes_text, audience="", experience=""):
+    """자료 노트(+저자 경험)를 보고 쓸 만한 글 주제 4개를 제안한다.
+    큰 주제(예: '혈당 영양제')는 경쟁이 세서, 저자 경험이 차별점이 되는 좁은 각도를 우선한다.
+    반환: [{"title", "keyword", "angle", "edge", "materials"}] (실패하면 빈 목록)"""
+    exp_block = f"\n[저자의 실무 경험 — 이게 이 블로그만의 차별점]\n{experience}\n" if experience.strip() else ""
     prompt = f"""아래는 블로그 원고용 자료 노트야. 이 자료로 쓸 수 있는 블로그 글 주제를 4개 제안해줘.
 독자: {audience or "일반 소비자"}
-
+저자: 식품 품질관리(QA) 실무자
+{exp_block}
 조건:
 - 자료에 실제로 있는 사실만으로 쓸 수 있는 주제만 (자료 밖 지식이 필요하면 제외).
-- 사람들이 구글에 실제로 검색할 법한 키워드를 중심으로.
-- 서로 다른 각도로 (예: 비교·정리형, 소비자 체크리스트형, 이슈 해설형, 오해 바로잡기형).
-- 단순 기사 요약이 아니라 독자에게 판단 기준이나 정리를 주는 글이 되게.
+- "혈당 영양제", "유산균 추천"처럼 넓고 경쟁이 센 주제는 피하고, 범위를 좁힌 구체적인 검색어로
+  (예: "혈당 영양제 라벨 기능성 문구 확인법", "유산균 보장균수 표시 기준").
+- 각 주제는 QA 실무자의 판단 기준이나 위 저자 경험이 들어가야 완성되는 글이어야 해 — 기사만 읽은
+  사람도 쓸 수 있는 주제는 빼.
+- 사람들이 구글에 실제로 검색할 법한 키워드를 중심으로, 서로 다른 각도로
+  (예: 라벨 확인법, 오해 바로잡기, 비교·정리, 판단 기준 체크리스트).
+- 질병 치료·예방으로 읽힐 수 있는 제목·키워드는 쓰지 마 (예: "혈당 낮추는", "당뇨 예방").
 
 반드시 아래 JSON 배열 형식으로만 답해. 다른 설명 없이.
-[{{"title": "제목 후보(20~30자)", "keyword": "타깃 키워드", "angle": "어떤 관점·구성의 글인지 한두 문장", "materials": "주로 쓸 자료 번호 (예: 자료 1, 3)"}}]
+[{{"title": "제목 후보(20~30자)", "keyword": "타깃 키워드(좁고 구체적으로)", "angle": "어떤 관점·구성의 글인지 한두 문장", "edge": "이 주제에서 QA 실무자·저자 경험이 차별점이 되는 이유 한 문장", "materials": "주로 쓸 자료 번호 (예: 자료 1, 3)"}}]
 
 [자료 노트]
 {notes_text}"""
@@ -151,7 +186,7 @@ def suggest_topics(notes_text, audience=""):
         m = re.search(r"\[.*\]", text, re.DOTALL)
         items = json.loads(m.group(0), strict=False) if m else []
         return [
-            {k: str(item.get(k, "")).strip() for k in ("title", "keyword", "angle", "materials")}
+            {k: str(item.get(k, "")).strip() for k in ("title", "keyword", "angle", "edge", "materials")}
             for item in items if isinstance(item, dict) and item.get("title")
         ][:5]
     except Exception as e:
@@ -172,8 +207,14 @@ def draft_from_materials(notes_text, topic, target_keyword="", audience="", tone
     today = datetime.now()
 
     if opinion.strip():
-        opinion_rule = (f"저자의 의견·실무 경험 (글에 꼭 녹여 — 도입이나 마무리, 관련 섹션에 저자 1인칭 판단으로):\n"
-                        f"{opinion.strip()}")
+        opinion_rule = (f"""저자의 실무 경험·판단 (이 글의 뼈대 — 자료는 이걸 뒷받침하는 근거로만 써):
+{opinion.strip()}
+
+경험 활용 규칙:
+- 소제목 구성은 위 경험을 중심으로 짜: [소비자가 흔히 하는 오해]가 있으면 그걸 바로잡는 섹션,
+  [내가 고르는 기준]이 있으면 판단 기준·체크리스트 섹션, [실무에서 본 것]은 근거 사례로.
+- 자료 내용을 순서대로 요약하는 섹션은 만들지 마. 각 섹션은 저자의 판단 → 자료 근거 순서로.
+- 경험은 저자 1인칭으로 쓰되, 위에 적힌 것만 써 (없는 경험을 보태지 마).""")
     else:
         opinion_rule = ("저자의 의견·실무 경험: (입력 없음) — 저자의 판단이나 경험을 지어내지 마. 자료 해설 중심으로 쓰고, "
                         "마무리 바로 앞에 [추가 필요: 저자의 실무 경험이나 판단 한두 줄] 을 독립된 줄로 남겨 "

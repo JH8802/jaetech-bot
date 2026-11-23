@@ -438,6 +438,9 @@ def readiness(review, body, inputs, settings, platform):
     rows = [
         ("남은 항목([출처 필요]·[추가 필요]·[검수]·[내부링크 제안])",
          "block" if pending else "ok", f"{len(pending)}개 남음" if pending else "모두 처리됨"),
+        ("자료와 다르게 쓴 곳 (내가 쓴 글 ↔ 자료 노트)",
+         "block" if review.get("mismatch") else "ok",
+         f"{len(review.get('mismatch') or [])}곳 — 원문 확인 후 본문에서 직접 고치기" if review.get("mismatch") else "없음"),
         ("근거 없는 숫자", "block" if facts_missing else "ok",
          f"{len(facts_missing)}개" if facts_missing else "없음"),
         ("원문과 거의 같은 문장 (저작권)", "block" if review.get("copied") else "ok",

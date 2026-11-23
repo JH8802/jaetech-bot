@@ -4,6 +4,7 @@ blog_app.py
 blog_drafter.py
 blog_factcheck.py
 blog_materials.py
+blog_own.py
 blog_reviewer.py
 blog_sources.py
 blog_style_guide.py

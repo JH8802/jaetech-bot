@@ -20,7 +20,10 @@ import streamlit as st
 from blog_drafter import draft_post, suggest_questions, revise_draft
 from blog_factcheck import check_numbers, build_references, unverified, find_copied_sentences
 from blog_materials import (make_material_note, suggest_topics, draft_from_materials,
-                            count_materials, split_notes, AUDIENCES, TONES, LENGTHS)
+                            count_materials, split_notes, AUDIENCES, TONES, LENGTHS,
+                            EXPERIENCE_FIELDS, EXPERIENCE_FIELD_MAX, EXPERIENCE_MIN_FIELDS,
+                            EXPERIENCE_MIN_TOTAL, format_experience, experience_problem)
+from blog_own import package_own_draft, compare_with_notes, OWN_MIN_CHARS
 from blog_reviewer import (scan_cliches, scan_structure, scan_seo, scan_health_claims, scan_ai_patterns,
                            scan_experience_claims, scan_sections, readiness, own_texts,
                            review_draft, collect_issues, ai_issue, AI_REVIEW_LABELS)
@@ -36,10 +39,12 @@ st.set_page_config(page_title="블로그 초안 생성기", page_icon="✍️")
 
 KEY_POINTS_MAX = 1000  # 실제 경험/숫자/사례 최대 글자 수
 PERSONAL_TAKE_MAX = 300  # 본인 의견/입장 최대 글자 수
-OPINION_MAX = 500  # 자료로 쓰기 — 내 의견·경험 최대 글자 수
+OWN_BODY_MAX = 20000  # 내가 쓴 글 — 원고 최대 글자 수
 PLATFORM_CHOICES = ["네이버 블로그", "티스토리", "워드프레스"]
 MODE_MEMO = "✍️ 내 메모로 쓰기"
 MODE_MATERIALS = "📰 자료로 쓰기 (기사 링크·PDF·캡처)"
+MODE_OWN = "📝 내가 쓴 글 점검 (AI는 본문 안 고침)"
+MODES = [MODE_MEMO, MODE_MATERIALS, MODE_OWN]
 
 # 자동 저장하는 입력칸 (위젯 key → 기본값)
 INPUT_DEFAULTS = {
@@ -55,13 +60,17 @@ INPUT_DEFAULTS = {
     "mat_audience": AUDIENCES[0],
     "mat_tone": list(TONES)[2],
     "mat_length": 3000,
-    "mat_opinion": "",
+    "exp_seen": "",
+    "exp_myth": "",
+    "exp_criteria": "",
+    "own_body": "",
+    "own_faq": False,
 }
 # 고를 수 있는 값이 정해진 입력칸 — 저장된 값이 목록에 없으면 기본값으로
-INPUT_CHOICES = {"mode": [MODE_MEMO, MODE_MATERIALS], "mat_audience": AUDIENCES,
+INPUT_CHOICES = {"mode": MODES, "mat_audience": AUDIENCES,
                  "mat_tone": list(TONES), "mat_length": LENGTHS}
 INPUT_LIMITS = {"key_points_text": KEY_POINTS_MAX, "personal_take_text": PERSONAL_TAKE_MAX,
-                "mat_opinion": OPINION_MAX}
+                "own_body": OWN_BODY_MAX, **{k: EXPERIENCE_FIELD_MAX for k in EXPERIENCE_FIELDS}}
 # 원고 탭의 입력칸 key 앞부분 — 원고 내용이 바뀌면 지워야 새 내용으로 다시 채워짐
 FIELD_PREFIXES = ("title", "category", "tags", "meta", "slug", "body", "note")
 
@@ -75,6 +84,8 @@ def _clean_input(key, value):
         return [p for p in (value if isinstance(value, list) else []) if p in PLATFORM_CHOICES] or list(default)
     if key in INPUT_CHOICES:
         return value if value in INPUT_CHOICES[key] else default
+    if isinstance(default, bool):
+        return bool(value)
     if not isinstance(value, str):
         return default
     return value[:INPUT_LIMITS[key]] if key in INPUT_LIMITS else value
@@ -96,6 +107,9 @@ def init_state():
 
     if "autosave_loaded" not in st.session_state:
         saved = load_autosave()
+        # 예전 '내 의견·실무 경험' 한 칸(mat_opinion)에 적어둔 내용은 '실무에서 본 것' 칸으로 옮김
+        if saved.get("mat_opinion") and not any(saved.get(k) for k in EXPERIENCE_FIELDS):
+            saved["exp_seen"] = saved["mat_opinion"]
         # 화면에 안 보이는 입력칸(다른 작성 방식의 칸)은 Streamlit이 값을 지워버려서,
         # 여기(_inputs)에 따로 보관해두고 매번 다시 채운다
         st.session_state._inputs = {key: _clean_input(key, saved.get(key, default))
@@ -265,9 +279,17 @@ def load_draft_cb():
     if inputs.get("mode") == "materials":
         set_input("mode", MODE_MATERIALS)
         set_input("mat_notes", "\n\n".join(inputs.get("sources", [])))
-        set_input("mat_opinion", (inputs.get("personal_take") or "")[:OPINION_MAX])
+        experience = inputs.get("experience") or {"exp_seen": inputs.get("personal_take", "")}
+        for key in EXPERIENCE_FIELDS:
+            set_input(key, _clean_input(key, experience.get(key, "")))
         for key, field in (("mat_audience", "audience"), ("mat_tone", "tone"), ("mat_length", "length")):
             set_input(key, _clean_input(key, inputs.get(field)))
+        st.session_state.mat_raw = inputs.get("material_raw", {})
+    elif inputs.get("mode") == "own":
+        set_input("mode", MODE_OWN)
+        set_input("own_body", _clean_input("own_body", inputs.get("own_body", "")))
+        set_input("own_faq", bool(inputs.get("want_faq")))
+        set_input("mat_notes", "\n\n".join(inputs.get("sources", [])))
         st.session_state.mat_raw = inputs.get("material_raw", {})
     else:
         set_input("mode", MODE_MEMO)
@@ -354,7 +376,7 @@ st.caption("⚠️ 플랫폼을 여러 개 고르면 그 개수만큼 Claude를 
 st.button("🔄 새로 시작 (입력칸 비우기)", on_click=reset_all)
 st.divider()
 
-mode = st.radio("작성 방식", [MODE_MEMO, MODE_MATERIALS], key="mode", horizontal=True)
+mode = st.radio("작성 방식", MODES, key="mode", horizontal=True)
 platforms = st.multiselect(
     "어디에 발행할 거야? (여러 개 선택 가능 — 선택한 만큼 따로 생성됨)",
     PLATFORM_CHOICES, key="platforms",
@@ -506,17 +528,10 @@ if mode == MODE_MEMO:
                 finish_generation(drafts, filenames, inputs, target_keyword.strip())
 
 # ─────────────────────────────────────────────
-# 📰 자료로 쓰기
+# 자료 넣기 (자료로 쓰기·내가 쓴 글 점검 공용)
 # ─────────────────────────────────────────────
-else:
-    st.info(
-        "기사 링크·PDF·캡처를 넣으면 AI가 **자료 노트**로 정리하고 → 쓸 만한 **주제를 제안**하고 → "
-        "제목 후보·요약 박스·소제목·표·목록·SEO까지 갖춘 **원고**를 써줘. 자료 문장은 그대로 옮기지 않고 "
-        "새로 쓰며, 인정 범위를 벗어난 표현이나 자료끼리 충돌하는 내용은 [검수] 표시로 남겨."
-    )
-
-    # 1️⃣ 자료 넣기
-    st.subheader("1️⃣ 자료 넣기")
+def materials_input_ui(note_label):
+    """기사 링크·PDF·캡처를 읽어 자료 노트로 정리하는 화면 조각. 반환: 자료 노트 글자"""
     st.text_area(
         "기사·자료 링크 (한 줄에 하나 — 웹페이지·PDF 링크)", key="mat_urls", height=110,
         placeholder="https://www.hankyung.com/article/...\nhttps://www.mfds.go.kr/brd/.../down.do?...",
@@ -529,7 +544,7 @@ else:
     new_urls = [u for u in lines_of(st.session_state.mat_urls)
                 if is_bare_url(u) and u not in st.session_state.mat_done]
     read_label = f"📚 자료 읽고 정리하기 (새 링크 {len(new_urls)}개 · 파일 {len(mat_files or [])}개)"
-    if st.button(read_label, type="primary", disabled=not (new_urls or mat_files)):
+    if st.button(read_label, disabled=not (new_urls or mat_files)):
         jobs = [("url", u) for u in new_urls] + [("file", f.name, f.getvalue()) for f in (mat_files or [])]
         notes = st.session_state.mat_notes.strip()
         number = count_materials(notes)
@@ -565,61 +580,98 @@ else:
 
     if "pending_mat_notes" in st.session_state:
         set_input("mat_notes", st.session_state.pop("pending_mat_notes"))
-    mat_notes = st.text_area(
-        "📒 자료 노트 — AI가 원문을 사실·수치 위주로 다시 정리한 것 (이 노트만 원고의 근거로 쓰여)",
-        key="mat_notes", height=320,
+    notes_text = st.text_area(
+        note_label, key="mat_notes", height=280,
         help="AI가 정리한 거라 원문과 대조해서 틀린 부분은 여기서 직접 고쳐줘. 직접 메모를 '[자료 N] 출처' 형식으로 추가해도 돼.",
     )
     col_a, col_b = st.columns([3, 1])
-    col_a.caption(f"자료 {count_materials(mat_notes)}개 · {len(mat_notes):,}자 · 이미 읽은 링크는 다시 읽지 않아")
+    col_a.caption(f"자료 {count_materials(notes_text)}개 · {len(notes_text):,}자 · 이미 읽은 링크는 다시 읽지 않아")
     col_b.button("🗑️ 자료 비우기", on_click=clear_materials_cb)
+    return notes_text
 
-    # 2️⃣ 주제 정하기
-    st.subheader("2️⃣ 주제 정하기")
-    if st.button("💡 이 자료로 쓸 만한 주제 제안받기", disabled=not mat_notes.strip()):
-        with st.spinner("자료를 보고 주제를 고르는 중..."):
-            st.session_state.topic_ideas = suggest_topics(mat_notes, st.session_state.mat_audience)
+
+def experience_values():
+    return {k: st.session_state.get(k, "") for k in EXPERIENCE_FIELDS}
+
+
+# ─────────────────────────────────────────────
+# 📰 자료로 쓰기
+# ─────────────────────────────────────────────
+if mode == MODE_MATERIALS:
+    st.info(
+        "기사 링크·PDF·캡처를 **자료 노트**로 정리하고, **내 실무 경험**을 중심으로 원고를 짜. "
+        "자료는 내 판단을 뒷받침하는 근거로만 쓰여 — 자료만 다시 정리한 글은 구글이 낮게 보기 때문에 "
+        "경험 칸은 **필수**야. 인정 범위를 벗어난 표현이나 자료끼리 충돌하는 내용은 [검수] 표시로 남겨."
+    )
+
+    st.subheader("1️⃣ 자료 넣기")
+    mat_notes = materials_input_ui(
+        "📒 자료 노트 — AI가 원문을 사실·수치 위주로 다시 정리한 것 (이 노트가 원고의 근거로 쓰여)")
+
+    st.subheader("2️⃣ 내 실무 경험 (필수)")
+    st.caption(
+        f"글의 뼈대가 되는 부분이야. 칸을 {EXPERIENCE_MIN_FIELDS}개 이상, 합계 {EXPERIENCE_MIN_TOTAL}자 이상 채워야 "
+        "원고를 쓸 수 있어. 소제목도 이 경험을 중심으로 짜여 (오해 → 바로잡는 섹션, 기준 → 체크리스트 섹션)."
+    )
+    placeholders = {
+        "exp_seen": "예) 라벨 검토하다 보면 '혈당 케어'만 크게 쓰고 기능성 원료명은 뒷면에 작게 적은 제품이 꽤 많다.",
+        "exp_myth": "예) '혈당 영양제'면 다 기능성을 인정받은 줄 아는데, 일반식품인데 이름만 비슷하게 붙인 경우도 있다.",
+        "exp_criteria": "예) 나는 기능성 인정 문구가 정확히 적혀 있는지, 1일 섭취량 기준 함량이 있는지부터 본다.",
+    }
+    for key, label in EXPERIENCE_FIELDS.items():
+        st.text_area(label, key=key, height=90, max_chars=EXPERIENCE_FIELD_MAX, placeholder=placeholders[key])
+    exp_vals = experience_values()
+    exp_issue = experience_problem(exp_vals)
+    exp_total = sum(len(v.strip()) for v in exp_vals.values())
+    if exp_issue:
+        st.warning(f"⛔ {exp_issue} — 경험이 부족하면 '자료를 다시 정리한 글'이 돼서 구글 평가가 낮아져.")
+    else:
+        st.success(f"✅ 경험 입력 충분 (합계 {exp_total:,}자)")
+
+    st.subheader("3️⃣ 주제 정하기")
+    if st.button("💡 이 자료와 내 경험으로 쓸 만한 주제 제안받기", disabled=not mat_notes.strip()):
+        with st.spinner("자료와 경험을 보고 주제를 고르는 중..."):
+            st.session_state.topic_ideas = suggest_topics(
+                mat_notes, st.session_state.mat_audience, format_experience(exp_vals))
         if not st.session_state.topic_ideas:
             st.warning("주제 제안에 실패했어 — 다시 눌러보거나 아래 주제를 직접 적어줘.")
+    st.caption("큰 주제(예: '혈당 영양제')는 경쟁이 세서, QA 실무자의 판단이 차별점이 되는 좁은 주제 위주로 제안해. "
+               "경험 칸을 먼저 채우면 더 잘 맞는 주제가 나와.")
     for i, idea in enumerate(st.session_state.topic_ideas):
         with st.container(border=True):
             st.markdown(f"**{idea['title']}**")
             st.caption(f"키워드: {idea['keyword']} · {idea['materials']}")
             st.write(idea["angle"])
+            if idea.get("edge"):
+                st.caption(f"🎯 차별점: {idea['edge']}")
             st.button("이 주제로 정하기", key=f"pick_idea_{i}", on_click=pick_idea_cb, args=(i,))
     topic, target_keyword = keyword_inputs()
 
-    # 3️⃣ 글 설정
-    st.subheader("3️⃣ 글 설정")
+    st.subheader("4️⃣ 글 설정")
     col1, col2 = st.columns(2)
     with col1:
         st.selectbox("독자", AUDIENCES, key="mat_audience")
         st.select_slider("분량 (본문)", options=LENGTHS, key="mat_length", format_func=lambda n: f"{n:,}자 내외")
     with col2:
         st.radio("말투", list(TONES), key="mat_tone")
-    opinion = st.text_area(
-        f"내 의견·실무 경험 (최대 {OPINION_MAX}자 — 강력 추천)", key="mat_opinion", height=120,
-        max_chars=OPINION_MAX,
-        placeholder="예) 실무에서 보면 1정당 함량을 안 적은 제품이 꽤 많다. 나는 총량만 크게 쓴 제품은 일단 거른다.",
-        help="자료만 다시 정리한 글은 구글이 가치가 낮다고 봐. 한두 줄이라도 내 판단·경험이 들어가야 '내 글'이 돼.",
-    )
-    st.caption(f"{len(opinion):,} / {OPINION_MAX}자")
-    if not opinion.strip():
-        st.warning("내 의견·경험이 비어 있으면 '자료를 다시 정리한 글'이 돼서 구글 평가가 낮아질 수 있어. 한두 줄이라도 적는 걸 추천해.")
     autosave_inputs()
 
     if st.button("✍️ 자료로 원고 쓰기", type="primary"):
         if not mat_notes.strip():
             st.error("자료 노트가 비어 있어. 먼저 자료를 읽어서 정리해줘.")
+        elif exp_issue:
+            st.error(f"내 실무 경험이 부족해: {exp_issue}.")
         elif not topic.strip():
             st.error("주제를 정해줘 (제안받은 주제에서 고르거나 직접 입력).")
         elif not platforms:
             st.error("발행할 곳을 하나 이상 선택해줘.")
         else:
+            opinion = format_experience(exp_vals)
             inputs = {
                 "mode": "materials", "topic": topic, "target_keyword": target_keyword.strip(),
-                "key_points": lines_of(opinion), "sources": split_notes(mat_notes),
-                "personal_take": opinion, "notes": [], "user_additions": [],
+                "key_points": [v.strip() for v in exp_vals.values() if v.strip()],
+                "sources": split_notes(mat_notes), "personal_take": opinion,
+                "experience": exp_vals, "notes": [], "user_additions": [],
                 "audience": st.session_state.mat_audience, "tone": st.session_state.mat_tone,
                 "length": st.session_state.mat_length, "material_raw": dict(st.session_state.mat_raw),
             }
@@ -641,6 +693,68 @@ else:
                 drafts[platform], filenames[platform] = draft, path
             if drafts:
                 finish_generation(drafts, filenames, inputs, target_keyword.strip())
+
+# ─────────────────────────────────────────────
+# 📝 내가 쓴 글 점검
+# ─────────────────────────────────────────────
+elif mode == MODE_OWN:
+    st.info(
+        "내가 직접 쓴 원고를 붙여넣으면 AI는 **본문을 한 글자도 고치지 않고** 제목 후보·메타설명·요약 박스·"
+        "목차·사진 자리와 ALT(·FAQ)만 만들어 붙이고 점검해. 자료 노트가 있으면 원고의 수치·사실이 "
+        "자료와 **다르게 쓰인 곳**만 찾아줘."
+    )
+
+    st.subheader("1️⃣ 내 원고")
+    own_body = st.text_area(
+        f"원고 붙여넣기 (최소 {OWN_MIN_CHARS}자)", key="own_body", height=360, max_chars=OWN_BODY_MAX,
+        placeholder="메모장·워드에서 쓴 원고를 그대로 붙여넣어.\n\n## 소제목은 이렇게 줄 맨 앞에 ## 를 붙이면 그대로 소제목이 돼 (■, ▶ 도 돼)\n\n소제목이 없으면 AI가 넣을 자리를 제안해 — 문장은 안 바꿔.",
+    )
+    st.caption(f"{len(own_body):,}자")
+    own_keyword = st.text_input(
+        "타깃 키워드 (이 글로 잡고 싶은 검색어 — 비우면 AI가 원고에서 고름)", key="kw_input",
+        placeholder="예: 혈당 영양제 기능성 문구",
+    )
+
+    st.subheader("2️⃣ 근거 자료 (선택)")
+    st.caption("원고에서 인용한 기사·PDF를 넣으면, 원고의 수치·사실이 자료와 다르게 쓰인 곳을 찾아줘. "
+               "자료에 링크가 있으면 원문 카드·참고 자료 목록에도 쓰여.")
+    own_notes = materials_input_ui("📒 자료 노트 (원고와 대조할 근거)")
+
+    st.subheader("3️⃣ 옵션")
+    st.checkbox("FAQ(자주 묻는 질문) 만들기 — 원고에 답이 있는 질문만", key="own_faq",
+                help="구글은 2023년부터 대부분의 사이트에서 FAQ를 검색결과에 펼쳐 보여주지 않아. "
+                     "독자에게 실제로 도움이 될 때만 켜.")
+    autosave_inputs()
+
+    if st.button("🧩 제목·요약·목차 만들고 점검하기", type="primary"):
+        if len(own_body.strip()) < OWN_MIN_CHARS:
+            st.error(f"원고가 너무 짧아 — {OWN_MIN_CHARS}자 이상 붙여넣어줘.")
+        elif not platforms:
+            st.error("발행할 곳을 하나 이상 선택해줘.")
+        else:
+            inputs = {
+                "mode": "own", "topic": "", "target_keyword": own_keyword.strip(),
+                "own_body": own_body, "want_faq": st.session_state.own_faq,
+                # 원고 전체가 저자 글 — 경험 점검·숫자 대조에서 '저자가 쓴 것'으로 인정됨
+                "key_points": lines_of(own_body), "personal_take": "",
+                "sources": split_notes(own_notes), "notes": [], "user_additions": [],
+                "material_raw": dict(st.session_state.mat_raw),
+            }
+            drafts, filenames = {}, {}
+            for platform in platforms:
+                with st.spinner(f"⏳ {platform}용 제목·요약·목차 만드는 중..."):
+                    try:
+                        draft, info = package_own_draft(own_body, own_keyword.strip(), platform,
+                                                        want_faq=st.session_state.own_faq)
+                    except Exception as e:
+                        st.error(f"❌ {platform} 처리 실패: {e}")
+                        continue
+                inputs["topic"] = inputs["topic"] or parse_draft_metadata(draft)["title"]
+                path = new_draft_path(platform)
+                write_draft_file(path, inputs["topic"], platform, own_keyword.strip(), draft, inputs)
+                drafts[platform], filenames[platform] = draft, path
+            if drafts:
+                finish_generation(drafts, filenames, inputs, own_keyword.strip())
 
 # ─────────────────────────────────────────────
 # 원고 탭
@@ -679,6 +793,9 @@ if st.session_state.drafts:
                         "copied": find_copied_sentences(meta["body"], inputs.get("material_raw", {})),
                         "experience": scan_experience_claims(meta["body"], own_texts(inputs)),
                         "sections": scan_sections(meta["body"]),
+                        # 내가 쓴 글 + 자료 노트가 있을 때만: 원고가 자료와 다르게 쓴 곳 (AI 1회)
+                        "mismatch": (compare_with_notes(meta["body"], "\n\n".join(inputs["sources"]))
+                                     if inputs.get("mode") == "own" and inputs.get("sources") else []),
                         "ai": review_draft(draft),
                         "overlap": find_keyword_overlap(
                             platform, st.session_state.target_keyword,
@@ -890,6 +1007,18 @@ if st.session_state.drafts:
                     )
                     st.caption("'1', '2' 같은 흔한 작은 숫자는 재료 어딘가에 거의 항상 있어서 확인됨으로 나올 수 있어. 숫자만 보고, 기관명 같은 고유명사는 확인하지 않아.")
 
+            mismatch = review.get("mismatch", [])
+            if mismatch is None:
+                st.warning("자료 대조: 원고와 자료 노트 비교에 실패했어 — '🔁 다시 점검'을 눌러봐.")
+            elif mismatch:
+                st.error(
+                    f"**자료와 다르게 쓴 곳 {len(mismatch)}개** (원고의 수치·사실이 자료 노트와 다름 — 원문을 확인하고 "
+                    "본문 칸에서 직접 고친 뒤 💾 저장)\n"
+                    + "\n".join(f"- 원고: {m['quote']}\n  - 자료: {m['material']}\n  - {m['issue']}" for m in mismatch)
+                )
+            elif inputs.get("mode") == "own" and inputs.get("sources"):
+                st.success("자료 대조: 원고와 자료 노트가 다르게 쓰인 곳 없음")
+
             experience = review.get("experience", [])
             if experience:
                 st.error(
@@ -935,44 +1064,50 @@ if st.session_state.drafts:
 
             # ── 다듬기 ──
             st.divider()
-            st.subheader("✨ 점검 반영해서 다듬기")
-            issues = collect_issues(review)
-            st.caption(
-                f"지적된 {len(issues)}건을 반영해 수정본을 만들어. 문제 없는 부분은 그대로 두고, "
-                "새 사실은 처음 입력한 재료와 아래 메모에 있는 것만 써 (지어내지 않음). "
-                "누르면 Claude를 1번 더 호출해. 이전 버전은 drafts/history 폴더에 남아."
-            )
-            author_note = st.text_area(
-                "추가 메모 (선택) — 지적을 해결할 구체적인 사실·사례·의견이 있으면 적어줘",
-                height=90, key=f"note_{platform}",
-                placeholder="예) 구체성 부족 지적 → 지난달 점검한 A제품은 균주명 없이 '500억 보장'만 표기돼 있었음",
-            )
-            if st.button("✨ 점검 반영해서 다듬기", key=f"revise_{platform}", type="primary"):
-                if not issues and not author_note.strip():
-                    st.info("지적된 부분도 추가 메모도 없어서 다듬을 게 없어.")
-                else:
-                    with st.spinner(f"⏳ {platform} 수정본 만드는 중..."):
-                        try:
-                            revised = revise_draft(
-                                draft, issues, inputs.get("key_points", []),
-                                sources=inputs.get("sources"),
-                                personal_take=inputs.get("personal_take", ""),
-                                author_note=author_note.strip(), platform=platform,
-                                target_keyword=st.session_state.target_keyword,
+            if inputs.get("mode") == "own":
+                st.subheader("✏️ 고치기")
+                st.info("'내가 쓴 글 점검' 모드에서는 AI가 본문을 고치지 않아. 위 점검 결과를 보고 본문 칸에서 직접 "
+                        "고친 뒤 💾 저장하면, 점검이 다시 돌아가. (제목·요약 같은 포장만 다시 만들려면 위에서 "
+                        "'🧩 제목·요약·목차 만들고 점검하기'를 한 번 더 누르면 돼)")
+            else:
+                st.subheader("✨ 점검 반영해서 다듬기")
+                issues = collect_issues(review)
+                st.caption(
+                    f"지적된 {len(issues)}건을 반영해 수정본을 만들어. 문제 없는 부분은 그대로 두고, "
+                    "새 사실은 처음 입력한 재료와 아래 메모에 있는 것만 써 (지어내지 않음). "
+                    "누르면 Claude를 1번 더 호출해. 이전 버전은 drafts/history 폴더에 남아."
+                )
+                author_note = st.text_area(
+                    "추가 메모 (선택) — 지적을 해결할 구체적인 사실·사례·의견이 있으면 적어줘",
+                    height=90, key=f"note_{platform}",
+                    placeholder="예) 구체성 부족 지적 → 지난달 점검한 A제품은 균주명 없이 '500억 보장'만 표기돼 있었음",
+                )
+                if st.button("✨ 점검 반영해서 다듬기", key=f"revise_{platform}", type="primary"):
+                    if not issues and not author_note.strip():
+                        st.info("지적된 부분도 추가 메모도 없어서 다듬을 게 없어.")
+                    else:
+                        with st.spinner(f"⏳ {platform} 수정본 만드는 중..."):
+                            try:
+                                revised = revise_draft(
+                                    draft, issues, inputs.get("key_points", []),
+                                    sources=inputs.get("sources"),
+                                    personal_take=inputs.get("personal_take", ""),
+                                    author_note=author_note.strip(), platform=platform,
+                                    target_keyword=st.session_state.target_keyword,
+                                )
+                            except Exception as e:
+                                revised = ""
+                                st.error(f"❌ 다듬기 실패: {e}\n(네트워크 문제일 수 있어 — 다시 눌러봐)")
+                        if revised and revised.strip() == draft.strip():
+                            st.info(
+                                "수정본이 이전 초안과 똑같아 — 지적된 부분을 AI가 재료 없이는 고칠 수 없다고 "
+                                "판단한 거야. 위 '추가 메모'에 그 지적을 해결할 사실·사례·기준을 적고 다시 눌러봐."
                             )
-                        except Exception as e:
-                            revised = ""
-                            st.error(f"❌ 다듬기 실패: {e}\n(네트워크 문제일 수 있어 — 다시 눌러봐)")
-                    if revised and revised.strip() == draft.strip():
-                        st.info(
-                            "수정본이 이전 초안과 똑같아 — 지적된 부분을 AI가 재료 없이는 고칠 수 없다고 "
-                            "판단한 거야. 위 '추가 메모'에 그 지적을 해결할 사실·사례·기준을 적고 다시 눌러봐."
-                        )
-                    elif revised:
-                        if author_note.strip():
-                            inputs.setdefault("notes", []).append(author_note.strip())
-                        persist(platform, revised)
-                        st.rerun()
+                        elif revised:
+                            if author_note.strip():
+                                inputs.setdefault("notes", []).append(author_note.strip())
+                            persist(platform, revised)
+                            st.rerun()
 
             st.caption("참고: 이건 'AI 티/가독성' 체크일 뿐, 이 플랫폼 자체 검색 알고리즘 점수는 아니야.")
 

@@ -171,6 +171,19 @@ _CARD_RE = re.compile(r"^\[원문 카드\s*[:：]\s*(?:자료|출처)?\s*(\d+)\s
 _NUMBERED_RE = re.compile(r"^\d{1,2}[.)]\s+")
 NOTICE_PREFIXES = VISUAL_TAGS + ("[내부링크 제안]", "[추가 필요", "[검수")
 SUMMARY_TITLE = "한눈에 보기"
+TOC_TITLE = "목차"
+
+
+def _anchors(blocks):
+    """[목차]가 있을 때만 소제목마다 이동용 id(sec-1, sec-2 …)를 붙인다. 반환: {블록 순번: id}"""
+    if not any(kind == "toc" for kind, _ in blocks):
+        return {}
+    ids, n = {}, 0
+    for idx, (kind, _) in enumerate(blocks):
+        if kind == "h2":
+            n += 1
+            ids[idx] = f"sec-{n}"
+    return ids
 REFS_TITLE = "참고 자료"
 AUTHOR_TITLE = "글쓴이"
 
@@ -221,6 +234,9 @@ def parse_body_blocks(body):
                     items.append(_BULLET_RE.sub("", lines[i].strip()))
                 i += 1
             blocks.append(("summary", items))
+        elif s.startswith("[목차]"):
+            flush()
+            blocks.append(("toc", None))
         elif _CARD_RE.match(s):
             flush()
             blocks.append(("card", int(_CARD_RE.match(s).group(1))))
@@ -336,10 +352,21 @@ def body_to_html(body, cards=None):
     cards: source_cards() 결과 — [원문 카드: N] 자리에 넣을 원문 정보"""
     cards = cards or {}
     out = []
-    for kind, data in parse_body_blocks(body):
+    blocks = parse_body_blocks(body)
+    anchors = _anchors(blocks)
+    for idx, (kind, data) in enumerate(blocks):
         if kind == "card":
             if data in cards:
                 out.append(_card_html(cards[data]))
+            continue
+        if kind == "toc":
+            items = "".join(f'<li><a href="#{anchors[i]}">{html.escape(d)}</a></li>'
+                            for i, (k, d) in enumerate(blocks) if k == "h2")
+            out.append('<div style="background:#f8f9fb;padding:14px 20px;border-radius:8px;">'
+                       f"<p><strong>{TOC_TITLE}</strong></p><ol>{items}</ol></div>")
+            continue
+        if kind == "h2" and idx in anchors:
+            out.append(f'<h2 id="{anchors[idx]}">{html.escape(data)}</h2>')
             continue
         if kind == "p":
             out.append("<p>" + "<br>\n".join(_inline(x) for x in data) + "</p>")
@@ -393,10 +420,29 @@ def body_to_gutenberg(body, cards=None):
     (워드프레스 공식 블록 라이브러리로 '정상 블록'으로 인식되는 형식인지 검증한 형식)"""
     cards = cards or {}
     out = []
-    for kind, data in parse_body_blocks(body):
+    blocks = parse_body_blocks(body)
+    anchors = _anchors(blocks)
+    for idx, (kind, data) in enumerate(blocks):
         if kind == "card":
             if data in cards:
                 out.append(_card_gutenberg(cards[data]))
+            continue
+        if kind == "toc":
+            lis = "\n\n".join(_wp("list-item", f'<li><a href="#{anchors[i]}">{html.escape(d)}</a></li>')
+                               for i, (k, d) in enumerate(blocks) if k == "h2")
+            inner = (_wp("paragraph", f"<p><strong>{TOC_TITLE}</strong></p>") + "\n\n"
+                     + _wp("list", f'<ol class="wp-block-list">{lis}</ol>', '{"ordered":true}'))
+            out.append(_wp(
+                "group",
+                '<div class="wp-block-group has-background" style="background-color:#f8f9fb;'
+                'padding-top:16px;padding-right:20px;padding-bottom:16px;padding-left:20px">'
+                f"{inner}</div>",
+                '{"style":{"color":{"background":"#f8f9fb"},"spacing":{"padding":{"top":"16px",'
+                '"bottom":"16px","left":"20px","right":"20px"}}},"layout":{"type":"constrained"}}',
+            ))
+            continue
+        if kind == "h2" and idx in anchors:
+            out.append(_wp("heading", f'<h2 class="wp-block-heading" id="{anchors[idx]}">{html.escape(data)}</h2>'))
             continue
         if kind == "p":
             out.append(_wp("paragraph", "<p>" + "<br>".join(_inline(x) for x in data) + "</p>"))
