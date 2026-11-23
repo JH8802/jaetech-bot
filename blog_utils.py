@@ -707,7 +707,7 @@ SETTINGS_PATH = os.path.join(DATA_DIR, "site_settings.json")
 SETTINGS_DEFAULTS = {
     "author_bio": "",        # 저자 소개 (2~4줄)
     "disclosure": "",        # 이해관계 고지 (예: 업체와 금전적 관계 없음)
-    "disclose_ai": True,     # AI 도구 도움 사실을 글 끝에 밝힐지
+    "disclose_ai": False,    # AI 도구 도움 사실을 글 끝에 밝힐지 (의무 아님 — 기본은 끔)
     "categories": [],        # 내 블로그 카테고리 목록 (비우면 AI가 자유롭게)
 }
 

@@ -46,8 +46,11 @@ OWN_BODY_MAX = 20000  # 내가 쓴 글 — 원고 최대 글자 수
 PLATFORM_CHOICES = ["네이버 블로그", "티스토리", "워드프레스"]
 MODE_MEMO = "✍️ 내 메모로 쓰기"
 MODE_MATERIALS = "📰 자료로 쓰기 (기사 링크·PDF·캡처)"
-MODE_OWN = "📝 내가 쓴 글 점검·다듬기"
-OLD_MODE_NAMES = {"📝 내가 쓴 글 점검 (AI는 본문 안 고침)": MODE_OWN}  # 예전 이름으로 자동 저장된 값
+MODE_OWN = "📝 내가 쓴 글 가져오기"
+OLD_MODE_NAMES = {  # 예전 이름으로 자동 저장된 값
+    "📝 내가 쓴 글 점검 (AI는 본문 안 고침)": MODE_OWN,
+    "📝 내가 쓴 글 점검·다듬기": MODE_OWN,
+}
 MODES = [MODE_MEMO, MODE_MATERIALS, MODE_OWN]
 
 # 자동 저장하는 입력칸 (위젯 key → 기본값)
@@ -373,7 +376,9 @@ with st.sidebar:
     st.text_input("이해관계 고지 (선택)", key="set_disclosure",
                   placeholder="예) 이 글에 나온 업체·제품과 금전적 관계가 없습니다.")
     st.checkbox("AI 도구 도움을 받았다고 글 끝에 밝히기", key="set_disclose_ai",
-                help="구글은 AI 사용 여부를 독자가 궁금해할 만한 곳에 밝히는 걸 권장해 왔어. 끄면 문구가 빠져.")
+                help="의무는 아니야 (구글은 AI 사용 여부가 아니라 글 품질로 평가해). 켜면 글 끝에 "
+                     "'초안 정리에 AI 도구의 도움을 받았고, 내용 확인과 최종 판단은 필자가 했습니다'가 붙어. "
+                     "협찬·제휴 링크가 있을 때 밝히는 '이해관계 고지'는 이것과 별개로 꼭 써야 해.")
     st.text_area(
         "내 블로그 카테고리 목록 (한 줄에 하나)", key="set_categories", height=110,
         placeholder="예)\n건강기능식품 표시·광고\n식품 안전·이슈\n재테크",
@@ -427,9 +432,12 @@ def use_suggestion_cb():
         set_input("kw_input", pick)
 
 
-def keyword_suggest_ui(keyword, topic=""):
-    """구글 자동완성으로 실제 검색어를 모아 보여주고, 골라서 타깃 키워드로 쓰게 한다."""
-    with st.expander("🔎 구글 자동완성으로 키워드 찾기 (무료) · 상위 글 확인"):
+def keyword_suggest_ui(topic=""):
+    """구글 자동완성으로 실제 검색어를 모아 보여주고, 골라서 타깃 키워드로 쓰게 한다.
+    타깃 키워드 칸보다 먼저 그린다 (주제 → 실제 검색어 보기 → 타깃 키워드 고르기 순서)."""
+    keyword = st.session_state.get("kw_input", "")
+    with st.expander("🔎 구글 자동완성으로 키워드 찾기 (무료) — 타깃 키워드 정하기 전에",
+                     expanded=not keyword.strip()):
         st.caption(
             "사람들이 구글 검색창에 **실제로 이어서 치는 검색어**를 모아줘 (방법·차이·기준·부작용 등으로 넓혀서). "
             "검색량은 안 나오니까, 아래 목록을 복사해서 구글 키워드 플래너 → '검색량 및 예측 가져오기'에 붙여넣어 확인해. "
@@ -458,25 +466,29 @@ def keyword_suggest_ui(keyword, topic=""):
                     st.markdown(f"{group}: " + " · ".join(items))
                 if result.get("failed"):
                     st.caption(f"(일부 {result['failed']}번은 못 불러와서 빠졌어)")
-                st.selectbox("타깃 키워드로 쓸 검색어", result["all"], key="ac_pick")
-                st.button("✅ 이 검색어를 타깃 키워드로", key="ac_use", on_click=use_suggestion_cb)
                 st.caption("키워드 플래너에 붙여넣을 목록 (오른쪽 위 복사 버튼):")
                 st.code("\n".join([result["seed"]] + result["all"]), language=None)
+                st.selectbox("타깃 키워드로 쓸 검색어", result["all"], key="ac_pick")
+                st.button("✅ 이 검색어를 타깃 키워드로 (아래 칸에 들어가)", key="ac_use", on_click=use_suggestion_cb)
 
-        if keyword.strip():
-            st.link_button(f"🌐 구글에서 '{keyword.strip()}' 검색해서 상위 글 보기", google_search_url(keyword.strip()))
-            st.caption("상위 10개가 공공기관·대형 언론·백과사전 위주면 경쟁이 세고, 오래된 글·얕은 블로그 글·"
-                       "질문에 제대로 답 안 하는 글이 섞여 있으면 기회야. (시크릿 창에서 보면 더 정확해)")
+
+def top_results_link(keyword):
+    """타깃 키워드로 구글 상위 글을 직접 보러 가는 버튼 (경쟁 판단용)."""
+    if keyword.strip():
+        st.link_button(f"🌐 구글에서 '{keyword.strip()}' 검색해서 상위 글 보기", google_search_url(keyword.strip()))
+        st.caption("상위 10개가 공공기관·대형 언론·백과사전 위주면 경쟁이 세고, 오래된 글·얕은 블로그 글·"
+                   "질문에 제대로 답 안 하는 글이 섞여 있으면 기회야. (시크릿 창에서 보면 더 정확해)")
 
 
 def keyword_inputs():
     topic = st.text_input("주제", key="topic", placeholder="예: 홈쇼핑 유산균 표시광고, 뭐가 문제인가")
+    keyword_suggest_ui(topic)
     keyword = st.text_input(
         "타깃 키워드 (이 글로 잡고 싶은 검색어 — 비우면 AI가 고름)", key="kw_input",
         placeholder="예: 유산균 보장균수",
-        help="아래 '구글 자동완성으로 키워드 찾기'에서 실제 검색어를 골라 쓰면 좋아.",
+        help="위 '구글 자동완성으로 키워드 찾기'에서 실제 검색어를 골라 쓰면 좋아.",
     )
-    keyword_suggest_ui(keyword, topic)
+    top_results_link(keyword)
     return topic, keyword
 
 
@@ -613,7 +625,7 @@ if mode == MODE_MEMO:
                 finish_generation(drafts, filenames, inputs, target_keyword.strip())
 
 # ─────────────────────────────────────────────
-# 자료 넣기 (자료로 쓰기·내가 쓴 글 점검 공용)
+# 자료 넣기 (자료로 쓰기·내가 쓴 글 가져오기 공용)
 # ─────────────────────────────────────────────
 def materials_input_ui(note_label):
     """기사 링크·PDF·캡처를 읽어 자료 노트로 정리하는 화면 조각. 반환: 자료 노트 글자"""
@@ -780,15 +792,16 @@ if mode == MODE_MATERIALS:
                 finish_generation(drafts, filenames, inputs, target_keyword.strip())
 
 # ─────────────────────────────────────────────
-# 📝 내가 쓴 글 점검
+# 📝 내가 쓴 글 가져오기
 # ─────────────────────────────────────────────
 elif mode == MODE_OWN:
     st.info(
         "내가 직접 쓴 원고를 붙여넣으면, 먼저 **본문은 그대로 둔 채** 제목 후보·메타설명·요약 박스·"
         "목차·사진 자리와 ALT(·FAQ)를 만들어 붙이고 점검해. 자료 노트가 있으면 원고의 수치·사실이 "
         "자료와 **다르게 쓰인 곳**도 찾아줘.\n\n"
-        "그다음 결과 화면 맨 아래 **✨ 내 글 다듬기**에서 원할 때만 ① 맞춤법·오타만 ② 구조 정리(소제목·문단 순서) 중 "
-        "골라 고칠 수 있어 — 바뀐 곳을 보여주고, 마음에 안 들면 되돌릴 수 있어."
+        "그다음 결과 화면 맨 아래 **✨ 다듬기**에서 원할 때만 ① 맞춤법·오타만 ② 구조 정리(소제목·문단 순서) 중 "
+        "골라 고칠 수 있어 — 바뀐 곳을 보여주고, 마음에 안 들면 되돌릴 수 있어. "
+        "(메모·자료로 만든 초안도 결과 화면에서 똑같이 다듬을 수 있어)"
     )
 
     st.subheader("1️⃣ 내 원고")
@@ -797,11 +810,12 @@ elif mode == MODE_OWN:
         placeholder="메모장·워드에서 쓴 원고를 그대로 붙여넣어.\n\n## 소제목은 이렇게 줄 맨 앞에 ## 를 붙이면 그대로 소제목이 돼 (■, ▶ 도 돼)\n\n소제목이 없으면 AI가 넣을 자리를 제안해 — 문장은 안 바꿔.",
     )
     st.caption(f"{len(own_body):,}자")
+    keyword_suggest_ui()
     own_keyword = st.text_input(
         "타깃 키워드 (이 글로 잡고 싶은 검색어 — 비우면 AI가 원고에서 고름)", key="kw_input",
         placeholder="예: 혈당 영양제 기능성 문구",
     )
-    keyword_suggest_ui(own_keyword)
+    top_results_link(own_keyword)
 
     st.subheader("2️⃣ 근거 자료 (선택)")
     st.caption("원고에서 인용한 기사·PDF를 넣으면, 원고의 수치·사실이 자료와 다르게 쓰인 곳을 찾아줘. "
@@ -1153,73 +1167,62 @@ if st.session_state.drafts:
             # ── 다듬기 ──
             st.divider()
             edit_history_ui(platform)
-            if inputs.get("mode") == "own":
-                st.subheader("✨ 내 글 다듬기")
-                st.caption(
-                    "고칠 범위를 골라. 처음엔 '맞춤법·오타만'을 추천해 — 내 문장이 그대로 남아서 '내 글'의 장점이 살아. "
-                    "글이 길고 흐름이 오락가락하면 '구조 정리'를 써. 어느 쪽이든 원고에 없는 사실·숫자·경험은 보태지 않고, "
-                    "바뀐 곳을 보여주고 되돌릴 수 있어. 누르면 Claude를 1번 호출해."
-                )
-                level = st.radio("다듬기 범위", list(EDIT_LEVELS), format_func=EDIT_LEVELS.get,
-                                 key=f"edit_level_{platform}")
-                request = st.text_input("추가로 바라는 점 (선택)", key=f"note_{platform}",
-                                        placeholder="예) 마지막 문단의 내 결론은 꼭 그대로 둬 / 소제목은 질문형으로")
-                if st.button("✨ 내 글 다듬기", key=f"own_edit_{platform}", type="primary"):
-                    with st.spinner(f"⏳ {EDIT_LEVELS[level].split(' (')[0]} 하는 중..."):
-                        try:
-                            edited = edit_own_draft(draft, level, st.session_state.target_keyword, request)
-                        except Exception as e:
-                            edited = ""
-                            st.error(f"❌ 다듬기 실패: {e}\n(네트워크 문제일 수 있어 — 다시 눌러봐)")
-                    if edited and edited.strip() == draft.strip():
-                        st.info("고칠 곳이 없대 — 이미 깔끔한 원고야.")
-                    elif edited:
-                        if not parse_draft_metadata(edited)["title"]:
-                            st.error("❌ 다듬은 결과의 형식이 깨져서 반영하지 않았어. 다시 눌러봐.")
-                        else:
-                            if request.strip():
-                                inputs.setdefault("notes", []).append(request.strip())
-                            apply_edit(platform, draft, edited, EDIT_LEVELS[level].split(" (")[0])
-                            st.rerun()
-            else:
-                st.subheader("✨ 점검 반영해서 다듬기")
-                issues = collect_issues(review)
-                st.caption(
-                    f"지적된 {len(issues)}건을 반영해 수정본을 만들어. 문제 없는 부분은 그대로 두고, "
-                    "새 사실은 처음 입력한 재료와 아래 메모에 있는 것만 써 (지어내지 않음). "
-                    "누르면 Claude를 1번 더 호출해. 이전 버전은 drafts/history 폴더에 남아."
-                )
-                author_note = st.text_area(
+            is_own = inputs.get("mode") == "own"
+            issues = [] if is_own else collect_issues(review)
+            levels = {**({} if is_own else {"review": f"🩺 점검 지적 반영 (지적된 {len(issues)}건 고치기)"}), **EDIT_LEVELS}
+            st.subheader("✨ 다듬기")
+            st.caption(
+                ("AI 초안이면 먼저 '점검 지적 반영'으로 지적된 곳을 고치고, 본문을 직접 손본 뒤 마지막에 "
+                 "'맞춤법·오타만'을 한 번 돌리는 걸 추천해. " if not is_own else
+                 "처음엔 '맞춤법·오타만'을 추천해 — 내 문장이 그대로 남아서 '내 글'의 장점이 살아. ")
+                + "글이 길고 흐름이 오락가락하면 '구조 정리'를 써. 어느 쪽이든 원고·재료에 없는 사실·숫자·경험은 "
+                "보태지 않고, 바뀐 곳을 보여주고 되돌릴 수 있어. 누르면 Claude를 1번 호출해."
+            )
+            level = st.radio("다듬기 범위", list(levels), format_func=levels.get,
+                             key=f"edit_level_{inputs.get('mode', 'memo')}_{platform}")
+            if level == "review":
+                request = st.text_area(
                     "추가 메모 (선택) — 지적을 해결할 구체적인 사실·사례·의견이 있으면 적어줘",
                     height=90, key=f"note_{platform}",
                     placeholder="예) 구체성 부족 지적 → 지난달 점검한 A제품은 균주명 없이 '500억 보장'만 표기돼 있었음",
                 )
-                if st.button("✨ 점검 반영해서 다듬기", key=f"revise_{platform}", type="primary"):
-                    if not issues and not author_note.strip():
-                        st.info("지적된 부분도 추가 메모도 없어서 다듬을 게 없어.")
-                    else:
-                        with st.spinner(f"⏳ {platform} 수정본 만드는 중..."):
-                            try:
-                                revised = revise_draft(
+            else:
+                request = st.text_area("추가로 바라는 점 (선택)", height=68, key=f"note_{platform}",
+                                       placeholder="예) 마지막 문단의 내 결론은 꼭 그대로 둬 / 소제목은 질문형으로")
+            label = levels[level].split(" (")[0]
+            if st.button("✨ 다듬기 실행", key=f"revise_{platform}", type="primary"):
+                edited = ""
+                if level == "review" and not issues and not request.strip():
+                    st.info("지적된 부분도 추가 메모도 없어서 다듬을 게 없어. '맞춤법·오타만'이나 '구조 정리'를 골라봐.")
+                else:
+                    with st.spinner(f"⏳ {label} 하는 중..."):
+                        try:
+                            if level == "review":
+                                edited = revise_draft(
                                     draft, issues, inputs.get("key_points", []),
                                     sources=inputs.get("sources"),
                                     personal_take=inputs.get("personal_take", ""),
-                                    author_note=author_note.strip(), platform=platform,
+                                    author_note=request.strip(), platform=platform,
                                     target_keyword=st.session_state.target_keyword,
                                 )
-                            except Exception as e:
-                                revised = ""
-                                st.error(f"❌ 다듬기 실패: {e}\n(네트워크 문제일 수 있어 — 다시 눌러봐)")
-                        if revised and revised.strip() == draft.strip():
-                            st.info(
-                                "수정본이 이전 초안과 똑같아 — 지적된 부분을 AI가 재료 없이는 고칠 수 없다고 "
-                                "판단한 거야. 위 '추가 메모'에 그 지적을 해결할 사실·사례·기준을 적고 다시 눌러봐."
-                            )
-                        elif revised:
-                            if author_note.strip():
-                                inputs.setdefault("notes", []).append(author_note.strip())
-                            apply_edit(platform, draft, revised, "점검 반영")
-                            st.rerun()
+                            else:
+                                edited = edit_own_draft(draft, level, st.session_state.target_keyword, request)
+                        except Exception as e:
+                            st.error(f"❌ 다듬기 실패: {e}\n(네트워크 문제일 수 있어 — 다시 눌러봐)")
+                if edited and edited.strip() == draft.strip():
+                    st.info(
+                        "수정본이 이전 원고와 똑같아 — 지적된 부분을 AI가 재료 없이는 고칠 수 없다고 판단한 거야. "
+                        "위 '추가 메모'에 그 지적을 해결할 사실·사례·기준을 적고 다시 눌러봐."
+                        if level == "review" else "고칠 곳이 없대 — 이미 깔끔한 원고야."
+                    )
+                elif edited:
+                    if not parse_draft_metadata(edited)["title"]:
+                        st.error("❌ 다듬은 결과의 형식이 깨져서 반영하지 않았어. 다시 눌러봐.")
+                    else:
+                        if request.strip():
+                            inputs.setdefault("notes", []).append(request.strip())
+                        apply_edit(platform, draft, edited, label)
+                        st.rerun()
 
             st.caption("참고: 이건 'AI 티/가독성' 체크일 뿐, 이 플랫폼 자체 검색 알고리즘 점수는 아니야.")
 
