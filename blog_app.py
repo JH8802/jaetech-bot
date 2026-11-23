@@ -11,6 +11,7 @@
 - 입력칸 내용은 자동 저장 (껐다 켜도 이어서 작성)
 - 생성·수정한 원고는 drafts/ 폴더에 자동 저장 (덮어쓸 때 이전 버전은 drafts/history/)
 """
+import difflib
 import os
 import re
 from datetime import datetime
@@ -23,7 +24,7 @@ from blog_materials import (make_material_note, suggest_topics, draft_from_mater
                             count_materials, split_notes, AUDIENCES, TONES, LENGTHS,
                             EXPERIENCE_FIELDS, EXPERIENCE_FIELD_MAX, EXPERIENCE_MIN_FIELDS,
                             EXPERIENCE_MIN_TOTAL, format_experience, experience_problem)
-from blog_own import package_own_draft, compare_with_notes, OWN_MIN_CHARS
+from blog_own import package_own_draft, compare_with_notes, edit_own_draft, EDIT_LEVELS, OWN_MIN_CHARS
 from blog_reviewer import (scan_cliches, scan_structure, scan_seo, scan_health_claims, scan_ai_patterns,
                            scan_experience_claims, scan_sections, readiness, own_texts,
                            review_draft, collect_issues, ai_issue, AI_REVIEW_LABELS)
@@ -43,7 +44,8 @@ OWN_BODY_MAX = 20000  # 내가 쓴 글 — 원고 최대 글자 수
 PLATFORM_CHOICES = ["네이버 블로그", "티스토리", "워드프레스"]
 MODE_MEMO = "✍️ 내 메모로 쓰기"
 MODE_MATERIALS = "📰 자료로 쓰기 (기사 링크·PDF·캡처)"
-MODE_OWN = "📝 내가 쓴 글 점검 (AI는 본문 안 고침)"
+MODE_OWN = "📝 내가 쓴 글 점검·다듬기"
+OLD_MODE_NAMES = {"📝 내가 쓴 글 점검 (AI는 본문 안 고침)": MODE_OWN}  # 예전 이름으로 자동 저장된 값
 MODES = [MODE_MEMO, MODE_MATERIALS, MODE_OWN]
 
 # 자동 저장하는 입력칸 (위젯 key → 기본값)
@@ -101,6 +103,8 @@ def init_state():
         "inputs": {},
         "sources_report": [], "ph_ver": {}, "uploader_ver": 0,
         "topic_ideas": [], "mat_report": [],
+        # 다듬기 되돌리기·바뀐 곳 보기용 {플랫폼명: …}
+        "undo": {}, "last_edit": {},
     }
     for key, value in defaults.items():
         st.session_state.setdefault(key, value)
@@ -108,6 +112,7 @@ def init_state():
     if "autosave_loaded" not in st.session_state:
         saved = load_autosave()
         # 예전 '내 의견·실무 경험' 한 칸(mat_opinion)에 적어둔 내용은 '실무에서 본 것' 칸으로 옮김
+        saved["mode"] = OLD_MODE_NAMES.get(saved.get("mode"), saved.get("mode"))
         if saved.get("mat_opinion") and not any(saved.get(k) for k in EXPERIENCE_FIELDS):
             saved["exp_seen"] = saved["mat_opinion"]
         # 화면에 안 보이는 입력칸(다른 작성 방식의 칸)은 Streamlit이 값을 지워버려서,
@@ -189,7 +194,35 @@ def remember_typed_numbers(old_text, new_text):
         st.session_state.inputs.setdefault("user_additions", []).append("직접 수정: " + " ".join(new_nums))
 
 
+def apply_edit(platform, old_draft, new_draft, label):
+    """다듬기 결과를 반영하고, 되돌리기·바뀐 곳 보기를 위해 이전 원고를 기억해 둔다."""
+    st.session_state.undo[platform] = old_draft
+    st.session_state.last_edit[platform] = {"label": label, "old": old_draft, "new": new_draft}
+    persist(platform, new_draft)
+
+
+def edit_history_ui(platform):
+    """방금 다듬기에서 바뀐 곳을 보여주고, 다듬기 전으로 되돌릴 수 있게 한다."""
+    edit = st.session_state.last_edit.get(platform)
+    if not edit or st.session_state.drafts.get(platform) != edit["new"]:
+        return
+    def sentences(draft):  # 문단 하나가 한 줄이라, 문장 단위로 쪼개야 바뀐 곳만 보임
+        body = parse_draft_metadata(draft)["body"]
+        return [x for line in body.split("\n") for x in re.split(r"(?<=[.!?])\s+", line.strip()) if x]
+    diff = [l for l in difflib.unified_diff(sentences(edit["old"]), sentences(edit["new"]), lineterm="", n=0)
+            if not l.startswith(("---", "+++", "@@"))]
+    changed = sum(1 for l in diff if l.startswith("+"))
+    with st.expander(f"🔍 방금 다듬기({edit['label']})에서 바뀐 곳 — 문장 {changed}개", expanded=True):
+        st.caption("빨간 줄(-)이 원래 문장, 초록 줄(+)이 바뀐 문장이야. 마음에 안 들면 아래 버튼으로 되돌려.")
+        st.code("\n".join(diff) or "(본문은 그대로 — 제목·요약 등만 바뀜)", language="diff")
+        if st.button("↩️ 다듬기 전으로 되돌리기", key=f"undo_{platform}"):
+            persist(platform, st.session_state.undo.pop(platform))
+            st.session_state.last_edit.pop(platform, None)
+            st.rerun()
+
+
 def finish_generation(drafts, filenames, inputs, keyword):
+    st.session_state.undo, st.session_state.last_edit = {}, {}
     st.session_state.drafts = drafts
     st.session_state.filenames = filenames
     st.session_state.target_keyword = keyword
@@ -209,7 +242,7 @@ def new_draft_path(platform):
 def reset_all():
     for key in ("questions", "sources_report", "topic_ideas", "mat_report", "mat_done"):
         st.session_state[key] = []
-    for key in ("drafts", "filenames", "reviews", "inputs", "mat_raw"):
+    for key in ("drafts", "filenames", "reviews", "inputs", "mat_raw", "undo", "last_edit"):
         st.session_state[key] = {}
     st.session_state.target_keyword = ""
     mode = st.session_state.get("mode", MODE_MEMO)
@@ -268,6 +301,7 @@ def load_draft_cb():
     }
     st.session_state.drafts = {platform: info["draft"]}
     st.session_state.filenames = {platform: path}
+    st.session_state.undo, st.session_state.last_edit = {}, {}
     st.session_state.target_keyword = info["keyword"]
     st.session_state.inputs = inputs
     st.session_state.reviews = {}
@@ -699,9 +733,11 @@ if mode == MODE_MATERIALS:
 # ─────────────────────────────────────────────
 elif mode == MODE_OWN:
     st.info(
-        "내가 직접 쓴 원고를 붙여넣으면 AI는 **본문을 한 글자도 고치지 않고** 제목 후보·메타설명·요약 박스·"
-        "목차·사진 자리와 ALT(·FAQ)만 만들어 붙이고 점검해. 자료 노트가 있으면 원고의 수치·사실이 "
-        "자료와 **다르게 쓰인 곳**만 찾아줘."
+        "내가 직접 쓴 원고를 붙여넣으면, 먼저 **본문은 그대로 둔 채** 제목 후보·메타설명·요약 박스·"
+        "목차·사진 자리와 ALT(·FAQ)를 만들어 붙이고 점검해. 자료 노트가 있으면 원고의 수치·사실이 "
+        "자료와 **다르게 쓰인 곳**도 찾아줘.\n\n"
+        "그다음 결과 화면 맨 아래 **✨ 내 글 다듬기**에서 원할 때만 ① 맞춤법·오타만 ② 구조 정리(소제목·문단 순서) 중 "
+        "골라 고칠 수 있어 — 바뀐 곳을 보여주고, 마음에 안 들면 되돌릴 수 있어."
     )
 
     st.subheader("1️⃣ 내 원고")
@@ -1064,11 +1100,35 @@ if st.session_state.drafts:
 
             # ── 다듬기 ──
             st.divider()
+            edit_history_ui(platform)
             if inputs.get("mode") == "own":
-                st.subheader("✏️ 고치기")
-                st.info("'내가 쓴 글 점검' 모드에서는 AI가 본문을 고치지 않아. 위 점검 결과를 보고 본문 칸에서 직접 "
-                        "고친 뒤 💾 저장하면, 점검이 다시 돌아가. (제목·요약 같은 포장만 다시 만들려면 위에서 "
-                        "'🧩 제목·요약·목차 만들고 점검하기'를 한 번 더 누르면 돼)")
+                st.subheader("✨ 내 글 다듬기")
+                st.caption(
+                    "고칠 범위를 골라. 처음엔 '맞춤법·오타만'을 추천해 — 내 문장이 그대로 남아서 '내 글'의 장점이 살아. "
+                    "글이 길고 흐름이 오락가락하면 '구조 정리'를 써. 어느 쪽이든 원고에 없는 사실·숫자·경험은 보태지 않고, "
+                    "바뀐 곳을 보여주고 되돌릴 수 있어. 누르면 Claude를 1번 호출해."
+                )
+                level = st.radio("다듬기 범위", list(EDIT_LEVELS), format_func=EDIT_LEVELS.get,
+                                 key=f"edit_level_{platform}")
+                request = st.text_input("추가로 바라는 점 (선택)", key=f"note_{platform}",
+                                        placeholder="예) 마지막 문단의 내 결론은 꼭 그대로 둬 / 소제목은 질문형으로")
+                if st.button("✨ 내 글 다듬기", key=f"own_edit_{platform}", type="primary"):
+                    with st.spinner(f"⏳ {EDIT_LEVELS[level].split(' (')[0]} 하는 중..."):
+                        try:
+                            edited = edit_own_draft(draft, level, st.session_state.target_keyword, request)
+                        except Exception as e:
+                            edited = ""
+                            st.error(f"❌ 다듬기 실패: {e}\n(네트워크 문제일 수 있어 — 다시 눌러봐)")
+                    if edited and edited.strip() == draft.strip():
+                        st.info("고칠 곳이 없대 — 이미 깔끔한 원고야.")
+                    elif edited:
+                        if not parse_draft_metadata(edited)["title"]:
+                            st.error("❌ 다듬은 결과의 형식이 깨져서 반영하지 않았어. 다시 눌러봐.")
+                        else:
+                            if request.strip():
+                                inputs.setdefault("notes", []).append(request.strip())
+                            apply_edit(platform, draft, edited, EDIT_LEVELS[level].split(" (")[0])
+                            st.rerun()
             else:
                 st.subheader("✨ 점검 반영해서 다듬기")
                 issues = collect_issues(review)
@@ -1106,7 +1166,7 @@ if st.session_state.drafts:
                         elif revised:
                             if author_note.strip():
                                 inputs.setdefault("notes", []).append(author_note.strip())
-                            persist(platform, revised)
+                            apply_edit(platform, draft, revised, "점검 반영")
                             st.rerun()
 
             st.caption("참고: 이건 'AI 티/가독성' 체크일 뿐, 이 플랫폼 자체 검색 알고리즘 점수는 아니야.")
