@@ -3,6 +3,7 @@
 blog_app.py
 blog_drafter.py
 blog_factcheck.py
+blog_keywords.py
 blog_materials.py
 blog_own.py
 blog_reviewer.py

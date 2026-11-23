@@ -7,6 +7,7 @@
 - 📰 자료로 쓰기: 기사 링크·PDF·캡처를 읽어 '자료 노트'로 정리 → 주제 제안 → 원고 작성
   (구조 편집·재작성·표/목록·SEO·검수 표시까지, 워드프레스 블록 에디터용 HTML 출력)
 
+- 타깃 키워드 칸 아래 '구글 자동완성으로 키워드 찾기': 실제 검색어 모으기 → 키워드 플래너용 목록·상위 글 확인 링크
 - 왼쪽 사이드바: 내 문체 샘플(저장하면 모든 초안·다듬기에 반영), 저장된 원고 불러오기
 - 입력칸 내용은 자동 저장 (껐다 켜도 이어서 작성)
 - 생성·수정한 원고는 drafts/ 폴더에 자동 저장 (덮어쓸 때 이전 버전은 drafts/history/)
@@ -24,6 +25,7 @@ from blog_materials import (make_material_note, suggest_topics, draft_from_mater
                             count_materials, split_notes, AUDIENCES, TONES, LENGTHS,
                             EXPERIENCE_FIELDS, EXPERIENCE_FIELD_MAX, EXPERIENCE_MIN_FIELDS,
                             EXPERIENCE_MIN_TOTAL, format_experience, experience_problem)
+from blog_keywords import expand_keyword, google_search_url
 from blog_own import package_own_draft, compare_with_notes, edit_own_draft, EDIT_LEVELS, OWN_MIN_CHARS
 from blog_reviewer import (scan_cliches, scan_structure, scan_seo, scan_health_claims, scan_ai_patterns,
                            scan_experience_claims, scan_sections, readiness, own_texts,
@@ -419,13 +421,62 @@ if "티스토리" in platforms and "워드프레스" in platforms:
     st.warning("**중복 콘텐츠 주의** — 같은 주제를 티스토리와 워드프레스에 둘 다 올리면 내용이 거의 같아서, 구글이 하나만 검색에 보여주고 나머지는 거의 숨겨 — 두 블로그가 서로 경쟁하게 돼. 원칙은 '한 주제는 한 블로그'. 굳이 둘 다 쓸 거면 주제나 관점을 확실히 나눠서 (예: 소비자 관점 / 실무자 관점) 따로 생성해.")
 
 
+def use_suggestion_cb():
+    pick = st.session_state.get("ac_pick")
+    if pick:
+        set_input("kw_input", pick)
+
+
+def keyword_suggest_ui(keyword, topic=""):
+    """구글 자동완성으로 실제 검색어를 모아 보여주고, 골라서 타깃 키워드로 쓰게 한다."""
+    with st.expander("🔎 구글 자동완성으로 키워드 찾기 (무료) · 상위 글 확인"):
+        st.caption(
+            "사람들이 구글 검색창에 **실제로 이어서 치는 검색어**를 모아줘 (방법·차이·기준·부작용 등으로 넓혀서). "
+            "검색량은 안 나오니까, 아래 목록을 복사해서 구글 키워드 플래너 → '검색량 및 예측 가져오기'에 붙여넣어 확인해. "
+            "AI 비용 없음 · 10~20초 걸려."
+        )
+        seed = st.text_input("기본 검색어", key="ac_seed",
+                             placeholder=keyword.strip() or topic.strip() or "예: 유산균 보장균수")
+        seed = seed.strip() or keyword.strip() or topic.strip()
+        if st.button("🔎 자동완성 불러오기", key="ac_run", disabled=not seed):
+            with st.spinner(f"구글 자동완성 모으는 중... ({seed})"):
+                try:
+                    st.session_state.ac_result = {"seed": seed, **expand_keyword(seed)}
+                except Exception as e:
+                    st.session_state.ac_result = None
+                    st.error(f"❌ {e}\n인터넷 연결을 확인하고, 잠시 뒤 다시 눌러봐. "
+                             "(구글이 짧은 시간에 여러 번 물어보면 잠깐 막을 때가 있어)")
+
+        result = st.session_state.get("ac_result")
+        if result:
+            if not result["all"]:
+                st.info(f"'{result['seed']}'로는 자동완성이 거의 없어 — 검색하는 사람이 적은 표현일 수 있어. "
+                        "더 짧거나 흔한 말로 바꿔서 다시 해봐.")
+            else:
+                st.markdown(f"**'{result['seed']}' 관련 검색어 {len(result['all'])}개**")
+                for group, items in result["groups"].items():
+                    st.markdown(f"{group}: " + " · ".join(items))
+                if result.get("failed"):
+                    st.caption(f"(일부 {result['failed']}번은 못 불러와서 빠졌어)")
+                st.selectbox("타깃 키워드로 쓸 검색어", result["all"], key="ac_pick")
+                st.button("✅ 이 검색어를 타깃 키워드로", key="ac_use", on_click=use_suggestion_cb)
+                st.caption("키워드 플래너에 붙여넣을 목록 (오른쪽 위 복사 버튼):")
+                st.code("\n".join([result["seed"]] + result["all"]), language=None)
+
+        if keyword.strip():
+            st.link_button(f"🌐 구글에서 '{keyword.strip()}' 검색해서 상위 글 보기", google_search_url(keyword.strip()))
+            st.caption("상위 10개가 공공기관·대형 언론·백과사전 위주면 경쟁이 세고, 오래된 글·얕은 블로그 글·"
+                       "질문에 제대로 답 안 하는 글이 섞여 있으면 기회야. (시크릿 창에서 보면 더 정확해)")
+
+
 def keyword_inputs():
     topic = st.text_input("주제", key="topic", placeholder="예: 홈쇼핑 유산균 표시광고, 뭐가 문제인가")
     keyword = st.text_input(
         "타깃 키워드 (이 글로 잡고 싶은 검색어 — 비우면 AI가 고름)", key="kw_input",
         placeholder="예: 유산균 보장균수",
-        help="구글 검색창에 주제를 쳐보고 자동완성에 뜨는 검색어 중 하나를 고르면 좋아.",
+        help="아래 '구글 자동완성으로 키워드 찾기'에서 실제 검색어를 골라 쓰면 좋아.",
     )
+    keyword_suggest_ui(keyword, topic)
     return topic, keyword
 
 
@@ -750,6 +801,7 @@ elif mode == MODE_OWN:
         "타깃 키워드 (이 글로 잡고 싶은 검색어 — 비우면 AI가 원고에서 고름)", key="kw_input",
         placeholder="예: 혈당 영양제 기능성 문구",
     )
+    keyword_suggest_ui(own_keyword)
 
     st.subheader("2️⃣ 근거 자료 (선택)")
     st.caption("원고에서 인용한 기사·PDF를 넣으면, 원고의 수치·사실이 자료와 다르게 쓰인 곳을 찾아줘. "
