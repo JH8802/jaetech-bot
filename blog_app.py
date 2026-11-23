@@ -199,10 +199,12 @@ def remember_typed_numbers(old_text, new_text):
         st.session_state.inputs.setdefault("user_additions", []).append("직접 수정: " + " ".join(new_nums))
 
 
-def apply_edit(platform, old_draft, new_draft, label):
-    """다듬기 결과를 반영하고, 되돌리기·바뀐 곳 보기를 위해 이전 원고를 기억해 둔다."""
+def apply_edit(platform, old_draft, new_draft, label, notes=None):
+    """다듬기 결과를 반영하고, 되돌리기·바뀐 곳 보기를 위해 이전 원고를 기억해 둔다.
+    notes: 화면에 같이 보여줄 단계별 안내 (예: '맞춤법: 고칠 곳 없음')"""
     st.session_state.undo[platform] = old_draft
-    st.session_state.last_edit[platform] = {"label": label, "old": old_draft, "new": new_draft}
+    st.session_state.last_edit[platform] = {"label": label, "old": old_draft, "new": new_draft,
+                                            "notes": notes or []}
     persist(platform, new_draft)
 
 
@@ -218,7 +220,10 @@ def edit_history_ui(platform):
             if not l.startswith(("---", "+++", "@@"))]
     changed = sum(1 for l in diff if l.startswith("+"))
     with st.expander(f"🔍 방금 다듬기({edit['label']})에서 바뀐 곳 — 문장 {changed}개", expanded=True):
-        st.caption("빨간 줄(-)이 원래 문장, 초록 줄(+)이 바뀐 문장이야. 마음에 안 들면 아래 버튼으로 되돌려.")
+        st.caption("빨간 줄(-)이 원래 문장, 초록 줄(+)이 바뀐 문장이야. 마음에 안 들면 아래 버튼으로 되돌려 "
+                   "(여러 단계를 한 번에 돌렸으면 전부 되돌아가).")
+        for note in edit.get("notes", []):
+            st.caption(f"ℹ️ {note}")
         st.code("\n".join(diff) or "(본문은 그대로 — 제목·요약 등만 바뀜)", language="diff")
         if st.button("↩️ 다듬기 전으로 되돌리기", key=f"undo_{platform}"):
             persist(platform, st.session_state.undo.pop(platform))
@@ -1168,61 +1173,75 @@ if st.session_state.drafts:
             st.divider()
             edit_history_ui(platform)
             is_own = inputs.get("mode") == "own"
+            mode_key = inputs.get("mode", "memo")
             issues = [] if is_own else collect_issues(review)
-            levels = {**({} if is_own else {"review": f"🩺 점검 지적 반영 (지적된 {len(issues)}건 고치기)"}), **EDIT_LEVELS}
+            # 실행 순서: 점검 지적 반영 → 구조 정리 → 맞춤법 (맞춤법은 문장이 다 정해진 뒤 마지막에)
+            levels = {**({} if is_own else {"review": f"🩺 점검 지적 반영 (지적된 {len(issues)}건 고치기)"}),
+                      "structure": EDIT_LEVELS["structure"], "proofread": EDIT_LEVELS["proofread"]}
             st.subheader("✨ 다듬기")
             st.caption(
-                ("AI 초안이면 먼저 '점검 지적 반영'으로 지적된 곳을 고치고, 본문을 직접 손본 뒤 마지막에 "
-                 "'맞춤법·오타만'을 한 번 돌리는 걸 추천해. " if not is_own else
-                 "처음엔 '맞춤법·오타만'을 추천해 — 내 문장이 그대로 남아서 '내 글'의 장점이 살아. ")
-                + "글이 길고 흐름이 오락가락하면 '구조 정리'를 써. 어느 쪽이든 원고·재료에 없는 사실·숫자·경험은 "
-                "보태지 않고, 바뀐 곳을 보여주고 되돌릴 수 있어. 누르면 Claude를 1번 호출해."
+                "여러 개를 같이 골라도 돼 — 고른 것들을 **점검 지적 반영 → 구조 정리 → 맞춤법** 순서로 차례대로 돌려. "
+                "하나 고를 때마다 Claude를 1번씩 호출해 (3개 다 고르면 3번). 어느 쪽이든 원고·재료에 없는 "
+                "사실·숫자·경험은 보태지 않고, 바뀐 곳을 보여주고 한 번에 되돌릴 수 있어."
+                + ("" if not is_own else " 처음엔 '맞춤법·오타만'을 추천해 — 내 문장이 그대로 남아.")
             )
-            level = st.radio("다듬기 범위", list(levels), format_func=levels.get,
-                             key=f"edit_level_{inputs.get('mode', 'memo')}_{platform}")
-            if level == "review":
+            default_on = "proofread" if is_own else "review"
+            picked = [lvl for lvl, text in levels.items()
+                      if st.checkbox(text, value=(lvl == default_on), key=f"edit_{lvl}_{mode_key}_{platform}")]
+            if "review" in picked:
                 request = st.text_area(
                     "추가 메모 (선택) — 지적을 해결할 구체적인 사실·사례·의견이 있으면 적어줘",
                     height=90, key=f"note_{platform}",
                     placeholder="예) 구체성 부족 지적 → 지난달 점검한 A제품은 균주명 없이 '500억 보장'만 표기돼 있었음",
+                    help="'점검 지적 반영' 단계에서 글에 반영돼. 구조 정리·맞춤법 단계는 새 내용을 넣지 않아.",
                 )
             else:
                 request = st.text_area("추가로 바라는 점 (선택)", height=68, key=f"note_{platform}",
                                        placeholder="예) 마지막 문단의 내 결론은 꼭 그대로 둬 / 소제목은 질문형으로")
-            label = levels[level].split(" (")[0]
-            if st.button("✨ 다듬기 실행", key=f"revise_{platform}", type="primary"):
-                edited = ""
-                if level == "review" and not issues and not request.strip():
-                    st.info("지적된 부분도 추가 메모도 없어서 다듬을 게 없어. '맞춤법·오타만'이나 '구조 정리'를 골라봐.")
-                else:
-                    with st.spinner(f"⏳ {label} 하는 중..."):
+            if st.button("✨ 다듬기 실행", key=f"revise_{platform}", type="primary", disabled=not picked):
+                current, done, notes = draft, [], []
+                for i, lvl in enumerate(picked, 1):
+                    label = levels[lvl].split(" (")[0]
+                    if lvl == "review" and not issues and not request.strip():
+                        notes.append(f"{label}: 지적된 부분도 추가 메모도 없어서 건너뜀")
+                        continue
+                    with st.spinner(f"⏳ ({i}/{len(picked)}) {label} 하는 중..."):
                         try:
-                            if level == "review":
+                            if lvl == "review":
                                 edited = revise_draft(
-                                    draft, issues, inputs.get("key_points", []),
+                                    current, issues, inputs.get("key_points", []),
                                     sources=inputs.get("sources"),
                                     personal_take=inputs.get("personal_take", ""),
                                     author_note=request.strip(), platform=platform,
                                     target_keyword=st.session_state.target_keyword,
                                 )
                             else:
-                                edited = edit_own_draft(draft, level, st.session_state.target_keyword, request)
+                                # 추가 메모가 '사실'일 때(점검 반영용)는 구조·맞춤법 단계에 넘기지 않음
+                                edited = edit_own_draft(current, lvl, st.session_state.target_keyword,
+                                                        "" if "review" in picked else request)
                         except Exception as e:
-                            st.error(f"❌ 다듬기 실패: {e}\n(네트워크 문제일 수 있어 — 다시 눌러봐)")
-                if edited and edited.strip() == draft.strip():
-                    st.info(
-                        "수정본이 이전 원고와 똑같아 — 지적된 부분을 AI가 재료 없이는 고칠 수 없다고 판단한 거야. "
-                        "위 '추가 메모'에 그 지적을 해결할 사실·사례·기준을 적고 다시 눌러봐."
-                        if level == "review" else "고칠 곳이 없대 — 이미 깔끔한 원고야."
-                    )
-                elif edited:
-                    if not parse_draft_metadata(edited)["title"]:
-                        st.error("❌ 다듬은 결과의 형식이 깨져서 반영하지 않았어. 다시 눌러봐.")
-                    else:
-                        if request.strip():
-                            inputs.setdefault("notes", []).append(request.strip())
-                        apply_edit(platform, draft, edited, label)
-                        st.rerun()
+                            notes.append(f"{label}: 실패해서 여기서 멈춤 ({e})")
+                            break
+                    if not edited or not parse_draft_metadata(edited)["title"]:
+                        notes.append(f"{label}: 결과 형식이 깨져서 반영 안 하고 여기서 멈춤")
+                        break
+                    if edited.strip() == current.strip():
+                        notes.append(f"{label}: 바꿀 곳이 없었음" + (
+                            " — 재료 없이는 못 고치는 지적이면 '추가 메모'에 사실·사례를 적고 다시 해봐"
+                            if lvl == "review" else ""))
+                        continue
+                    current = edited
+                    done.append(label)
+                if current.strip() == draft.strip():
+                    for note in notes:
+                        st.info(note)
+                    if not notes:
+                        st.info("바뀐 곳이 없어 — 이미 깔끔한 원고야.")
+                else:
+                    if request.strip():
+                        inputs.setdefault("notes", []).append(request.strip())
+                    apply_edit(platform, draft, current, " + ".join(done), notes)
+                    st.rerun()
 
             st.caption("참고: 이건 'AI 티/가독성' 체크일 뿐, 이 플랫폼 자체 검색 알고리즘 점수는 아니야.")
 
