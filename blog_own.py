@@ -89,10 +89,12 @@ def package_own_draft(own_text, target_keyword="", platform="워드프레스", w
 타깃 키워드: {target_keyword or "(지정 안 함 — 원고 내용에서 사람들이 실제로 검색할 법한 검색어 하나를 골라 기준으로)"}
 
 만들 것 (모두 원고에 있는 내용만 근거로. 원고에 없는 사실·수치·경험을 보태지 마):
-- "title": 타깃 키워드를 자연스럽게 한 번 넣은 제목, 20~30자, 낚시성 과장 금지
+- "title": 초점 키프레이즈를 글자 그대로 한 번 넣은 제목(가능하면 앞쪽에), 20~30자, 낚시성 과장 금지
 - "title_candidates": 다른 각도의 제목 후보 2개
 - "category": {category_rule()}
-- "meta_description": 검색결과 설명 1~2문장, 120~155자, 타깃 키워드 포함, 원고의 핵심만
+- "focus_keyphrase": 초점 키프레이즈 — 타깃 키워드를 글자 그대로 (지정 안 했으면 네가 고른 검색어)
+- "meta_description": 검색결과 설명 1~2문장, 120~155자, 원고의 핵심만. 초점 키프레이즈를 글자 그대로 1번 넣고,
+  마지막 단어에 조사를 바로 붙이지 마 ("…보장균수는"(X) → "유산균 보장균수 기준", "유산균 보장균수, "(O))
 - "slug": 영문 소문자 단어 3~6개를 하이픈으로 연결
 - "tags": 태그 목록 — {tag_rule(platform)}
 - "summary": "한눈에 보기" 요약 3~4개. 원고 핵심을 한 줄씩, 숫자는 원고에 있는 그대로
@@ -103,7 +105,7 @@ def package_own_draft(own_text, target_keyword="", platform="워드프레스", w
 - 질병 치료·예방으로 읽힐 수 있는 표현은 제목·설명·요약·FAQ 어디에도 쓰지 마.
 
 반드시 아래 JSON 하나만 출력해. 다른 설명 없이.
-{{"title": "", "title_candidates": ["", ""], "category": "", "meta_description": "", "slug": "",
+{{"title": "", "title_candidates": ["", ""], "category": "", "focus_keyphrase": "", "meta_description": "", "slug": "",
  "tags": [""], "summary": [""], "headings": [{{"before": 2, "text": ""}}],
  "photos": [{{"after": 1, "desc": "", "alt": "", "filename": ""}}], "faq": [{{"q": "", "a": ""}}]}}
 
@@ -191,6 +193,9 @@ def assemble_own_draft(items, data, use_ai_headings=True):
     head += [f"[카테고리] {_clean(data.get('category'), 40)}",
              f"[메타설명] {_clean(data.get('meta_description'), 200)}",
              f"[주소] {re.sub(r'[^a-z0-9-]', '', str(data.get('slug', '')).lower())}"]
+    focus = _clean(data.get("focus_keyphrase"), 60)
+    if focus:
+        head.append(f"[초점 키프레이즈] {focus}")
     return "\n".join(head) + "\n\n" + "\n\n".join(body) + f"\n\n[태그] {tags}"
 
 
@@ -238,7 +243,7 @@ EDIT_LEVELS = {
 }
 
 _FORMAT_RULE = """형식 규칙 (반드시 지켜):
-- 맨 위 [제목] [제목 후보] [카테고리] [메타설명] [주소] 줄과 맨 끝 [태그] 줄은 그대로 둬.
+- 맨 위 [제목] [제목 후보] [카테고리] [메타설명] [주소] [초점 키프레이즈] 줄과 맨 끝 [태그] 줄은 그대로 둬.
 - [요약]…[요약 끝], [목차], [소제목], [사진 제안], [원문 카드: …], [출처 필요], [추가 필요], [검수] 같은
   대괄호 표시는 지우거나 바꾸지 마 (구조 정리 단계에서 소제목 문구·[요약] 내용은 고쳐도 됨).
 - 마크다운 기호(#, * 등)는 쓰지 마.
@@ -263,7 +268,12 @@ def edit_own_draft(draft, level, target_keyword="", request=""):
 - 너무 긴 문단은 나누고, 문단을 잇는 짧은 연결 문장 정도만 새로 써도 돼.
 - 저자 문장을 새로 쓰지 말고 그대로 옮기는 게 기본이야. 고친다면 연결·중복 제거·오타 수정에 필요한 만큼만.
 - 원고에 없는 사실·숫자·사례·경험은 절대 보태지 마. 빼는 건 반복되는 문장만.
-- [요약] 박스 내용은 정리된 본문에 맞게 고쳐도 돼."""
+- [요약] 박스 내용은 정리된 본문에 맞게 고쳐도 돼.
+- 20어절(띄어쓰기 단위)이 넘는 긴 문장은 두 문장으로 끊어 (내용·말투는 그대로).""" + (f"""
+- 초점 키프레이즈 "{target_keyword}": 첫 문단의 첫 두 문장 안에 글자 그대로 1번, 본문 전체에 3회 이상 되게 맞춰.
+  새 문장을 보태지 말고, 저자 문장 속 같은 뜻의 표현을 키프레이즈 글자 그대로 바꾸는 방식으로.
+  마지막 단어에 조사를 바로 붙이지 마 ("…보장균수는"(X) → "유산균 보장균수 기준은"(O))."""
+                                        if target_keyword else "")
     extra = f"\n\n저자가 추가로 바라는 점: {request.strip()}" if request.strip() else ""
     prompt = f"{task}{extra}\n\n{_FORMAT_RULE}\n\n[원고]\n{draft}"
     return create_text(client, model="claude-sonnet-5-5", max_tokens=16000,

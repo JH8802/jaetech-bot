@@ -16,7 +16,7 @@ from datetime import datetime
 import anthropic
 from dotenv import load_dotenv
 
-from blog_drafter import (AI_HABITS_RULE, OPENING_STYLES, PLATFORM_STYLE_HINTS, _style_block,
+from blog_drafter import (AI_HABITS_RULE, READABILITY_RULE, CITATION_RULE, keyphrase_rule, OPENING_STYLES, PLATFORM_STYLE_HINTS, _style_block,
                           category_rule, tag_rule)
 from blog_sources import (fetch_url, IMAGE_TYPES, MAX_IMAGE_BYTES, MAX_PDF_BYTES, _HWP_HINT)
 from blog_style_guide import STYLE_GUIDE
@@ -78,6 +78,7 @@ def _note_prompt(where, name, topic, page_rule=""):
 {topic_hint}
 형식 (이 형식만 출력):
 출처: 매체·기관명 / 문서·기사 제목 / 날짜(있으면)
+  (논문이면 → 출처: 저널명 / 논문 제목(원어 그대로) / 제1저자 외 / 발행 연도(권·호가 보이면 함께) — 자료에 보이는 것만)
 - 핵심 사실 1
 - 핵심 사실 2
 … (사실·수치 위주로 6~12개, 전체 {NOTE_MAX_CHARS}자 이내)
@@ -246,8 +247,9 @@ def draft_from_materials(notes_text, topic, target_keyword="", audience="", tone
 3. [카테고리] {category_rule()}
 4. [메타설명] 검색결과 설명용 1~2문장, 120~155자, 타깃 키워드 포함
 5. [주소] 영문 슬러그 (소문자 단어 3~6개, 하이픈 연결)
+   [초점 키프레이즈] 타깃 키워드를 글자 그대로 (지정 안 했으면 네가 고른 검색어)
 6. 본문:
-   - 도입부: 독자가 왜 이 글을 읽어야 하는지 바로 보여주는 2~4문장. 첫 2~3문장 안에 타깃 키워드.
+   - 도입부: 독자가 왜 이 글을 읽어야 하는지 바로 보여주는 2~4문장. 첫 두 문장 안에 초점 키프레이즈를 글자 그대로.
      도입 방식: {random.choice(OPENING_STYLES)}. 인사말·"요즘/최근" 시작 금지.
    - 도입부 바로 다음에 핵심 요약 박스:
      [요약]
@@ -280,6 +282,7 @@ def draft_from_materials(notes_text, topic, target_keyword="", audience="", tone
   큰따옴표로 한 문장 이내, 글 전체에서 2번 이하, 출처와 함께.
 - 수치·사실을 쓸 때는 문장 안에서 출처를 밝혀 (예: "○○신문(2026.5) 보도에 따르면", "식약처 고시(p.3)에 따르면").
   각주·링크 목록 형식은 쓰지 마.
+{CITATION_RULE}
 - 숫자는 자료 노트에 있는 그대로. 단위 환산·합산 같은 계산을 새로 하지 마 (꼭 필요하면 계산식을 함께 보여줘).
 - 검수 표시 — 판단이 필요한 자리에 독립된 줄이나 문장 끝에 [검수: 이유] 로 남겨:
   · 자료 속 효능·효과 주장이 건강기능식품 인정 범위를 벗어났을 수 있으면 → 글에서는 "~라고 광고했다"처럼
@@ -287,7 +290,10 @@ def draft_from_materials(notes_text, topic, target_keyword="", audience="", tone
   · 자료끼리 숫자·사실이 서로 다르면 → 둘 다 출처와 함께 쓰고 [검수: 자료 충돌 — 자료 1은 X, 자료 2는 Y]
   · 근거가 필요한 주장인데 자료 노트에 출처가 없으면 → [출처 필요: 어떤 근거]
 - 규제·기준·가격처럼 바뀔 수 있는 정보가 처음 나오는 문단에 "{today.year}년 {today.month}월 기준"을 한 번 밝혀.
-{AI_HABITS_RULE}"""
+{AI_HABITS_RULE}
+{READABILITY_RULE}
+
+{keyphrase_rule(target_keyword, length)}"""
 
     return create_text(
         client,

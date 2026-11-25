@@ -79,7 +79,7 @@ INPUT_CHOICES = {"mode": MODES, "mat_audience": AUDIENCES,
 INPUT_LIMITS = {"key_points_text": KEY_POINTS_MAX, "personal_take_text": PERSONAL_TAKE_MAX,
                 "own_body": OWN_BODY_MAX, **{k: EXPERIENCE_FIELD_MAX for k in EXPERIENCE_FIELDS}}
 # 원고 탭의 입력칸 key 앞부분 — 원고 내용이 바뀌면 지워야 새 내용으로 다시 채워짐
-FIELD_PREFIXES = ("title", "category", "tags", "meta", "slug", "body", "note")
+FIELD_PREFIXES = ("title", "category", "tags", "meta", "slug", "focus", "body", "note")
 
 
 # ─────────────────────────────────────────────
@@ -175,6 +175,7 @@ def current_meta(platform, meta):
         "tags": ss.get(f"tags_{platform}", meta["tags"]),
         "meta_description": ss.get(f"meta_{platform}", meta["meta_description"]),
         "slug": ss.get(f"slug_{platform}", meta["slug"]),
+        "focus_keyphrase": ss.get(f"focus_{platform}", meta.get("focus_keyphrase", "")),
         "body": ss.get(f"body_{platform}", meta["body"]),
     }
 
@@ -941,6 +942,14 @@ if st.session_state.drafts:
             st.text_input("제목", meta["title"], key=f"title_{platform}")
             if meta.get("title_candidates"):
                 st.caption("💡 다른 제목 후보: " + " · ".join(f"「{t}」" for t in meta["title_candidates"].split(" / ")))
+            if platform in ("워드프레스", "티스토리"):
+                st.text_input(
+                    "초점 키프레이즈 (워드프레스 Yoast SEO의 '초점 키프레이즈' 칸에 — 이 글로 잡을 검색어)"
+                    if platform == "워드프레스" else "초점 키프레이즈 (이 글로 잡을 검색어 — 점검 기준)",
+                    meta.get("focus_keyphrase", "") or st.session_state.target_keyword, key=f"focus_{platform}",
+                    help="제목·메타설명·첫 문단에 글자 그대로 들어가 있는지, 본문에 몇 번 나오는지를 점검 결과에서 봐. "
+                         "'유산균 보장균수는'처럼 조사가 바로 붙으면 Yoast가 인정하지 않아서, 점검도 똑같이 세.",
+                )
             col1, col2 = st.columns(2)
             with col1:
                 st.text_input("카테고리", meta["category"], key=f"category_{platform}")
@@ -1213,11 +1222,12 @@ if st.session_state.drafts:
                                     sources=inputs.get("sources"),
                                     personal_take=inputs.get("personal_take", ""),
                                     author_note=request.strip(), platform=platform,
-                                    target_keyword=st.session_state.target_keyword,
+                                    target_keyword=meta.get("focus_keyphrase") or st.session_state.target_keyword,
                                 )
                             else:
                                 # 추가 메모가 '사실'일 때(점검 반영용)는 구조·맞춤법 단계에 넘기지 않음
-                                edited = edit_own_draft(current, lvl, st.session_state.target_keyword,
+                                edited = edit_own_draft(current, lvl,
+                                                        meta.get("focus_keyphrase") or st.session_state.target_keyword,
                                                         "" if "review" in picked else request)
                         except Exception as e:
                             notes.append(f"{label}: 실패해서 여기서 멈춤 ({e})")
@@ -1278,7 +1288,8 @@ if st.session_state.drafts:
                     f"- 제목란에 위 제목 그대로\n"
                     f"- 카테고리: **{meta['category']}**\n"
                     f"- 태그: **{meta['tags']}**\n"
-                    f"- SEO 플러그인(Yoast 등)의 메타 설명 칸에 위 메타 설명 붙여넣기\n"
+                    f"- Yoast SEO의 **초점 키프레이즈** 칸에: **{meta.get('focus_keyphrase') or st.session_state.target_keyword}**\n"
+                    f"- Yoast SEO의 메타 설명 칸에 위 메타 설명 붙여넣기\n"
                     f"- 오른쪽 설정 패널의 고유주소(URL/슬러그) 칸에: **{meta['slug']}**\n"
                     "- 본문: 위 🧩 HTML 버전을 복사 → ⋮ 메뉴 → '코드 편집기'에 붙여넣기\n\n"
                     "**사진 삽입 + ALT 입력**: 📌 사진 자리에 이미지 블록을 추가하고 사진을 업로드 → "

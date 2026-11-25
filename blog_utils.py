@@ -63,6 +63,7 @@ METADATA_TAGS = {
     "[주소]": "slug",
     "[태그]": "tags",
     "[제목 후보]": "title_candidates",  # 자료로 쓰기 모드 — 여러 줄이면 " / "로 이어 붙임
+    "[초점 키프레이즈]": "focus_keyphrase",  # 워드프레스 Yoast SEO의 '초점 키프레이즈' 칸에 넣을 검색어
 }
 
 
@@ -91,6 +92,61 @@ def parse_draft_metadata(draft):
 
     meta["body"] = "\n".join(body_lines).strip()
     return meta
+
+
+_WORD_CHAR = r"[0-9A-Za-z가-힣]"
+
+
+def _keyphrase_pattern(keyphrase, exact=True):
+    words = [re.escape(w) for w in (keyphrase or "").split()]
+    if not words:
+        return None
+    tail = f"(?!{_WORD_CHAR})" if exact else ""
+    return re.compile(f"(?<!{_WORD_CHAR})" + r"\s*".join(words) + tail, re.IGNORECASE)
+
+
+def count_keyphrase(text, keyphrase, exact=True):
+    """초점 키프레이즈가 몇 번 나오는지.
+    exact=True: Yoast SEO처럼 글자 그대로 + 바로 뒤에 조사 없이 (띄어쓰기·문장부호가 오는 것)만 셈
+                ('유산균 보장균수 기준' O, '유산균 보장균수는' X)
+    exact=False: 조사가 붙은 것까지 셈"""
+    pattern = _keyphrase_pattern(keyphrase, exact)
+    return len(pattern.findall(text or "")) if pattern else 0
+
+
+def keyphrase_target(body_chars):
+    """본문 길이에 맞는 키프레이즈 권장 횟수 (최소, 최대) — 대략 800자당 1회, 최소 3회."""
+    low = max(3, round(body_chars / 800))
+    return low, low + 2
+
+
+def prose_sentences(body):
+    """본문에서 '글 문장'만 뽑는다 (표시 줄·표·목록·사진 제안 제외) — 문장 길이 점검용."""
+    sentences, in_box = [], False
+    for line in (body or "").split("\n"):
+        s = line.strip()
+        if s.startswith(("[표]", "[요약]", "[참고 자료]", "[저자 소개]")):
+            in_box = True
+        if in_box:
+            if s.startswith(("[표 끝]", "[요약 끝]", "[참고 자료 끝]", "[저자 소개 끝]")):
+                in_box = False
+            continue
+        if not s or s.startswith("[") or "|" in s or re.match(r"^(?:[-•·]|\d{1,2}[.)]|Q\.|A\.)\s", s):
+            continue
+        sentences += [x for x in re.split(r"(?<=[.!?])\s+", s) if x.strip()]
+    return sentences
+
+
+LONG_SENTENCE_WORDS = 20      # Yoast 가독성 기준: 20단어(어절) 넘으면 긴 문장
+LONG_SENTENCE_MAX_RATIO = 25  # 긴 문장이 전체의 25%를 넘으면 경고
+
+
+def long_sentence_stats(body):
+    """(긴 문장 목록, 전체 문장 수, 긴 문장 비율 %)"""
+    sentences = prose_sentences(body)
+    long_ones = [s for s in sentences if len(s.split()) > LONG_SENTENCE_WORDS]
+    ratio = round(100 * len(long_ones) / len(sentences)) if sentences else 0
+    return long_ones, len(sentences), ratio
 
 
 def has_keyword(text, keyword):
@@ -594,6 +650,7 @@ def compose_draft(meta):
         f"[카테고리] {meta.get('category', '')}",
         f"[메타설명] {meta.get('meta_description', '')}",
         f"[주소] {meta.get('slug', '')}",
+        *([f"[초점 키프레이즈] {meta['focus_keyphrase'].strip()}"] if (meta.get("focus_keyphrase") or "").strip() else []),
         "",
         meta.get("body", "").strip(),
         "",

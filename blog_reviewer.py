@@ -1,5 +1,5 @@
 import anthropic
-from blog_utils import extract_text, has_keyword, load_settings, find_placeholders, source_cards, card_numbers
+from blog_utils import parse_draft_metadata, count_keyphrase, keyphrase_target, long_sentence_stats, LONG_SENTENCE_WORDS, LONG_SENTENCE_MAX_RATIO, extract_text, has_keyword, load_settings, find_placeholders, source_cards, card_numbers
 from dotenv import load_dotenv
 import os
 import json
@@ -119,6 +119,12 @@ def scan_structure(draft):
     if len(draft) < 1000:
         issues.append(f"본문이 짧음 ({len(draft)}자) — 짧은 글은 저품질 신호로 취급될 수 있음")
 
+    long_ones, total, ratio = long_sentence_stats(parse_draft_metadata(draft)["body"])
+    if total and ratio > LONG_SENTENCE_MAX_RATIO:
+        examples = " / ".join(f"'{s[:40]}…'" for s in sorted(long_ones, key=lambda s: -len(s.split()))[:2])
+        issues.append(f"긴 문장 비율 {ratio}% ({LONG_SENTENCE_WORDS}어절 넘는 문장 {len(long_ones)}개 / 전체 {total}개) — "
+                      f"{LONG_SENTENCE_MAX_RATIO}% 이하 권장 (Yoast 가독성 기준). 긴 문장을 두 문장으로 끊기. 예: {examples}")
+
     visual_markers = sum(draft.count(tag) for tag in ("[사진 제안]", "[그래프 제안]", "[지도 제안]"))
     if visual_markers == 0:
         issues.append("사진/그래프/지도 제안이 하나도 없음 — 이미지 없는 글은 불리하다고 알려져 있음")
@@ -224,13 +230,48 @@ def scan_seo(meta, platform, target_keyword=""):
     paragraphs = [p.strip() for p in body.split("\n\n") if p.strip() and not p.strip().startswith("[")]
     first_paragraph = paragraphs[0] if paragraphs else ""
 
-    if target_keyword:
-        if not has_keyword(meta["title"], target_keyword):
-            issues.append(f"제목에 타깃 키워드 '{target_keyword}'가 없음")
-        if not has_keyword(first_paragraph, target_keyword):
-            issues.append(f"첫 문단에 타깃 키워드 '{target_keyword}'가 없음 (구글이 첫 문단으로 주제를 파악함)")
-        if is_google and subheadings and not any(has_keyword(s, target_keyword) for s in subheadings):
-            issues.append("소제목 중 타깃 키워드가 들어간 게 하나도 없음")
+    focus = (meta.get("focus_keyphrase") or "").strip()
+    kp = focus or target_keyword
+    if is_google and not focus:
+        issues.append("[초점 키프레이즈] 줄이 없음 — 워드프레스 Yoast SEO의 '초점 키프레이즈' 칸에 넣을 검색어 "
+                      "(보통 타깃 키워드와 같게)")
+    elif focus and target_keyword and focus.replace(" ", "") != target_keyword.replace(" ", ""):
+        issues.append(f"초점 키프레이즈 '{focus}'가 타깃 키워드 '{target_keyword}'와 다름 — 하나로 맞추는 걸 권장")
+
+    if kp and is_google:
+        # Yoast SEO처럼 '글자 그대로 + 뒤에 조사 없이' 쓴 것만 인정해서 센다
+        def where(label, text):
+            if count_keyphrase(text, kp):
+                return
+            if count_keyphrase(text, kp, exact=False):
+                issues.append(f"{label}에 초점 키프레이즈 '{kp}'가 조사와 붙어 있음 (예: '{kp}는') — Yoast는 글자 그대로만 "
+                              f"인정해서 없는 걸로 봄. '{kp} 기준은', '{kp}, …'처럼 뒤를 띄어 쓰기")
+            else:
+                issues.append(f"{label}에 초점 키프레이즈 '{kp}'가 없음")
+        where("제목", meta["title"])
+        where("첫 문단", first_paragraph)
+        where("메타설명", meta["meta_description"])
+        body_text = "\n".join(l for l in body.split("\n") if not l.strip().startswith("[사진 제안]"))
+        count = count_keyphrase(body_text, kp)
+        low, high = keyphrase_target(len(body))
+        if count < low:
+            loose = count_keyphrase(body_text, kp, exact=False)
+            extra = f" (조사가 붙어서 인정 안 되는 것 {loose - count}번 포함하면 {loose}번)" if loose > count else ""
+            issues.append(f"본문에 초점 키프레이즈 '{kp}'가 {count}번{extra} — 이 길이({len(body):,}자)면 "
+                          f"{low}~{high}번 권장 (키워드 밀도)")
+        elif count > high + 3:
+            issues.append(f"본문에 초점 키프레이즈 '{kp}'가 {count}번 — 너무 많으면 키워드 욱여넣기로 보여 "
+                          f"({low}~{high}번 권장)")
+        if subheadings and not any(count_keyphrase(s, kp, exact=False) for s in subheadings):
+            issues.append(f"소제목 중 초점 키프레이즈 '{kp}'가 들어간 게 하나도 없음 (1~2개 권장)")
+        alts = re.findall(r'ALT:\s*"([^"]*)"', body)
+        if alts and not any(count_keyphrase(a, kp, exact=False) for a in alts):
+            issues.append(f"사진 ALT 중 초점 키프레이즈 '{kp}'가 들어간 게 없음 (1개 권장)")
+    elif kp:
+        if not has_keyword(meta["title"], kp):
+            issues.append(f"제목에 타깃 키워드 '{kp}'가 없음")
+        if not has_keyword(first_paragraph, kp):
+            issues.append(f"첫 문단에 타깃 키워드 '{kp}'가 없음 (검색엔진이 첫 문단으로 주제를 파악함)")
 
     title_len = len(meta["title"])
     if title_len > 35:
@@ -247,8 +288,8 @@ def scan_seo(meta, platform, target_keyword=""):
     flat_tags = [t.replace(" ", "").lower() for t in tags]
     if len(set(flat_tags)) < len(flat_tags):
         issues.append("중복된 태그가 있음")
-    if target_keyword and tags and not any(has_keyword(t, target_keyword) for t in tags):
-        issues.append(f"태그에 타깃 키워드 '{target_keyword}'가 없음 (첫 태그로 넣는 걸 권장)")
+    if kp and tags and not any(has_keyword(t, kp) for t in tags):
+        issues.append(f"태그에 타깃 키워드 '{kp}'가 없음 (첫 태그로 넣는 걸 권장)")
 
     if is_google:
         if not 3 <= len(subheadings) <= 5:
