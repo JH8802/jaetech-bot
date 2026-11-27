@@ -17,7 +17,20 @@ import os
 import re
 from datetime import datetime
 
+import html
 import streamlit as st
+
+# 화면 글자에서 ~ 가 취소선으로 바뀌지 않게 (마크다운은 ~ 두 개 사이를 취소선으로 그림 — '3~5회 … 1~2개')
+def _no_strike(fn):
+    def wrapper(body=None, *args, **kwargs):
+        if isinstance(body, str):
+            body = re.sub(r"(?<!\\)~", r"\\~", body)
+        return fn(body, *args, **kwargs)
+    return wrapper
+
+
+for _name in ("markdown", "caption", "info", "warning", "error", "success", "write"):
+    setattr(st, _name, _no_strike(getattr(st, _name)))
 
 from blog_drafter import draft_post, suggest_questions, revise_draft
 from blog_factcheck import check_numbers, build_references, unverified, find_copied_sentences
@@ -30,13 +43,14 @@ from blog_own import package_own_draft, compare_with_notes, edit_own_draft, EDIT
 from blog_reviewer import (scan_cliches, scan_structure, scan_seo, scan_health_claims, scan_ai_patterns,
                            scan_experience_claims, scan_sections, readiness, own_texts,
                            review_draft, collect_issues, ai_issue, AI_REVIEW_LABELS)
-from blog_sources import resolve_sources, resolve_files, is_bare_url
+from blog_sources import resolve_sources, resolve_files, is_bare_url, find_urls
 from blog_utils import (parse_draft_metadata, load_past_titles, find_keyword_overlap, body_to_html,
                         body_to_gutenberg, find_placeholders, apply_placeholders, compose_draft,
                         write_draft_file, read_draft_file, list_saved_drafts,
                         load_style_sample, save_style_sample, STYLE_SAMPLE_MAX,
                         load_autosave, save_autosave, DATA_DIR, DRAFTS_DIR,
-                        load_settings, save_settings, publish_tail, source_cards, card_numbers)
+                        load_settings, save_settings, publish_tail, source_cards, card_numbers,
+                        parse_table_input, tables_to_markup, TABLE_INPUT_MAX)
 
 st.set_page_config(page_title="블로그 초안 생성기", page_icon="✍️")
 
@@ -60,6 +74,7 @@ INPUT_DEFAULTS = {
     "topic": "",
     "kw_input": "",
     "key_points_text": "",
+    "table_text": "",
     "sources_text": "",
     "personal_take_text": "",
     "mat_urls": "",
@@ -76,7 +91,7 @@ INPUT_DEFAULTS = {
 # 고를 수 있는 값이 정해진 입력칸 — 저장된 값이 목록에 없으면 기본값으로
 INPUT_CHOICES = {"mode": MODES, "mat_audience": AUDIENCES,
                  "mat_tone": list(TONES), "mat_length": LENGTHS}
-INPUT_LIMITS = {"key_points_text": KEY_POINTS_MAX, "personal_take_text": PERSONAL_TAKE_MAX,
+INPUT_LIMITS = {"table_text": TABLE_INPUT_MAX, "key_points_text": KEY_POINTS_MAX, "personal_take_text": PERSONAL_TAKE_MAX,
                 "own_body": OWN_BODY_MAX, **{k: EXPERIENCE_FIELD_MAX for k in EXPERIENCE_FIELDS}}
 # 원고 탭의 입력칸 key 앞부분 — 원고 내용이 바뀌면 지워야 새 내용으로 다시 채워짐
 FIELD_PREFIXES = ("title", "category", "tags", "meta", "slug", "focus", "body", "note")
@@ -220,16 +235,22 @@ def edit_history_ui(platform):
     diff = [l for l in difflib.unified_diff(sentences(edit["old"]), sentences(edit["new"]), lineterm="", n=0)
             if not l.startswith(("---", "+++", "@@"))]
     changed = sum(1 for l in diff if l.startswith("+"))
-    with st.expander(f"🔍 방금 다듬기({edit['label']})에서 바뀐 곳 — 문장 {changed}개", expanded=True):
-        st.caption("빨간 줄(-)이 원래 문장, 초록 줄(+)이 바뀐 문장이야. 마음에 안 들면 아래 버튼으로 되돌려 "
-                   "(여러 단계를 한 번에 돌렸으면 전부 되돌아가).")
-        for note in edit.get("notes", []):
-            st.caption(f"ℹ️ {note}")
-        st.code("\n".join(diff) or "(본문은 그대로 — 제목·요약 등만 바뀜)", language="diff")
-        if st.button("↩️ 다듬기 전으로 되돌리기", key=f"undo_{platform}"):
-            persist(platform, st.session_state.undo.pop(platform))
-            st.session_state.last_edit.pop(platform, None)
-            st.rerun()
+    st.success(f"✅ 다듬기 완료 ({edit['label']}) — 위 📄 본문 칸과 🧩 HTML에는 **다듬어진 글만** 들어 있어. "
+               "발행할 글은 거기서 복사해.")
+    for note in edit.get("notes", []):
+        st.caption(f"ℹ️ {note}")
+    with st.expander(f"🔍 바뀐 곳 비교 보기 — 문장 {changed}개 (확인용: 원래 문장과 바뀐 문장이 같이 있어서 복사용 아님)"):
+        def line_html(l):
+            text = html.escape(l[1:]).replace("~", "&#126;")
+            if l.startswith("-"):
+                return f'<div style="color:#b42318">전: {text}</div>'
+            return f'<div style="color:#067647;margin-bottom:8px">후: {text}</div>'
+        st.markdown("".join(line_html(l) for l in diff) or "(본문은 그대로 — 제목·요약 등만 바뀜)",
+                    unsafe_allow_html=True)
+    if st.button("↩️ 다듬기 전으로 되돌리기", key=f"undo_{platform}"):
+        persist(platform, st.session_state.undo.pop(platform))
+        st.session_state.last_edit.pop(platform, None)
+        st.rerun()
 
 
 def finish_generation(drafts, filenames, inputs, keyword):
@@ -339,6 +360,7 @@ def load_draft_cb():
     else:
         set_input("mode", MODE_MEMO)
         set_input("key_points_text", "\n".join(inputs.get("key_points", []))[:KEY_POINTS_MAX])
+        set_input("table_text", "\n\n".join(inputs.get("tables", []))[:TABLE_INPUT_MAX])
         set_input("sources_text", "\n".join(inputs.get("sources", [])))
         set_input("personal_take_text", (inputs.get("personal_take") or "")[:PERSONAL_TAKE_MAX])
 
@@ -524,22 +546,41 @@ if mode == MODE_MEMO:
     )
     st.caption(f"{len(key_points_text):,} / {KEY_POINTS_MAX:,}자")
 
+    with st.expander("📊 표 넣기 (선택) — 엑셀 복사 · 직접 작성 · HTML 표", expanded=bool(st.session_state.table_text.strip())):
+        table_text = st.text_area(
+            "표 내용 — 표가 여러 개면 빈 줄로 나누거나 각 표 위에 '[표] 표 제목' 줄을 둬",
+            key="table_text", height=180, max_chars=TABLE_INPUT_MAX,
+            placeholder="방법 1) 엑셀·구글시트에서 표를 드래그해서 복사 → 그대로 붙여넣기\n\n"
+                        "방법 2) 직접 쓰기 — 첫 줄은 표 제목(선택), 칸은 | 로 구분\n"
+                        "[표] 유산균 제품 표시 비교\n제품 | 보장균수 | 균주명 표시\nA사 | 100억 | 있음\nB사 | 500억 | 없음\n\n"
+                        "방법 3) HTML 표 붙여넣기 — <table>…</table> (칸 글자만 가져와)",
+            help="표 안의 숫자도 '내가 준 사실'로 취급돼서, AI가 본문에 표를 그대로 넣고 숫자를 바꾸지 않아. "
+                 "숫자 대조에서도 근거 있음으로 인정돼.",
+        )
+        tables, table_problems = parse_table_input(table_text)
+        for problem in table_problems:
+            st.warning(problem)
+        if tables:
+            st.caption(f"✅ 표 {len(tables)}개 인식 — 아래처럼 본문에 들어가 (미리보기)")
+            st.markdown(body_to_html("\n\n".join(tables_to_markup(tables))), unsafe_allow_html=True)
+
     # 링크/파일에서 가져온 출처는 다음 실행 때 입력칸에 넣는다 (입력칸이 그려진 뒤엔 값을 못 바꿔서)
     if "pending_sources" in st.session_state:
         set_input("sources_text", st.session_state.pop("pending_sources"))
 
     sources_text = st.text_area(
-        "참고 자료/출처 (한 줄에 하나씩, 선택) — 링크만 붙여넣어도 돼 (웹페이지·PDF 링크)",
+        "참고 자료/출처 (선택) — 링크 여러 개 OK (한 줄에 하나씩 권장, 링크 옆에 메모를 붙여도 돼)",
         key="sources_text", height=130,
         placeholder="예)\nhttps://www.mfds.go.kr/... (웹페이지나 PDF 링크만 붙이고 아래 '링크 내용 가져오기')\n식약처 고시 — NMN은 현재 건강기능식품 원료로 인정 안 됨 (직접 적어도 됨)",
         help="건강·돈 주제는 구글이 근거를 엄격하게 봐. 여기 적은 것만 본문에 인용하고, 근거가 필요한데 없으면 [출처 필요]로 표시돼.",
     )
     if st.button("🔗 링크 내용 가져오기 (웹페이지·PDF 링크 → '출처명 — 핵심 내용')"):
         source_lines = lines_of(sources_text)
-        if not any(is_bare_url(line) for line in source_lines):
-            st.info("가져올 링크가 없어 — 한 줄에 링크 하나만 있는 줄을 읽어.")
+        url_count = len(find_urls("\n".join(l for l in source_lines if is_bare_url(l))))
+        if not url_count:
+            st.info("새로 가져올 링크가 없어 (이미 가져온 줄은 다시 읽지 않아).")
         else:
-            with st.spinner("🔗 링크 읽는 중... (PDF 링크는 쪽수에 따라 30초~1분 걸릴 수 있어)"):
+            with st.spinner(f"🔗 링크 {url_count}개 읽는 중... (링크당 10~20초, PDF 링크는 30초~1분 걸릴 수 있어)"):
                 resolved, report = resolve_sources(source_lines, topic=topic)
             st.session_state.pending_sources = "\n".join(resolved)
             st.session_state.sources_report = report
@@ -607,10 +648,11 @@ if mode == MODE_MEMO:
         elif not platforms:
             st.error("발행할 곳을 하나 이상 선택해줘.")
         else:
+            tables = tables_to_markup(parse_table_input(st.session_state.table_text)[0])
             inputs = {
                 "mode": "memo", "topic": topic, "target_keyword": target_keyword.strip(),
                 "key_points": key_points, "sources": sources, "personal_take": personal_take,
-                "notes": [], "user_additions": [],
+                "tables": tables, "notes": [], "user_additions": [],
             }
             drafts, filenames = {}, {}
             for platform in platforms:
@@ -619,7 +661,7 @@ if mode == MODE_MEMO:
                         draft = draft_post(
                             topic, key_points, personal_take, platform=platform,
                             target_keyword=target_keyword.strip(), sources=sources,
-                            past_titles=load_past_titles(platform),
+                            past_titles=load_past_titles(platform), tables=tables,
                         )
                     except Exception as e:
                         st.error(f"❌ {platform} 초안 생성 실패: {e}\n(네트워크 문제일 수 있어 — 아래 '초안 생성'을 다시 눌러봐)")
@@ -636,7 +678,7 @@ if mode == MODE_MEMO:
 def materials_input_ui(note_label):
     """기사 링크·PDF·캡처를 읽어 자료 노트로 정리하는 화면 조각. 반환: 자료 노트 글자"""
     st.text_area(
-        "기사·자료 링크 (한 줄에 하나 — 웹페이지·PDF 링크)", key="mat_urls", height=110,
+        "기사·자료 링크 (여러 개 OK — 한 줄에 하나씩 권장, 웹페이지·PDF 링크)", key="mat_urls", height=110,
         placeholder="https://www.hankyung.com/article/...\nhttps://www.mfds.go.kr/brd/.../down.do?...",
     )
     mat_files = st.file_uploader(
@@ -644,8 +686,7 @@ def materials_input_ui(note_label):
         accept_multiple_files=True, key=f"mat_files_{st.session_state.uploader_ver}",
         help="PDF는 그대로 올리는 게 캡처보다 정확해. 한글(HWP) 파일은 못 읽어.",
     )
-    new_urls = [u for u in lines_of(st.session_state.mat_urls)
-                if is_bare_url(u) and u not in st.session_state.mat_done]
+    new_urls = [u for u in find_urls(st.session_state.mat_urls) if u not in st.session_state.mat_done]
     read_label = f"📚 자료 읽고 정리하기 (새 링크 {len(new_urls)}개 · 파일 {len(mat_files or [])}개)"
     if st.button(read_label, disabled=not (new_urls or mat_files)):
         jobs = [("url", u) for u in new_urls] + [("file", f.name, f.getvalue()) for f in (mat_files or [])]
@@ -1218,7 +1259,7 @@ if st.session_state.drafts:
                         try:
                             if lvl == "review":
                                 edited = revise_draft(
-                                    current, issues, inputs.get("key_points", []),
+                                    current, issues, inputs.get("key_points", []) + inputs.get("tables", []),
                                     sources=inputs.get("sources"),
                                     personal_take=inputs.get("personal_take", ""),
                                     author_note=request.strip(), platform=platform,

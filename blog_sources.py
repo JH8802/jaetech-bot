@@ -28,6 +28,18 @@ USER_AGENT = (
 )
 
 URL_PATTERN = re.compile(r"^https?://\S+$", re.IGNORECASE)
+URL_FIND = re.compile(r"https?://[^\s<>\"'\]\[]+", re.IGNORECASE)
+RESOLVED_MARK = " — 원문: "  # 이미 가져온 출처 줄 끝에 붙는 표시
+
+
+def find_urls(text):
+    """글 안의 링크를 모두 찾는다 (한 줄에 여러 개, 번호·메모가 붙어 있어도). 순서 유지·중복 제거."""
+    urls = []
+    for url in URL_FIND.findall(text or ""):
+        url = url.rstrip(".,;:!?)）」』>")
+        if url not in urls:
+            urls.append(url)
+    return urls
 
 # 본문이 아닌 영역 — 이 태그 안의 글자는 버린다
 _SKIP_TAGS = {"script", "style", "noscript", "nav", "header", "footer", "aside", "form", "svg"}
@@ -238,27 +250,37 @@ def resolve_sources(lines, topic=""):
       보고 항목: {"url": ..., "ok": bool, "message": ...}
     실패한 링크는 줄을 그대로 둔다 (AI가 못 읽는다는 건 호출하는 쪽에서 안내).
     """
-    resolved, report = [], []
+    resolved, report, seen = [], [], set()
     for line in lines:
         line = line.strip()
         if not line:
             continue
-        if not URL_PATTERN.match(line):
-            resolved.append(line)  # 이미 글로 적은 출처는 그대로
+        if not is_bare_url(line):
+            resolved.append(line)  # 글로 적은 출처, 이미 가져온 출처는 그대로
             continue
-        try:
-            kind, title, body = fetch_url(line)
-            if kind == "pdf":
-                summary = summarize_document(body, "application/pdf", title, topic)
-            else:
-                summary = summarize_source(line, title, body, topic)
-            # 원문 주소를 줄 끝에 남겨 둔다 → 발행 HTML의 '참고 자료'에서 원문 링크로 쓰임
-            summary = f"{_check_summary(summary)} — 원문: {line}"
-            resolved.append(summary)
-            report.append({"url": line, "ok": True, "message": summary})
-        except Exception as e:
-            resolved.append(line)
-            report.append({"url": line, "ok": False, "message": str(e)})
+        urls = [u for u in find_urls(line) if u not in seen]
+        seen.update(urls)
+        # 링크 옆에 적은 메모(번호·글머리표 제외)는 요약 뒤에 함께 남김
+        memo = URL_FIND.sub(" ", line)
+        memo = re.sub(r"^\s*(?:[-•·*]|\d{1,2}[.)])\s*", "", " ".join(memo.split())).strip(" -—:·,")
+        failed_all = True
+        for url in urls:
+            try:
+                kind, title, body = fetch_url(url)
+                if kind == "pdf":
+                    summary = summarize_document(body, "application/pdf", title, topic)
+                else:
+                    summary = summarize_source(url, title, body, topic)
+                # 원문 주소를 줄 끝에 남겨 둔다 → 발행 HTML의 '참고 자료'에서 원문 링크로 쓰임
+                summary = _check_summary(summary) + (f" — 내 메모: {memo}" if memo else "") + f"{RESOLVED_MARK}{url}"
+                resolved.append(summary)
+                report.append({"url": url, "ok": True, "message": summary})
+                failed_all = False
+            except Exception as e:
+                resolved.append(url)
+                report.append({"url": url, "ok": False, "message": str(e)})
+        if failed_all and memo:
+            resolved.append(memo)
     return resolved, report
 
 
@@ -290,4 +312,5 @@ def resolve_files(files, topic=""):
 
 
 def is_bare_url(line):
-    return bool(URL_PATTERN.match(line.strip()))
+    """아직 내용을 안 가져온 링크가 들어 있는 줄인지 (줄 전체가 링크가 아니어도 됨)."""
+    return bool(find_urls(line)) and RESOLVED_MARK not in line

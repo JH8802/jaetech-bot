@@ -4,6 +4,7 @@ import os
 import re
 import shutil
 from datetime import datetime
+from html.parser import HTMLParser
 
 from dotenv import load_dotenv
 
@@ -402,6 +403,17 @@ def _card_gutenberg(card):
     )
 
 
+TILDE_SAFE = "∼"  # U+223C 물결표 — 보기엔 ~ 와 같지만 에디터가 취소선 기호로 읽지 않음
+
+
+def safe_tilde(html_text):
+    """HTML의 글자 부분에서 ~ 를 ∼ 로 바꾼다 (태그 안의 주소·속성은 그대로).
+    티스토리·워드프레스 에디터와 마크다운은 ~ 두 개 사이 글자를 취소선으로 바꿔서,
+    '3~5회 … 1~2개'처럼 범위 표현이 한 문단에 두 번 나오면 그 사이 문장에 줄이 그어진다."""
+    parts = re.split(r"(<[^>]*>)", html_text or "")
+    return "".join(p if p.startswith("<") else p.replace("~", TILDE_SAFE) for p in parts)
+
+
 def body_to_html(body, cards=None):
     """티스토리 HTML 모드에 붙여넣을 일반 HTML.
     소제목 → <h2>, 요약 박스·표·목록·원문 카드 포함. 아직 안 채운 항목은 노란 표시로 남김.
@@ -455,7 +467,7 @@ def body_to_html(body, cards=None):
             )
         elif kind == "notice":
             out.append(f'<p style="background:#fff3cd;padding:8px;">📌 {html.escape(data)}</p>')
-    return "\n\n".join(out)
+    return safe_tilde("\n\n".join(out))
 
 
 def _wp(name, inner, attrs=""):
@@ -551,7 +563,7 @@ def body_to_gutenberg(body, cards=None):
             out.append(_wp("paragraph",
                            f'<p class="has-background" style="background-color:#fff3cd">📌 {html.escape(data)}</p>',
                            '{"style":{"color":{"background":"#fff3cd"}}}'))
-    return "\n\n".join(out)
+    return safe_tilde("\n\n".join(out))
 
 
 # ─────────────────────────────────────────────
@@ -847,7 +859,7 @@ def publish_tail(inputs, settings, written=""):
         if settings.get("disclosure", "").strip():
             lines.append(settings["disclosure"].strip())
         parts.append("[저자 소개]\n" + "\n".join(lines) + "\n[저자 소개 끝]")
-    return "\n\n".join(parts)
+    return safe_tilde("\n\n".join(parts))
 
 
 
@@ -896,3 +908,131 @@ def _domain(url):
 def card_numbers(body):
     """본문에 들어간 [원문 카드: N] 번호들."""
     return [int(m.group(1)) for m in (_CARD_RE.match(l.strip()) for l in body.split("\n")) if m]
+
+
+# ─────────────────────────────────────────────
+# 메모에 넣는 표 (엑셀 복사·직접 작성·HTML 표 → 본문 [표] 표기법)
+# ─────────────────────────────────────────────
+TABLE_INPUT_MAX = 20000
+
+
+class _HTMLTableParser(HTMLParser):
+    """HTML 안의 <table>들을 [{"caption", "rows"}]로 뽑는다 (글자만, 태그·스타일은 버림)."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.tables, self._table, self._row, self._cell, self._caption = [], None, None, None, None
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "table":
+            self._table = {"caption": "", "rows": []}
+        elif self._table is None:
+            return
+        elif tag == "caption":
+            self._caption = []
+        elif tag == "tr":
+            self._row = []
+        elif tag in ("td", "th"):
+            self._cell = []
+        elif tag == "br" and self._cell is not None:
+            self._cell.append(" ")
+
+    def handle_endtag(self, tag):
+        if self._table is None:
+            return
+        if tag == "caption" and self._caption is not None:
+            self._table["caption"] = " ".join("".join(self._caption).split())
+            self._caption = None
+        elif tag in ("td", "th") and self._cell is not None and self._row is not None:
+            self._row.append(" ".join("".join(self._cell).split()))
+            self._cell = None
+        elif tag == "tr" and self._row is not None:
+            if any(self._row):
+                self._table["rows"].append(self._row)
+            self._row = None
+        elif tag == "table":
+            self.tables.append(self._table)
+            self._table = None
+
+    def handle_data(self, data):
+        if self._cell is not None:
+            self._cell.append(data)
+        elif self._caption is not None:
+            self._caption.append(data)
+
+
+def _clean_cell(text):
+    return " ".join(str(text).replace("|", "/").split())
+
+
+def _split_row(line):
+    if "\t" in line:
+        return line.split("\t")
+    if "|" in line:
+        cells = line.strip().strip("|").split("|")
+        return None if all(re.fullmatch(r"\s*:?-{2,}:?\s*", c) for c in cells) else cells  # 마크다운 구분줄
+    return None
+
+
+def parse_table_input(text):
+    """메모 칸에 넣은 표를 읽는다. 반환: (표 목록 [{"caption", "rows"}], 문제 안내 목록)
+    - HTML 표(<table>…</table>): 칸 글자만 가져옴
+    - 엑셀·구글시트에서 복사한 표(칸이 탭으로 나뉨)
+    - 직접 쓴 표: 칸을 | 로 구분 (마크다운 표도 됨)
+    표가 여러 개면 빈 줄로 나누거나 각 표 위에 '[표] 표 제목' 줄을 둬. 칸이 아닌 첫 줄은 표 제목으로 씀."""
+    text = (text or "").strip()
+    if not text:
+        return [], []
+    if re.search(r"<table\b", text, re.IGNORECASE):
+        parser = _HTMLTableParser()
+        parser.feed(text)
+        raw_tables = parser.tables
+    else:
+        raw_tables, current = [], None
+        for line in text.split("\n"):
+            s = line.strip()
+            if s.startswith("[표 끝]"):
+                current = None
+                continue
+            if not s:
+                if current and current["rows"]:
+                    current = None
+                continue
+            if s.startswith("[표]"):
+                current = {"caption": s[len("[표]"):].strip(), "rows": []}
+                raw_tables.append(current)
+                continue
+            cells = _split_row(line.rstrip("\r"))
+            if cells is None:
+                if "|" in s or "\t" in line:
+                    continue  # 마크다운 구분줄
+                if current is None or current["rows"]:
+                    current = {"caption": s, "rows": []}
+                    raw_tables.append(current)
+                else:
+                    current["caption"] = (current["caption"] + " " + s).strip()
+                continue
+            if current is None:
+                current = {"caption": "", "rows": []}
+                raw_tables.append(current)
+            current["rows"].append(cells)
+
+    tables, problems = [], []
+    for i, t in enumerate(raw_tables, 1):
+        rows = [[_clean_cell(c) for c in r] for r in t["rows"]]
+        rows = [r for r in rows if any(r)]
+        width = max((len(r) for r in rows), default=0)
+        if len(rows) < 2 or width < 2:
+            if rows or t["caption"]:
+                problems.append(f"표 {i}({t['caption'] or '제목 없음'})는 칸을 못 읽었어 — 머리글 포함 2줄 이상, "
+                                "칸 2개 이상이어야 해 (칸은 탭이나 | 로 구분)")
+            continue
+        rows = [r + [""] * (width - len(r)) for r in rows]
+        tables.append({"caption": _clean_cell(t["caption"]), "rows": rows})
+    return tables, problems
+
+
+def tables_to_markup(tables):
+    """parse_table_input 결과를 본문 표기법([표] … [표 끝]) 문자열 목록으로."""
+    return ["\n".join([f"[표] {t['caption']}".rstrip()] + [" | ".join(r) for r in t["rows"]] + ["[표 끝]"])
+            for t in tables]

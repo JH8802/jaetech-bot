@@ -60,6 +60,7 @@ def build_references(inputs):
     """세션/저장 파일의 inputs dict에서 대조용 재료 묶음을 만든다."""
     return {
         "경험 메모": "\n".join(inputs.get("key_points", [])),
+        "내가 넣은 표": "\n".join(inputs.get("tables", [])),
         "출처": "\n".join(inputs.get("sources", [])),
         "의견": inputs.get("personal_take", ""),
         "다듬기 메모": "\n".join(inputs.get("notes", [])),
