@@ -1,5 +1,5 @@
 import anthropic
-from blog_utils import button_line_problems, parse_draft_metadata, count_keyphrase, keyphrase_target, long_sentence_stats, LONG_SENTENCE_WORDS, LONG_SENTENCE_MAX_RATIO, extract_text, has_keyword, load_settings, find_placeholders, source_cards, card_numbers
+from blog_utils import link_stats, button_line_problems, parse_draft_metadata, count_keyphrase, keyphrase_target, long_sentence_stats, LONG_SENTENCE_WORDS, LONG_SENTENCE_MAX_RATIO, extract_text, has_keyword, load_settings, find_placeholders, source_cards, card_numbers
 from dotenv import load_dotenv
 import os
 import json
@@ -108,7 +108,7 @@ def scan_structure(draft):
     """규칙 기반 구조 점검 — 가독성 + 사진/그래프/지도 제안 존재 여부."""
     issues = []
 
-    paragraphs = [p for p in draft.split("\n\n") if p.strip() and not p.strip().startswith("[")]
+    paragraphs = [p for p in draft.split("\n\n") if p.strip() and not (p.strip().startswith("[") and not p.strip().startswith("[["))]
     # 표(| 구분)·목록(- / 1.) 묶음은 문단이 아니므로 길이 점검에서 뺌
     paragraphs = [p for p in paragraphs
                   if not all("|" in l or re.match(r"^\s*(?:[-•·]|\d{1,2}[.)])\s", l) for l in p.strip().split("\n"))]
@@ -220,7 +220,7 @@ def scan_sections(body):
     return issues
 
 
-def scan_seo(meta, platform, target_keyword=""):
+def scan_seo(meta, platform, target_keyword="", has_reference_links=False):
     """규칙 기반 SEO 점검 — 구글 기준(티스토리/워드프레스)은 더 엄격하게 본다.
     meta는 parse_draft_metadata()의 반환값."""
     issues = []
@@ -229,7 +229,7 @@ def scan_seo(meta, platform, target_keyword=""):
 
     subheadings = [l.strip()[len("[소제목]"):].strip()
                    for l in body.split("\n") if l.strip().startswith("[소제목]")]
-    paragraphs = [p.strip() for p in body.split("\n\n") if p.strip() and not p.strip().startswith("[")]
+    paragraphs = [p.strip() for p in body.split("\n\n") if p.strip() and not (p.strip().startswith("[") and not p.strip().startswith("[["))]
     first_paragraph = paragraphs[0] if paragraphs else ""
 
     focus = (meta.get("focus_keyphrase") or "").strip()
@@ -301,6 +301,16 @@ def scan_seo(meta, platform, target_keyword=""):
             issues.append("메타설명이 없음")
         elif not 100 <= desc_len <= 160:
             issues.append(f"메타설명 {desc_len}자 — 120~155자 권장 (너무 짧거나 길면 구글이 본문에서 임의로 가져감)")
+
+    if is_google:
+        internal, external = link_stats(body)
+        if internal == 0:
+            issues.append("내부 링크가 없음 (Yoast 빨간불) — 내 블로그의 관련 글로 가는 링크를 1개 이상: "
+                          "[링크: 글 제목 | 주소] 줄이나 문장 속 [[글자 | 주소]]. 사이드바에 '내 블로그 주소'를 적어둬야 "
+                          "내부/외부가 정확히 구분돼")
+        if external == 0 and not has_reference_links:
+            issues.append("외부 링크가 없음 (Yoast 빨간불) — 근거 출처의 원문 링크를 1개 이상: 출처 칸에 링크를 넣거나, "
+                          "문장 속 [[출처 이름 | 주소]]")
 
     if platform == "워드프레스" and not meta.get("slug"):
         issues.append("글 주소(슬러그)가 없음")

@@ -3,6 +3,7 @@ import json
 import os
 import re
 import shutil
+import urllib.parse
 from datetime import datetime
 from html.parser import HTMLParser
 
@@ -132,9 +133,9 @@ def prose_sentences(body):
             if s.startswith(("[표 끝]", "[요약 끝]", "[참고 자료 끝]", "[저자 소개 끝]")):
                 in_box = False
             continue
-        if not s or s.startswith("[") or "|" in s or re.match(r"^(?:[-•·]|\d{1,2}[.)]|Q\.|A\.)\s", s):
+        if not s or (s.startswith("[") and not s.startswith("[[")) or "|" in visible_text(s) or re.match(r"^(?:[-•·]|\d{1,2}[.)]|Q\.|A\.)\s", s):
             continue
-        sentences += [x for x in re.split(r"(?<=[.!?])\s+", s) if x.strip()]
+        sentences += [x for x in re.split(r"(?<=[.!?])\s+", visible_text(s)) if x.strip()]
     return sentences
 
 
@@ -221,6 +222,69 @@ PLACEHOLDER_RE = re.compile(
     re.MULTILINE,
 )
 _INLINE_TAG_RE = re.compile(r"\[(?:출처 필요|추가 필요|검수)[^\]\n]*\]")
+# 문장 속 링크: [[보이는 글자 | https://주소]]
+INLINE_LINK_RE = re.compile(r"\[\[\s*([^\[\]|\n]+?)\s*\|\s*(https?://[^\s\[\]|]+)\s*\]\]")
+
+
+def _split_cells(row):
+    """표 한 줄을 | 로 나눈다 — 칸 안의 문장 속 링크 [[글자 | 주소]]의 | 는 나누지 않음."""
+    links = []
+    protected = INLINE_LINK_RE.sub(lambda m: links.append(m.group(0)) or f"\x00{len(links) - 1}\x00", row)
+    return [re.sub(r"\x00(\d+)\x00", lambda m: links[int(m.group(1))], c).strip() for c in protected.split("|")]
+
+
+def visible_text(text):
+    """문장 속 링크 표시를 보이는 글자만 남긴다 (문장 길이·키프레이즈 셀 때)."""
+    return INLINE_LINK_RE.sub(lambda m: m.group(1), text or "")
+
+
+def _host(url):
+    host = (urllib.parse.urlparse(url).hostname or "").lower()
+    return host[4:] if host.startswith("www.") else host
+
+
+def is_internal_url(url, site_url=None):
+    """내 블로그 주소(사이드바 설정)와 같은 사이트면 True, 다르면 False, 내 주소를 안 적었으면 None."""
+    site = (load_settings()["site_url"] if site_url is None else site_url).strip()
+    if not site:
+        return None
+    if not site.startswith(("http://", "https://")):
+        site = "https://" + site
+    mine, other = _host(site), _host(url)
+    return bool(mine) and (other == mine or other.endswith("." + mine))
+
+
+def _link_tag(text, url, internal):
+    """내부 링크는 같은 창, 외부 링크는 새 창(+noopener)."""
+    extra = "" if internal else ' target="_blank" rel="noreferrer noopener"'
+    return f'<a href="{html.escape(url)}"{extra}>{html.escape(text)}</a>'
+
+
+def link_stats(body, site_url=None):
+    """본문의 (내부 링크 수, 외부 링크 수) — [링크: …] 줄, 문장 속 [[…]], [버튼: …], [원문 카드]."""
+    site = load_settings()["site_url"] if site_url is None else site_url
+    internal = external = 0
+    for line in (body or "").split("\n"):
+        s = line.strip()
+        urls = []
+        m = _LINK_LINE_RE.match(s)
+        if m:
+            kind = is_internal_url(m.group(2), site)
+            internal, external = (internal + 1, external) if kind in (True, None) else (internal, external + 1)
+            continue
+        if _CARD_RE.match(s):
+            external += 1
+            continue
+        b = _BUTTON_LINE_RE.match(s)
+        if b:
+            urls.append(b.group(2))
+        urls += [u for _, u in INLINE_LINK_RE.findall(s)]
+        for u in urls:
+            if is_internal_url(u, site):
+                internal += 1
+            else:
+                external += 1
+    return internal, external
 _LINK_LINE_RE = re.compile(r"^\[링크:\s*(.*?)\s*\|\s*(https?://\S+)\s*\]$")
 _BUTTON_LINE_RE = re.compile(r"^\[버튼:\s*(.+?)\s*\|\s*(https?://[^\s|\]]+)\s*((?:\|[^|\]]*)*)\]$")
 _IMAGE_LINE_RE = re.compile(r"^\[이미지:\s*(https?://\S+)\s*\|\s*(.*?)\s*\]$")
@@ -319,7 +383,7 @@ def parse_body_blocks(body):
             while i < len(lines) and not lines[i].strip().startswith("[표 끝]"):
                 row = lines[i].strip().strip("|")
                 if row and not re.fullmatch(r"[\s|:\-]+", row):  # 마크다운식 구분선(---|---)은 건너뜀
-                    rows.append([c.strip() for c in row.split("|")])
+                    rows.append(_split_cells(row))
                 i += 1
             if rows:
                 width = max(len(r) for r in rows)
@@ -359,8 +423,21 @@ def parse_body_blocks(body):
 
 
 def _inline(text):
-    """문단 안 글자: HTML 이스케이프 + 아직 안 채운 [출처 필요]/[추가 필요]/[검수] 형광펜."""
-    return _INLINE_TAG_RE.sub(lambda m: f"<mark>{m.group(0)}</mark>", html.escape(text))
+    """문단 안 글자: HTML 이스케이프 + 문장 속 링크 [[글자 | 주소]] + 아직 안 채운 [출처 필요]/[추가 필요]/[검수] 형광펜."""
+    out, last = [], 0
+    for m in INLINE_LINK_RE.finditer(text):
+        out.append(_INLINE_TAG_RE.sub(lambda t: f"<mark>{t.group(0)}</mark>", html.escape(text[last:m.start()])))
+        out.append(_link_tag(m.group(1), m.group(2), is_internal_url(m.group(2))))
+        last = m.end()
+    out.append(_INLINE_TAG_RE.sub(lambda t: f"<mark>{t.group(0)}</mark>", html.escape(text[last:])))
+    return "".join(out)
+
+
+def _link_line(title, url):
+    """[링크: 제목 | 주소] 줄 — 내 블로그 글이면 '함께 보면 좋은 글', 다른 사이트면 '참고'(새 창)."""
+    if is_internal_url(url) is False:
+        return f"📎 참고: {_link_tag(title, url, False)}"
+    return f"👉 함께 보면 좋은 글: {_link_tag(title, url, True)}"
 
 
 def _table_html(data):
@@ -581,7 +658,7 @@ def body_to_html(body, cards=None):
             )
         elif kind == "link":
             title, url = data
-            out.append(f'<p>👉 함께 보면 좋은 글: <a href="{html.escape(url)}">{html.escape(title)}</a></p>')
+            out.append(f"<p>{_link_line(title, url)}</p>")
         elif kind == "button":
             out.append(cta_html(data[1], data[0], **data[2]))
         elif kind == "image":
@@ -666,8 +743,7 @@ def body_to_gutenberg(body, cards=None):
             ))
         elif kind == "link":
             title, url = data
-            out.append(_wp("paragraph",
-                           f'<p>👉 함께 보면 좋은 글: <a href="{html.escape(url)}">{html.escape(title)}</a></p>'))
+            out.append(_wp("paragraph", f"<p>{_link_line(title, url)}</p>"))
         elif kind == "button":
             out.append(cta_gutenberg(data[1], data[0], **data[2]))
         elif kind == "refs":
@@ -910,6 +986,7 @@ SETTINGS_DEFAULTS = {
     "disclosure": "",        # 이해관계 고지 (예: 업체와 금전적 관계 없음)
     "disclose_ai": False,    # AI 도구 도움 사실을 글 끝에 밝힐지 (의무 아님 — 기본은 끔)
     "categories": [],        # 내 블로그 카테고리 목록 (비우면 AI가 자유롭게)
+    "site_url": "",          # 내 블로그 주소 — 링크가 내부(같은 창)/외부(새 창)인지 가리는 기준
 }
 
 

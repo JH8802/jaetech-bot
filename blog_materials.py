@@ -16,7 +16,7 @@ from datetime import datetime
 import anthropic
 from dotenv import load_dotenv
 
-from blog_drafter import (AI_HABITS_RULE, READABILITY_RULE, CITATION_RULE, keyphrase_rule, OPENING_STYLES, PLATFORM_STYLE_HINTS, _style_block,
+from blog_drafter import (AI_HABITS_RULE, READABILITY_RULE, CITATION_RULE, LINK_RULE, keyphrase_rule, OPENING_STYLES, PLATFORM_STYLE_HINTS, _style_block,
                           category_rule, tag_rule)
 from blog_sources import (fetch_url, IMAGE_TYPES, MAX_IMAGE_BYTES, MAX_PDF_BYTES, _HWP_HINT)
 from blog_style_guide import STYLE_GUIDE
@@ -283,6 +283,7 @@ def draft_from_materials(notes_text, topic, target_keyword="", audience="", tone
 - 수치·사실을 쓸 때는 문장 안에서 출처를 밝혀 (예: "○○신문(2026.5) 보도에 따르면", "식약처 고시(p.3)에 따르면").
   각주·링크 목록 형식은 쓰지 마.
 {CITATION_RULE}
+{LINK_RULE}
 - 숫자는 자료 노트에 있는 그대로. 단위 환산·합산 같은 계산을 새로 하지 마 (꼭 필요하면 계산식을 함께 보여줘).
 - 검수 표시 — 판단이 필요한 자리에 독립된 줄이나 문장 끝에 [검수: 이유] 로 남겨:
   · 자료 속 효능·효과 주장이 건강기능식품 인정 범위를 벗어났을 수 있으면 → 글에서는 "~라고 광고했다"처럼

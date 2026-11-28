@@ -32,7 +32,7 @@ for _name in ("markdown", "caption", "info", "warning", "error", "success", "wri
     setattr(st, _name, _no_strike(getattr(st, _name)))
 
 from blog_drafter import draft_post, suggest_questions, revise_draft
-from blog_factcheck import check_numbers, build_references, unverified, find_copied_sentences
+from blog_factcheck import check_numbers, build_references, unverified, find_copied_sentences, unknown_urls
 from blog_materials import (make_material_note, suggest_topics, draft_from_materials,
                             count_materials, split_notes, AUDIENCES, TONES, LENGTHS,
                             EXPERIENCE_FIELDS, EXPERIENCE_FIELD_MAX, EXPERIENCE_MIN_FIELDS,
@@ -50,7 +50,8 @@ from blog_utils import (parse_draft_metadata, load_past_titles, find_keyword_ove
                         load_autosave, save_autosave, DATA_DIR, DRAFTS_DIR,
                         load_settings, save_settings, publish_tail, source_cards, card_numbers,
                         parse_table_input, tables_to_markup, TABLE_INPUT_MAX, safe_tilde_text,
-                        cta_html, cta_gutenberg, CTA_COLORS, CTA_SPONSORED_NOTE, button_markup)
+                        cta_html, cta_gutenberg, CTA_COLORS, CTA_SPONSORED_NOTE, button_markup,
+                        extract_references)
 
 st.set_page_config(page_title="블로그 초안 생성기", page_icon="✍️")
 
@@ -147,6 +148,7 @@ def init_state():
         st.session_state.set_disclosure = settings["disclosure"]
         st.session_state.set_disclose_ai = bool(settings["disclose_ai"])
         st.session_state.set_categories = "\n".join(settings["categories"])
+        st.session_state.set_site_url = settings["site_url"]
         st.session_state.autosave_loaded = True
 
     for key in INPUT_DEFAULTS:
@@ -209,7 +211,10 @@ def persist(platform, new_draft):
 
 
 def remember_typed_numbers(old_text, new_text):
-    """내가 직접 입력한 숫자는 숫자 대조에서 '근거 있음'으로 인정되게 기록."""
+    """내가 직접 입력한 숫자·주소는 숫자 대조·주소 대조에서 '근거 있음'으로 인정되게 기록."""
+    new_urls = [u for u in re.findall(r"https?://[^\s\]|)>\"']+", new_text) if u not in old_text]
+    if new_urls:
+        st.session_state.inputs.setdefault("user_additions", []).append("직접 넣은 주소: " + " ".join(new_urls))
     old_nums = set(re.findall(r"\d+(?:[.,]\d+)*", old_text))
     new_nums = [n for n in re.findall(r"\d+(?:[.,]\d+)*", new_text) if n not in old_nums]
     if new_nums:
@@ -297,6 +302,7 @@ def save_settings_cb():
         "disclosure": st.session_state.set_disclosure.strip(),
         "disclose_ai": st.session_state.set_disclose_ai,
         "categories": lines_of(st.session_state.set_categories),
+        "site_url": st.session_state.set_site_url.strip().rstrip("/"),
     })
     st.session_state.reviews = {}  # 카테고리·저자 소개가 바뀌면 점검을 다시 하게
 
@@ -397,6 +403,11 @@ with st.sidebar:
                 help="의무는 아니야 (구글은 AI 사용 여부가 아니라 글 품질로 평가해). 켜면 글 끝에 "
                      "'초안 정리에 AI 도구의 도움을 받았고, 내용 확인과 최종 판단은 필자가 했습니다'가 붙어. "
                      "협찬·제휴 링크가 있을 때 밝히는 '이해관계 고지'는 이것과 별개로 꼭 써야 해.")
+    st.text_input(
+        "내 블로그 주소", key="set_site_url", placeholder="예) https://myblog.com",
+        help="적어두면 이 주소로 가는 링크는 '내부 링크'(같은 창), 다른 사이트는 '외부 링크'(새 창)로 자동 구분돼. "
+             "점검에서 내부·외부 링크 수를 셀 때도 이 주소를 기준으로 봐.",
+    )
     st.text_area(
         "내 블로그 카테고리 목록 (한 줄에 하나)", key="set_categories", height=110,
         placeholder="예)\n건강기능식품 표시·광고\n식품 안전·이슈\n재테크",
@@ -993,7 +1004,11 @@ if st.session_state.drafts:
                     st.session_state.reviews[platform] = {
                         "cliche": scan_cliches(draft),
                         "structure": scan_structure(draft),
-                        "seo": scan_seo(meta, platform, st.session_state.target_keyword),
+                        "seo": scan_seo(meta, platform, st.session_state.target_keyword,
+                                        has_reference_links=any(" | http" in r for r in extract_references(inputs)))
+                               + [f"재료에 없는 주소 '{u}' — AI가 지어낸 주소일 수 있어. 직접 열어보고 맞으면 그대로 두고, "
+                                  "아니면 그 링크를 지워 (내가 넣은 주소면 무시)"
+                                  for u in unknown_urls(meta["body"], inputs, load_settings()["site_url"])],
                         "claims": scan_health_claims(meta["body"]),
                         "ai_patterns": scan_ai_patterns(meta["body"]),
                         "facts": check_numbers(meta["body"], build_references(inputs)),
@@ -1126,6 +1141,7 @@ if st.session_state.drafts:
                         else:
                             if added:
                                 inputs.setdefault("user_additions", []).extend(added)
+                            remember_typed_numbers(body_now, new_body)
                             edited = current_meta(platform, meta)
                             edited["body"] = new_body
                             persist(platform, compose_draft(edited))

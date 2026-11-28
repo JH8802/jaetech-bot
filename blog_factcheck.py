@@ -35,7 +35,7 @@ def check_numbers(body, references):
     results = {}
     for line in body.split("\n"):
         stripped = line.strip()
-        if not stripped or stripped.startswith("["):
+        if not stripped or (stripped.startswith("[") and not stripped.startswith("[[")):
             continue
         clean = _TAG_RE.sub(" ", stripped)
         for m in _NUM_RE.finditer(clean):
@@ -102,4 +102,29 @@ def find_copied_sentences(body, raw_texts, n=COPY_NGRAM):
             if source:
                 found.append({"sentence": sentence.strip()[:120], "source": source})
                 break
+    return found
+
+
+# ─────────────────────────────────────────────
+# 링크 주소 대조 — AI가 재료에 없는 주소를 지어냈는지
+# ─────────────────────────────────────────────
+URL_IN_TEXT = re.compile(r"https?://[^\s\]|)>\"']+")
+
+
+def unknown_urls(body, inputs, site_url=""):
+    """본문 속 주소 중 재료(출처·자료·메모·표·내가 직접 넣은 것)에 없는 것. 내 블로그 주소는 제외."""
+    from blog_utils import is_internal_url
+    pool = "\n".join([
+        *inputs.get("sources", []), *inputs.get("notes", []), *inputs.get("key_points", []),
+        *inputs.get("tables", []), *inputs.get("user_additions", []), inputs.get("own_body", ""),
+        *(inputs.get("material_raw") or {}).keys(),
+    ])
+    found = []
+    for url in URL_IN_TEXT.findall(body or ""):
+        url = url.rstrip(".,;:")
+        if url in found or url in pool:
+            continue
+        if site_url and is_internal_url(url, site_url):
+            continue
+        found.append(url)
     return found
