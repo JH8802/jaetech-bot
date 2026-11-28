@@ -1162,6 +1162,13 @@ if st.session_state.drafts:
                         st.caption("📰 링크가 있는 출처가 있는데 본문에 원문 카드가 없어. 넣고 싶은 문단 다음 줄에 "
                                    "[원문 카드: 번호]를 적고 💾 저장하면 돼 (번호는 자료 노트의 [자료 N] / 출처 칸의 줄 순서).")
                     st.code(html_code, language="html")
+                    stem = os.path.splitext(os.path.basename(st.session_state.filenames.get(platform, platform)))[0]
+                    st.download_button(
+                        "⬇️ HTML 파일로 내려받기", html_code.encode("utf-8"), file_name=f"{stem}.html",
+                        mime="text/html", key=f"dl_html_{platform}",
+                        help="내 PC에 .html 파일로 저장돼. 발행할 땐 파일을 메모장으로 열어 전체 복사해서 붙여넣으면 돼 "
+                             "(위 상자의 복사 아이콘을 눌러도 똑같아).",
+                    )
 
             # ── 점검 결과 ──
             st.subheader("📋 점검 결과")
