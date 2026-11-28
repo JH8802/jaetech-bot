@@ -414,6 +414,24 @@ def safe_tilde(html_text):
     return "".join(p if p.startswith("<") else p.replace("~", TILDE_SAFE) for p in parts)
 
 
+_URL_TOKEN = re.compile(r"https?://\S+")
+
+
+def safe_tilde_text(text):
+    """원고 글자의 ~ 를 ∼ 로 바꾼다 (링크 주소 안의 ~ 는 그대로).
+    본문 칸 글자를 복사해 워드프레스 일반 편집기에 붙여넣으면, 워드프레스가 마크다운으로 읽어
+    '70~99 … 1~2번'의 ~ 두 개 사이를 취소선(<del>)으로 바꾸기 때문 (실제 변환 코드로 확인)."""
+    if not text or "~" not in text:
+        return text
+    out, last = [], 0
+    for m in _URL_TOKEN.finditer(text):
+        out.append(text[last:m.start()].replace("~", TILDE_SAFE))
+        out.append(m.group(0))
+        last = m.end()
+    out.append(text[last:].replace("~", TILDE_SAFE))
+    return "".join(out)
+
+
 def body_to_html(body, cards=None):
     """티스토리 HTML 모드에 붙여넣을 일반 HTML.
     소제목 → <h2>, 요약 박스·표·목록·원문 카드 포함. 아직 안 채운 항목은 노란 표시로 남김.
@@ -683,7 +701,7 @@ def write_draft_file(path, topic, platform, keyword, draft, inputs=None, backup=
         stem = os.path.basename(path)[:-len(".txt")]
         shutil.copy(path, os.path.join(folder, "history", f"{stem}_이전_{datetime.now():%H%M%S}.txt"))
     with open(path, "w", encoding="utf-8") as f:
-        f.write(f"주제: {topic}\n플랫폼: {platform}\n타깃 키워드: {keyword}\n\n{draft}")
+        f.write(f"주제: {topic}\n플랫폼: {platform}\n타깃 키워드: {keyword}\n\n{safe_tilde_text(draft)}")
     if inputs is not None:
         with open(path[:-len(".txt")] + ".json", "w", encoding="utf-8") as f:
             json.dump(inputs, f, ensure_ascii=False, indent=2)

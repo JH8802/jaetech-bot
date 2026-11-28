@@ -49,7 +49,7 @@ from blog_utils import (parse_draft_metadata, load_past_titles, find_keyword_ove
                         load_style_sample, save_style_sample, STYLE_SAMPLE_MAX,
                         load_autosave, save_autosave, DATA_DIR, DRAFTS_DIR,
                         load_settings, save_settings, publish_tail, source_cards, card_numbers,
-                        parse_table_input, tables_to_markup, TABLE_INPUT_MAX)
+                        parse_table_input, tables_to_markup, TABLE_INPUT_MAX, safe_tilde_text)
 
 st.set_page_config(page_title="블로그 초안 생성기", page_icon="✍️")
 
@@ -196,6 +196,7 @@ def current_meta(platform, meta):
 
 def persist(platform, new_draft):
     """원고를 바꾸고 같은 파일에 저장 (이전 버전은 drafts/history/), 점검은 다시 하게 함."""
+    new_draft = safe_tilde_text(new_draft)  # 복사해서 워드프레스에 붙여도 ~ 가 취소선이 안 되게
     inputs = st.session_state.inputs
     write_draft_file(
         st.session_state.filenames[platform], inputs.get("topic", ""), platform,
@@ -217,6 +218,7 @@ def remember_typed_numbers(old_text, new_text):
 def apply_edit(platform, old_draft, new_draft, label, notes=None):
     """다듬기 결과를 반영하고, 되돌리기·바뀐 곳 보기를 위해 이전 원고를 기억해 둔다.
     notes: 화면에 같이 보여줄 단계별 안내 (예: '맞춤법: 고칠 곳 없음')"""
+    new_draft = safe_tilde_text(new_draft)
     st.session_state.undo[platform] = old_draft
     st.session_state.last_edit[platform] = {"label": label, "old": old_draft, "new": new_draft,
                                             "notes": notes or []}
@@ -242,7 +244,7 @@ def edit_history_ui(platform, publish_code, where):
 
 def finish_generation(drafts, filenames, inputs, keyword):
     st.session_state.undo, st.session_state.last_edit = {}, {}
-    st.session_state.drafts = drafts
+    st.session_state.drafts = {p: safe_tilde_text(d) for p, d in drafts.items()}
     st.session_state.filenames = filenames
     st.session_state.target_keyword = keyword
     st.session_state.reviews = {}
@@ -318,7 +320,7 @@ def load_draft_cb():
         "topic": info["topic"], "target_keyword": info["keyword"], "key_points": [],
         "sources": [], "personal_take": "", "notes": [], "user_additions": [],
     }
-    st.session_state.drafts = {platform: info["draft"]}
+    st.session_state.drafts = {platform: safe_tilde_text(info["draft"])}
     st.session_state.filenames = {platform: path}
     st.session_state.undo, st.session_state.last_edit = {}, {}
     st.session_state.target_keyword = info["keyword"]
