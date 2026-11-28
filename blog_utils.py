@@ -222,7 +222,7 @@ PLACEHOLDER_RE = re.compile(
 )
 _INLINE_TAG_RE = re.compile(r"\[(?:출처 필요|추가 필요|검수)[^\]\n]*\]")
 _LINK_LINE_RE = re.compile(r"^\[링크:\s*(.*?)\s*\|\s*(https?://\S+)\s*\]$")
-_BUTTON_LINE_RE = re.compile(r"^\[버튼:\s*(.+?)\s*\|\s*(https?://\S+?)\s*\]$")
+_BUTTON_LINE_RE = re.compile(r"^\[버튼:\s*(.+?)\s*\|\s*(https?://[^\s|\]]+)\s*((?:\|[^|\]]*)*)\]$")
 _IMAGE_LINE_RE = re.compile(r"^\[이미지:\s*(https?://\S+)\s*\|\s*(.*?)\s*\]$")
 _BULLET_RE = re.compile(r"^[-•·]\s+")
 _CARD_RE = re.compile(r"^\[원문 카드\s*[:：]\s*(?:자료|출처)?\s*(\d+)\s*\]$")
@@ -266,7 +266,8 @@ def parse_body_blocks(body):
       … [표 끝]                     → ("table", {"caption", "rows"})
       - 항목 / 1. 항목 (연속된 줄)   → ("ul"|"ol", [항목...])
       [링크: 제목 | 주소]           → ("link", (제목, 주소))
-      [버튼: 문구 | 주소]           → ("button", (문구, 주소))   CTA 버튼 (가운데·파란색)
+      [버튼: 문구 | 주소 | 옵션…]   → ("button", (문구, 주소, 옵션 dict))   CTA 버튼
+                                       옵션(선택, 순서 무관): 색(파랑·초록·주황·빨강·검정), 왼쪽, 같은 창, 제휴
       [이미지: 주소 | ALT]          → ("image", (주소, ALT))
       [사진 제안]·[내부링크 제안]·[추가 필요]·[검수] 줄 → ("notice", 줄)
       그 외 연속된 줄               → ("p", [줄...])
@@ -332,7 +333,8 @@ def parse_body_blocks(body):
             blocks.append(("link", _LINK_LINE_RE.match(s).groups()))
         elif _BUTTON_LINE_RE.match(s):
             flush()
-            blocks.append(("button", _BUTTON_LINE_RE.match(s).groups()))
+            text, url, opts = _BUTTON_LINE_RE.match(s).groups()
+            blocks.append(("button", (text, url, parse_button_options(opts))))
         elif _IMAGE_LINE_RE.match(s):
             flush()
             blocks.append(("image", _IMAGE_LINE_RE.match(s).groups()))
@@ -413,6 +415,51 @@ def _card_gutenberg(card):
 # ─────────────────────────────────────────────
 CTA_COLORS = {"파랑": "#2f6fde", "초록": "#1f9d55", "주황": "#f07c1d", "빨강": "#e03131", "검정": "#222222"}
 CTA_SPONSORED_NOTE = "※ 이 링크는 제휴 링크로, 이 링크를 통해 구매하면 글쓴이가 일정 수수료를 받을 수 있습니다."
+
+
+BUTTON_OPTION_WORDS = ("왼쪽", "가운데", "같은 창", "새 창", "제휴")
+
+
+def parse_button_options(text):
+    """'| 초록 | 왼쪽 | 제휴' 같은 버튼 옵션 → cta_html/cta_gutenberg 인자. 모르는 말은 무시."""
+    args = {}
+    for word in (w.strip() for w in (text or "").split("|")):
+        if word in CTA_COLORS:
+            args["color"] = CTA_COLORS[word]
+        elif word == "왼쪽":
+            args["center"] = False
+        elif word == "같은 창":
+            args["new_tab"] = False
+        elif word == "제휴":
+            args["sponsored"] = True
+            args["note"] = CTA_SPONSORED_NOTE
+    return args
+
+
+def button_line_problems(body):
+    """본문의 [버튼: …] 줄에서 잘못 쓴 곳을 찾는다 (형식 오류·모르는 옵션)."""
+    problems = []
+    for line in (body or "").split("\n"):
+        s = line.strip()
+        if not s.startswith("[버튼"):
+            continue
+        m = _BUTTON_LINE_RE.match(s)
+        if not m:
+            problems.append(f"버튼 줄 형식이 틀려서 버튼이 안 만들어짐: '{s[:60]}' — [버튼: 문구 | https://주소] 형식으로")
+            continue
+        unknown = [w.strip() for w in m.group(3).split("|")
+                   if w.strip() and w.strip() not in CTA_COLORS and w.strip() not in BUTTON_OPTION_WORDS]
+        if unknown:
+            problems.append(f"버튼 옵션 {', '.join(repr(w) for w in unknown)}는 모르는 말이라 무시됨 — 쓸 수 있는 옵션: "
+                            f"{'·'.join(CTA_COLORS)} / 왼쪽 / 같은 창 / 제휴")
+    return problems
+
+
+def button_markup(url, text, color_name="파랑", center=True, sponsored=False, new_tab=True):
+    """본문 칸에 넣을 버튼 한 줄 — 기본값(파랑·가운데·새 창)이 아닌 옵션만 붙인다."""
+    opts = ([color_name] if color_name != "파랑" else []) + ([] if center else ["왼쪽"]) \
+        + ([] if new_tab else ["같은 창"]) + (["제휴"] if sponsored else [])
+    return f"[버튼: {text} | {url}" + "".join(f" | {o}" for o in opts) + "]"
 
 
 def _cta_rel(sponsored, new_tab):
@@ -536,7 +583,7 @@ def body_to_html(body, cards=None):
             title, url = data
             out.append(f'<p>👉 함께 보면 좋은 글: <a href="{html.escape(url)}">{html.escape(title)}</a></p>')
         elif kind == "button":
-            out.append(cta_html(data[1], data[0]))
+            out.append(cta_html(data[1], data[0], **data[2]))
         elif kind == "image":
             url, alt = data
             out.append(f'<p><img src="{html.escape(url)}" alt="{html.escape(alt)}"></p>')
@@ -622,7 +669,7 @@ def body_to_gutenberg(body, cards=None):
             out.append(_wp("paragraph",
                            f'<p>👉 함께 보면 좋은 글: <a href="{html.escape(url)}">{html.escape(title)}</a></p>'))
         elif kind == "button":
-            out.append(cta_gutenberg(data[1], data[0]))
+            out.append(cta_gutenberg(data[1], data[0], **data[2]))
         elif kind == "refs":
             out.append(_wp("heading", f'<h2 class="wp-block-heading">{REFS_TITLE}</h2>'))
             lis = "\n\n".join(_wp("list-item", f"<li>{_ref_item(x)}</li>") for x in data)

@@ -1,5 +1,5 @@
 import anthropic
-from blog_utils import parse_draft_metadata, count_keyphrase, keyphrase_target, long_sentence_stats, LONG_SENTENCE_WORDS, LONG_SENTENCE_MAX_RATIO, extract_text, has_keyword, load_settings, find_placeholders, source_cards, card_numbers
+from blog_utils import button_line_problems, parse_draft_metadata, count_keyphrase, keyphrase_target, long_sentence_stats, LONG_SENTENCE_WORDS, LONG_SENTENCE_MAX_RATIO, extract_text, has_keyword, load_settings, find_placeholders, source_cards, card_numbers
 from dotenv import load_dotenv
 import os
 import json
@@ -118,6 +118,8 @@ def scan_structure(draft):
 
     if len(draft) < 1000:
         issues.append(f"본문이 짧음 ({len(draft)}자) — 짧은 글은 저품질 신호로 취급될 수 있음")
+
+    issues += button_line_problems(parse_draft_metadata(draft)["body"])
 
     long_ones, total, ratio = long_sentence_stats(parse_draft_metadata(draft)["body"])
     if total and ratio > LONG_SENTENCE_MAX_RATIO:

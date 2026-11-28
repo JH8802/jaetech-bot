@@ -50,7 +50,7 @@ from blog_utils import (parse_draft_metadata, load_past_titles, find_keyword_ove
                         load_autosave, save_autosave, DATA_DIR, DRAFTS_DIR,
                         load_settings, save_settings, publish_tail, source_cards, card_numbers,
                         parse_table_input, tables_to_markup, TABLE_INPUT_MAX, safe_tilde_text,
-                        cta_html, cta_gutenberg, CTA_COLORS, CTA_SPONSORED_NOTE)
+                        cta_html, cta_gutenberg, CTA_COLORS, CTA_SPONSORED_NOTE, button_markup)
 
 st.set_page_config(page_title="블로그 초안 생성기", page_icon="✍️")
 
@@ -490,9 +490,14 @@ def cta_tool_ui():
             st.caption("에디터 오른쪽 위 '기본모드' → HTML로 바꾼 뒤, 버튼을 넣을 자리에 붙여넣기.")
             st.code(preview, language="html")
         with tab_body:
-            st.caption("원고의 📄 본문 칸에서 버튼을 넣을 자리에 이 한 줄을 넣고 💾 저장하면, 🧩 HTML에 버튼으로 들어가 "
-                       "(기본 모양: 가운데·파란색). 색·위치·제휴 고지를 바꾸려면 위 워드프레스/티스토리 코드를 써.")
-            st.code(f"[버튼: {text} | {url}]", language=None)
+            st.caption("원고의 📄 본문 칸에서 버튼을 넣을 자리에 아래 내용을 넣고 💾 저장하면, 🧩 HTML에 위에서 고른 "
+                       "색·위치·제휴 표시 그대로 버튼이 들어가 (앞뒤 줄은 비워둬).")
+            snippet = button_markup(url, text, color, center, sponsored, new_tab)
+            st.code((lead + "\n\n" if lead else "") + snippet, language=None)
+            st.caption("옵션은 줄 끝에 | 로 붙이면 돼 (순서 상관없음): 색 = 파랑·초록·주황·빨강·검정 / 왼쪽 / 같은 창 / 제휴. "
+                       "예) [버튼: 쿠팡에서 가격 보기 | https://… | 주황 | 제휴]")
+            if sponsored and note != CTA_SPONSORED_NOTE:
+                st.warning("본문 칸 방식은 제휴 고지가 기본 문구로 들어가. 고친 고지 문구를 쓰려면 워드프레스/티스토리 탭 코드를 써.")
 
 
 cta_tool_ui()
