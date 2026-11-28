@@ -16,7 +16,7 @@ from datetime import datetime
 import anthropic
 from dotenv import load_dotenv
 
-from blog_drafter import (AI_HABITS_RULE, READABILITY_RULE, CITATION_RULE, LINK_RULE, keyphrase_rule, OPENING_STYLES, PLATFORM_STYLE_HINTS, _style_block,
+from blog_drafter import (AI_HABITS_RULE, READABILITY_RULE, CITATION_RULE, LINK_RULE, tables_block, keyphrase_rule, OPENING_STYLES, PLATFORM_STYLE_HINTS, _style_block,
                           category_rule, tag_rule)
 from blog_sources import (fetch_url, IMAGE_TYPES, MAX_IMAGE_BYTES, MAX_PDF_BYTES, _HWP_HINT)
 from blog_style_guide import STYLE_GUIDE
@@ -196,7 +196,7 @@ def suggest_topics(notes_text, audience="", experience=""):
 
 
 def draft_from_materials(notes_text, topic, target_keyword="", audience="", tone="", length=3000,
-                         opinion="", platform="워드프레스", past_titles=None, style_sample=None):
+                         opinion="", platform="워드프레스", past_titles=None, style_sample=None, tables=None):
     """자료 노트를 근거로 블로그 원고를 쓴다 (본문 표기법은 blog_utils.parse_body_blocks 참고)."""
     if not (notes_text or "").strip():
         raise ValueError("자료 노트가 비어 있어. 먼저 자료를 읽어서 정리해줘.")
@@ -240,7 +240,7 @@ def draft_from_materials(notes_text, topic, target_keyword="", audience="", tone
 
 [자료 노트 — 이 글의 유일한 근거. 여기 없는 사실·수치는 쓰지 마]
 {notes_text}
-
+{tables_block(tables)}
 출력 순서와 형식 (마크다운 기호 #, *, ** 는 쓰지 마):
 1. [제목] 타깃 키워드를 자연스럽게 한 번 넣은 제목 (20~30자, 낚시성 과장 금지)
 2. [제목 후보] 다른 각도의 제목 후보 — 이 줄을 2번 (한 줄에 하나씩)

@@ -1245,3 +1245,77 @@ def tables_to_markup(tables):
     """parse_table_input 결과를 본문 표기법([표] … [표 끝]) 문자열 목록으로."""
     return ["\n".join([f"[표] {t['caption']}".rstrip()] + [" | ".join(r) for r in t["rows"]] + ["[표 끝]"])
             for t in tables]
+
+
+def normalize_own_tables(text):
+    """내가 쓴 원고 안에 붙여넣은 표를 [표] … [표 끝] 표기로 바꾼다 (그 자리 그대로).
+    - HTML 표(<table>…</table>)
+    - 엑셀·구글시트에서 복사한 표 (칸이 탭으로 나뉜 줄이 2줄 이상 연속)
+    - | 로 칸을 나눈 줄이 2줄 이상 연속 (마크다운 표 포함)
+    이미 [표] … [표 끝]으로 쓴 표, [링크: …]·[버튼: …] 같은 표시 줄은 건드리지 않는다.
+    반환: (바뀐 원고, 바꾼 표 개수)"""
+    count = 0
+
+    def html_table(m):
+        nonlocal count
+        tables, _ = parse_table_input(m.group(0))
+        if not tables:
+            return m.group(0)
+        count += len(tables)
+        return "\n\n" + "\n\n".join(tables_to_markup(tables)) + "\n\n"
+
+    text = re.sub(r"<table\b.*?</table>", html_table, text or "", flags=re.IGNORECASE | re.DOTALL)
+
+    def row_of(line):
+        s = line.strip()
+        if not s or (s.startswith("[") and not s.startswith("[[")):
+            return None
+        if "\t" in line:
+            cells = [c.strip() for c in line.strip("\r\n").split("\t")]
+        elif "|" in visible_text(s):
+            cells = _split_cells(s.strip("|"))
+        else:
+            return None
+        if all(re.fullmatch(r":?-{2,}:?", c) for c in cells if c):  # 마크다운 구분줄
+            return []
+        return cells if sum(1 for c in cells if c) >= 2 else None
+
+    out, run, in_box = [], [], False
+
+    def flush_run():
+        nonlocal count
+        rows = [r for r in run if r]
+        if len(rows) >= 2:
+            width = max(len(r) for r in rows)
+            rows = [r + [""] * (width - len(r)) for r in rows]
+            out.extend(["", "[표]", *(" | ".join(c.replace("|", "/") if not INLINE_LINK_RE.search(c) else c
+                                                   for c in r) for r in rows), "[표 끝]", ""])
+            count += 1
+        else:
+            out.extend(raw_run)
+        run.clear()
+        raw_run.clear()
+
+    raw_run = []
+    for line in text.split("\n"):
+        s = line.strip()
+        if s.startswith("[표]"):
+            in_box = True
+        if in_box:
+            if run:
+                flush_run()
+            out.append(line)
+            if s.startswith("[표 끝]"):
+                in_box = False
+            continue
+        cells = row_of(line)
+        if cells is not None:
+            run.append(cells)
+            raw_run.append(line)
+            continue
+        if run:
+            flush_run()
+        out.append(line)
+    if run:
+        flush_run()
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(out)).strip(), count

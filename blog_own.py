@@ -76,6 +76,7 @@ def package_own_draft(own_text, target_keyword="", platform="워드프레스", w
     heading_rule = (
         '- "headings": 원고에 소제목이 거의 없어. 문단 사이 자연스러운 자리에 소제목 3~5개를 제안해 — '
         '각 소제목은 사람들이 검색할 법한 질문·키워드로, 그 아래 문단들이 실제로 답하는 내용으로. '
+        '그중 1~2개에는 초점 키프레이즈를 글자 그대로 넣어 (전부 넣지는 마). '
         '"before"는 그 소제목이 들어갈 문단 번호 (그 문단 바로 앞에 들어감). 첫 문단(1) 앞에는 넣지 마.'
         if need_headings else '- "headings": 원고에 소제목이 이미 있으니 빈 배열 [] 로 둬.'
     )
@@ -100,7 +101,8 @@ def package_own_draft(own_text, target_keyword="", platform="워드프레스", w
 - "summary": "한눈에 보기" 요약 3~4개. 원고 핵심을 한 줄씩, 숫자는 원고에 있는 그대로
 {heading_rule}
 - "photos": 사진이 있으면 좋을 자리 1~2개. "after"는 그 사진이 들어갈 문단 번호(그 문단 바로 뒤),
-  "desc"는 어떤 사진인지, "alt"는 이미지에 실제로 보이는 것을 설명하는 대체 텍스트, "filename"은 영문 소문자 하이픈 파일명.jpg
+  "desc"는 어떤 사진인지, "alt"는 이미지에 실제로 보이는 것을 설명하는 대체 텍스트(그중 1개에는 초점 키프레이즈를
+  자연스럽게 넣어), "filename"은 영문 소문자 하이픈 파일명.jpg
 {faq_rule}
 - 질병 치료·예방으로 읽힐 수 있는 표현은 제목·설명·요약·FAQ 어디에도 쓰지 마.
 

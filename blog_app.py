@@ -51,7 +51,7 @@ from blog_utils import (parse_draft_metadata, load_past_titles, find_keyword_ove
                         load_settings, save_settings, publish_tail, source_cards, card_numbers,
                         parse_table_input, tables_to_markup, TABLE_INPUT_MAX, safe_tilde_text,
                         cta_html, cta_gutenberg, CTA_COLORS, CTA_SPONSORED_NOTE, button_markup,
-                        extract_references)
+                        extract_references, normalize_own_tables)
 
 st.set_page_config(page_title="블로그 초안 생성기", page_icon="✍️")
 
@@ -347,6 +347,7 @@ def load_draft_cb():
         for key, field in (("mat_audience", "audience"), ("mat_tone", "tone"), ("mat_length", "length")):
             set_input(key, _clean_input(key, inputs.get(field)))
         st.session_state.mat_raw = inputs.get("material_raw", {})
+        set_input("table_text", "\n\n".join(inputs.get("tables", []))[:TABLE_INPUT_MAX])
     elif inputs.get("mode") == "own":
         set_input("mode", MODE_OWN)
         set_input("own_body", _clean_input("own_body", inputs.get("own_body", "")))
@@ -523,6 +524,27 @@ if "티스토리" in platforms and "워드프레스" in platforms:
     st.warning("**중복 콘텐츠 주의** — 같은 주제를 티스토리와 워드프레스에 둘 다 올리면 내용이 거의 같아서, 구글이 하나만 검색에 보여주고 나머지는 거의 숨겨 — 두 블로그가 서로 경쟁하게 돼. 원칙은 '한 주제는 한 블로그'. 굳이 둘 다 쓸 거면 주제나 관점을 확실히 나눠서 (예: 소비자 관점 / 실무자 관점) 따로 생성해.")
 
 
+def table_input_ui():
+    """📊 표 넣기 (메모로 쓰기·자료로 쓰기 공용) — 엑셀 복사·직접 작성·HTML 표를 [표]로 바꿔 AI에 넘긴다."""
+    with st.expander("📊 표 넣기 (선택) — 엑셀 복사 · 직접 작성 · HTML 표", expanded=bool(st.session_state.table_text.strip())):
+        table_text = st.text_area(
+            "표 내용 — 표가 여러 개면 빈 줄로 나누거나 각 표 위에 '[표] 표 제목' 줄을 둬",
+            key="table_text", height=180, max_chars=TABLE_INPUT_MAX,
+            placeholder="방법 1) 엑셀·구글시트에서 표를 드래그해서 복사 → 그대로 붙여넣기\n\n"
+                        "방법 2) 직접 쓰기 — 첫 줄은 표 제목(선택), 칸은 | 로 구분\n"
+                        "[표] 유산균 제품 표시 비교\n제품 | 보장균수 | 균주명 표시\nA사 | 100억 | 있음\nB사 | 500억 | 없음\n\n"
+                        "방법 3) HTML 표 붙여넣기 — <table>…</table> (칸 글자만 가져와)",
+            help="표 안의 숫자도 '내가 준 사실'로 취급돼서, AI가 본문에 표를 그대로 넣고 숫자를 바꾸지 않아. "
+                 "숫자 대조에서도 근거 있음으로 인정돼.",
+        )
+        tables, table_problems = parse_table_input(table_text)
+        for problem in table_problems:
+            st.warning(problem)
+        if tables:
+            st.caption(f"✅ 표 {len(tables)}개 인식 — 아래처럼 본문에 들어가 (미리보기)")
+            st.markdown(body_to_html("\n\n".join(tables_to_markup(tables))), unsafe_allow_html=True)
+
+
 def use_suggestion_cb():
     pick = st.session_state.get("ac_pick")
     if pick:
@@ -615,23 +637,7 @@ if mode == MODE_MEMO:
     )
     st.caption(f"{len(key_points_text):,} / {KEY_POINTS_MAX:,}자")
 
-    with st.expander("📊 표 넣기 (선택) — 엑셀 복사 · 직접 작성 · HTML 표", expanded=bool(st.session_state.table_text.strip())):
-        table_text = st.text_area(
-            "표 내용 — 표가 여러 개면 빈 줄로 나누거나 각 표 위에 '[표] 표 제목' 줄을 둬",
-            key="table_text", height=180, max_chars=TABLE_INPUT_MAX,
-            placeholder="방법 1) 엑셀·구글시트에서 표를 드래그해서 복사 → 그대로 붙여넣기\n\n"
-                        "방법 2) 직접 쓰기 — 첫 줄은 표 제목(선택), 칸은 | 로 구분\n"
-                        "[표] 유산균 제품 표시 비교\n제품 | 보장균수 | 균주명 표시\nA사 | 100억 | 있음\nB사 | 500억 | 없음\n\n"
-                        "방법 3) HTML 표 붙여넣기 — <table>…</table> (칸 글자만 가져와)",
-            help="표 안의 숫자도 '내가 준 사실'로 취급돼서, AI가 본문에 표를 그대로 넣고 숫자를 바꾸지 않아. "
-                 "숫자 대조에서도 근거 있음으로 인정돼.",
-        )
-        tables, table_problems = parse_table_input(table_text)
-        for problem in table_problems:
-            st.warning(problem)
-        if tables:
-            st.caption(f"✅ 표 {len(tables)}개 인식 — 아래처럼 본문에 들어가 (미리보기)")
-            st.markdown(body_to_html("\n\n".join(tables_to_markup(tables))), unsafe_allow_html=True)
+    table_input_ui()
 
     # 링크/파일에서 가져온 출처는 다음 실행 때 입력칸에 넣는다 (입력칸이 그려진 뒤엔 값을 못 바꿔서)
     if "pending_sources" in st.session_state:
@@ -861,6 +867,7 @@ if mode == MODE_MATERIALS:
     topic, target_keyword = keyword_inputs()
 
     st.subheader("4️⃣ 글 설정")
+    table_input_ui()
     col1, col2 = st.columns(2)
     with col1:
         st.selectbox("독자", AUDIENCES, key="mat_audience")
@@ -887,6 +894,7 @@ if mode == MODE_MATERIALS:
                 "experience": exp_vals, "notes": [], "user_additions": [],
                 "audience": st.session_state.mat_audience, "tone": st.session_state.mat_tone,
                 "length": st.session_state.mat_length, "material_raw": dict(st.session_state.mat_raw),
+                "tables": tables_to_markup(parse_table_input(st.session_state.table_text)[0]),
             }
             drafts, filenames = {}, {}
             for platform in platforms:
@@ -896,7 +904,7 @@ if mode == MODE_MATERIALS:
                             mat_notes, topic, target_keyword.strip(),
                             audience=st.session_state.mat_audience, tone=st.session_state.mat_tone,
                             length=st.session_state.mat_length, opinion=opinion, platform=platform,
-                            past_titles=load_past_titles(platform),
+                            past_titles=load_past_titles(platform), tables=inputs["tables"],
                         )
                     except Exception as e:
                         st.error(f"❌ {platform} 원고 작성 실패: {e}\n(네트워크 문제일 수 있어 — 다시 눌러봐)")
@@ -925,7 +933,14 @@ elif mode == MODE_OWN:
         f"원고 붙여넣기 (최소 {OWN_MIN_CHARS}자)", key="own_body", height=360, max_chars=OWN_BODY_MAX,
         placeholder="메모장·워드에서 쓴 원고를 그대로 붙여넣어.\n\n## 소제목은 이렇게 줄 맨 앞에 ## 를 붙이면 그대로 소제목이 돼 (■, ▶ 도 돼)\n\n소제목이 없으면 AI가 넣을 자리를 제안해 — 문장은 안 바꿔.",
     )
-    st.caption(f"{len(own_body):,}자")
+    own_fixed, own_tables = normalize_own_tables(own_body)
+    st.caption(f"{len(own_body):,}자" + (f" · 📊 표 {own_tables}개 인식 (엑셀·HTML·| 표 → 서식 있는 표로 바뀌어 들어가)"
+                                         if own_tables else
+                                         " · 표는 엑셀에서 복사해 원고 안 원하는 자리에 그대로 붙여넣으면 돼"))
+    if own_tables:
+        with st.expander(f"📊 원고 속 표 미리보기 ({own_tables}개)"):
+            preview_tables = [b for b in own_fixed.split("\n\n") if b.strip().startswith("[표]")]
+            st.markdown(body_to_html("\n\n".join(preview_tables)), unsafe_allow_html=True)
     keyword_suggest_ui()
     own_keyword = st.text_input(
         "타깃 키워드 (이 글로 잡고 싶은 검색어 — 비우면 AI가 원고에서 고름)", key="kw_input",
@@ -952,9 +967,9 @@ elif mode == MODE_OWN:
         else:
             inputs = {
                 "mode": "own", "topic": "", "target_keyword": own_keyword.strip(),
-                "own_body": own_body, "want_faq": st.session_state.own_faq,
+                "own_body": own_fixed, "want_faq": st.session_state.own_faq,
                 # 원고 전체가 저자 글 — 경험 점검·숫자 대조에서 '저자가 쓴 것'으로 인정됨
-                "key_points": lines_of(own_body), "personal_take": "",
+                "key_points": lines_of(own_fixed), "personal_take": "",
                 "sources": split_notes(own_notes), "notes": [], "user_additions": [],
                 "material_raw": dict(st.session_state.mat_raw),
             }
@@ -962,7 +977,7 @@ elif mode == MODE_OWN:
             for platform in platforms:
                 with st.spinner(f"⏳ {platform}용 제목·요약·목차 만드는 중..."):
                     try:
-                        draft, info = package_own_draft(own_body, own_keyword.strip(), platform,
+                        draft, info = package_own_draft(own_fixed, own_keyword.strip(), platform,
                                                         want_faq=st.session_state.own_faq)
                     except Exception as e:
                         st.error(f"❌ {platform} 처리 실패: {e}")
@@ -1315,7 +1330,8 @@ if st.session_state.drafts:
                 "여러 개를 같이 골라도 돼 — 고른 것들을 **점검 지적 반영 → 구조 정리 → 맞춤법** 순서로 차례대로 돌려. "
                 "하나 고를 때마다 Claude를 1번씩 호출해 (3개 다 고르면 3번). 어느 쪽이든 원고·재료에 없는 "
                 "사실·숫자·경험은 보태지 않고, 바뀐 곳을 보여주고 한 번에 되돌릴 수 있어."
-                + ("" if not is_own else " 처음엔 '맞춤법·오타만'을 추천해 — 내 문장이 그대로 남아.")
+                + ("" if not is_own else " 처음엔 '맞춤법·오타만'을 추천해 — 내 문장이 그대로 남아. 점검에서 "
+                   "초점 키프레이즈(첫 문단·횟수)나 긴 문장 지적이 나오면 '구조 정리'가 내 문장을 최소한만 바꿔서 맞춰줘.")
             )
             default_on = "proofread" if is_own else "review"
             picked = [lvl for lvl, text in levels.items()

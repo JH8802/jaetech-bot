@@ -77,6 +77,22 @@ READABILITY_RULE = """- 문장 길이: 한 문장은 대부분 15어절(띄어�
   (워드프레스 Yoast 가독성 기준: 20단어 넘는 문장이 25%를 넘으면 경고) 짧은 문장과 중간 길이 문장을
   섞는 리듬은 유지해."""
 
+def tables_block(tables):
+    """저자가 직접 넣은 표를 프롬프트에 넣는 블록 (없으면 빈 문자열) — 메모·자료 모드 공용."""
+    if not tables:
+        return ""
+    return f"""
+저자가 직접 정리한 표 (본문에 반드시 넣어):
+{chr(10).join(tables)}
+
+표 규칙:
+- 위 표를 본문에서 가장 관련 있는 자리에 [표] … [표 끝] 형식 그대로 넣어. 칸 내용·숫자·행 순서는 한 글자도 바꾸지 마.
+  [표] 뒤 제목이 비어 있으면 내용에 맞는 짧은 표 제목을 붙여.
+- 표 바로 앞이나 뒤에 표에서 읽어낼 핵심을 1~2문장으로 풀어 줘 (표에 없는 숫자는 쓰지 마).
+- 표의 숫자도 사실 재료야 — 본문에서 인용할 때 표에 있는 그대로.
+"""
+
+
 LINK_RULE = """- 문장 속 링크: 재료(출처·자료 노트)에 원문 주소(https://…)가 적힌 출처를 본문에서 처음 언급할 때,
   출처 이름에 [[출처 이름 | 주소]] 형식으로 링크를 걸어 (예: [[식약처 건강기능식품 기준 및 규격 | https://…]]에 따르면).
   글 전체에서 최대 3개, 같은 주소는 한 번만. 주소는 재료에 적힌 것을 글자 그대로만 써 — 재료에 없는 주소는
@@ -185,18 +201,7 @@ def draft_post(topic, key_points, personal_take="", platform="네이버 블로�
     else:
         sources_block = "\n참고 자료/출처: (별도 입력 없음)\n"
 
-    tables_block = ""
-    if tables:
-        tables_block = f"""
-저자가 직접 정리한 표 (본문에 반드시 넣어):
-{chr(10).join(tables)}
-
-표 규칙:
-- 위 표를 본문에서 가장 관련 있는 자리에 [표] … [표 끝] 형식 그대로 넣어. 칸 내용·숫자·행 순서는 한 글자도 바꾸지 마.
-  [표] 뒤 제목이 비어 있으면 내용에 맞는 짧은 표 제목을 붙여.
-- 표 바로 앞이나 뒤에 표에서 읽어낼 핵심을 1~2문장으로 풀어 줘 (표에 없는 숫자는 쓰지 마).
-- 표의 숫자도 사실 재료야 — 본문에서 인용할 때 표에 있는 그대로.
-"""
+    tables_block_text = tables_block(tables)
 
     if past_titles:
         titles_text = "\n".join(f"- {t}" for t in past_titles)
@@ -223,7 +228,7 @@ def draft_post(topic, key_points, personal_take="", platform="네이버 블로�
 길게 이어 쓴 문단일 수도 있어. 문단이면 그 안에 든 사실·수치·경험·저자의 판단을
 빠짐없이 읽어내서 글에 반영해):
 {points_text}
-{sources_block}{tables_block}
+{sources_block}{tables_block_text}
 저자의 의견/입장: {personal_take or "(별도 입력 없음 — 사실 전달 위주로 작성)"}
 
 플랫폼: {style_hint}
