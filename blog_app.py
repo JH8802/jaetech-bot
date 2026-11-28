@@ -12,7 +12,6 @@
 - 입력칸 내용은 자동 저장 (껐다 켜도 이어서 작성)
 - 생성·수정한 원고는 drafts/ 폴더에 자동 저장 (덮어쓸 때 이전 버전은 drafts/history/)
 """
-import difflib
 import os
 import re
 from datetime import datetime
@@ -224,29 +223,17 @@ def apply_edit(platform, old_draft, new_draft, label, notes=None):
     persist(platform, new_draft)
 
 
-def edit_history_ui(platform):
-    """방금 다듬기에서 바뀐 곳을 보여주고, 다듬기 전으로 되돌릴 수 있게 한다."""
+def edit_history_ui(platform, publish_code, where):
+    """다듬기가 끝나면 다듬어진 글(발행용)만 바로 복사할 수 있게 보여주고, 되돌리기 버튼을 둔다.
+    publish_code: 지금 원고로 만든 발행용 HTML(티스토리·워드프레스) 또는 본문 글자(네이버)"""
     edit = st.session_state.last_edit.get(platform)
     if not edit or st.session_state.drafts.get(platform) != edit["new"]:
         return
-    def sentences(draft):  # 문단 하나가 한 줄이라, 문장 단위로 쪼개야 바뀐 곳만 보임
-        body = parse_draft_metadata(draft)["body"]
-        return [x for line in body.split("\n") for x in re.split(r"(?<=[.!?])\s+", line.strip()) if x]
-    diff = [l for l in difflib.unified_diff(sentences(edit["old"]), sentences(edit["new"]), lineterm="", n=0)
-            if not l.startswith(("---", "+++", "@@"))]
-    changed = sum(1 for l in diff if l.startswith("+"))
-    st.success(f"✅ 다듬기 완료 ({edit['label']}) — 위 📄 본문 칸과 🧩 HTML에는 **다듬어진 글만** 들어 있어. "
-               "발행할 글은 거기서 복사해.")
+    st.success(f"✅ 다듬기 완료 ({edit['label']}) — 아래가 다듬어진 글이야. 오른쪽 위 복사 아이콘을 눌러서 "
+               f"{where} 붙여넣으면 돼.")
     for note in edit.get("notes", []):
         st.caption(f"ℹ️ {note}")
-    with st.expander(f"🔍 바뀐 곳 비교 보기 — 문장 {changed}개 (확인용: 원래 문장과 바뀐 문장이 같이 있어서 복사용 아님)"):
-        def line_html(l):
-            text = html.escape(l[1:]).replace("~", "&#126;")
-            if l.startswith("-"):
-                return f'<div style="color:#b42318">전: {text}</div>'
-            return f'<div style="color:#067647;margin-bottom:8px">후: {text}</div>'
-        st.markdown("".join(line_html(l) for l in diff) or "(본문은 그대로 — 제목·요약 등만 바뀜)",
-                    unsafe_allow_html=True)
+    st.code(publish_code, language="html" if publish_code.lstrip().startswith("<") else None)
     if st.button("↩️ 다듬기 전으로 되돌리기", key=f"undo_{platform}"):
         persist(platform, st.session_state.undo.pop(platform))
         st.session_state.last_edit.pop(platform, None)
@@ -1221,7 +1208,8 @@ if st.session_state.drafts:
 
             # ── 다듬기 ──
             st.divider()
-            edit_history_ui(platform)
+            edit_history_ui(platform, html_code if platform in ("티스토리", "워드프레스") else publish_body,
+                            where if platform in ("티스토리", "워드프레스") else "에디터에")
             is_own = inputs.get("mode") == "own"
             mode_key = inputs.get("mode", "memo")
             issues = [] if is_own else collect_issues(review)
