@@ -49,7 +49,8 @@ from blog_utils import (parse_draft_metadata, load_past_titles, find_keyword_ove
                         load_style_sample, save_style_sample, STYLE_SAMPLE_MAX,
                         load_autosave, save_autosave, DATA_DIR, DRAFTS_DIR,
                         load_settings, save_settings, publish_tail, source_cards, card_numbers,
-                        parse_table_input, tables_to_markup, TABLE_INPUT_MAX, safe_tilde_text)
+                        parse_table_input, tables_to_markup, TABLE_INPUT_MAX, safe_tilde_text,
+                        cta_html, cta_gutenberg, CTA_COLORS, CTA_SPONSORED_NOTE)
 
 st.set_page_config(page_title="블로그 초안 생성기", page_icon="✍️")
 
@@ -432,6 +433,69 @@ st.caption("발행은 직접, 초안 생성 + 자동 점검까지만 · 입력 �
 st.caption("⚠️ 플랫폼을 여러 개 고르면 그 개수만큼 Claude를 호출해 — 비용도 그만큼 늘어남")
 
 st.button("🔄 새로 시작 (입력칸 비우기)", on_click=reset_all)
+
+
+def cta_tool_ui():
+    """원고와 상관없이, 링크 하나로 '사이트 방문 유도' CTA 버튼 HTML을 만든다."""
+    with st.expander("🔘 CTA 버튼 만들기 — 원고 없이 링크만 넣으면 바로 (워드프레스·티스토리)"):
+        st.caption("글 안에 '이 사이트로 가보세요' 버튼을 넣을 때 써. AI 비용 없음.")
+        url = st.text_input("링크 주소 (URL)", key="cta_url", placeholder="https://www.mfds.go.kr/...").strip()
+        text = st.text_input("버튼 문구", key="cta_text", value="👉 자세히 보러 가기",
+                             help="무엇을 얻는지 보이게 쓰면 더 많이 눌러 — 예: '식약처 원문 기준 확인하기', "
+                                  "'공식 홈페이지에서 성분표 보기'").strip()
+        lead = st.text_input("버튼 위 안내 문장 (선택)", key="cta_lead",
+                             placeholder="예) 더 자세한 기준은 식약처 사이트에서 직접 확인할 수 있어요.").strip()
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            color = st.selectbox("색", list(CTA_COLORS), key="cta_color")
+        with col2:
+            center = st.radio("위치", ["가운데", "왼쪽"], key="cta_align", horizontal=True) == "가운데"
+        with col3:
+            new_tab = st.checkbox("새 창으로 열기", value=True, key="cta_newtab",
+                                  help="독자가 내 글을 닫지 않고 다녀올 수 있어서 보통 켜두는 걸 추천")
+        kind = st.radio("어떤 링크야?", ["일반 정보 링크 (공식 사이트·원문 등)", "제휴·광고 링크 (쿠팡 파트너스·협찬 등)"],
+                        key="cta_kind")
+        sponsored = kind.startswith("제휴")
+        note = ""
+        if sponsored:
+            note = st.text_input(
+                "제휴 고지 문구 (버튼 바로 아래에 붙어)", key="cta_note", value=CTA_SPONSORED_NOTE,
+                help="공정위 추천·보증 심사지침상 제휴·광고 링크는 대가 관계를 밝혀야 해. 쿠팡 파트너스는 "
+                     "'이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.' 문구를 "
+                     "쓰라고 안내하고 있어. 글 맨 앞(첫 화면)에도 한 번 밝히는 게 안전해.",
+            ).strip()
+            st.caption("제휴 링크에는 구글 권장대로 rel=\"sponsored nofollow\"가 자동으로 붙어 "
+                       "(안 붙이면 구글이 '링크를 사고판다'고 보고 불이익을 줄 수 있어).")
+        if not url:
+            return
+        if not re.match(r"^https?://\S+$", url):
+            st.error("링크 주소는 https:// 또는 http:// 로 시작해야 해 (띄어쓰기 없이).")
+            return
+        if not text:
+            st.error("버튼 문구를 적어줘.")
+            return
+        args = dict(lead=lead, color=CTA_COLORS[color], center=center, sponsored=sponsored, new_tab=new_tab, note=note)
+        preview = cta_html(url, text, **args)
+        st.caption("미리보기 (실제 글에서는 테마에 따라 글꼴이 조금 달라 보일 수 있어)")
+        if hasattr(st, "html"):
+            st.html(preview)
+        else:
+            st.markdown(preview, unsafe_allow_html=True)
+        tab_wp, tab_ts, tab_body = st.tabs(["워드프레스", "티스토리", "본문 칸에 넣기"])
+        with tab_wp:
+            st.caption("편집 화면 오른쪽 위 ⋮ → '코드 편집기'에서 버튼을 넣을 자리에 붙여넣기 → '비주얼 편집기'로 돌아오면 "
+                       "버튼 블록으로 보여 (색·문구는 거기서도 바꿀 수 있어). 오른쪽 위 복사 아이콘으로 복사.")
+            st.code(cta_gutenberg(url, text, **args), language="html")
+        with tab_ts:
+            st.caption("에디터 오른쪽 위 '기본모드' → HTML로 바꾼 뒤, 버튼을 넣을 자리에 붙여넣기.")
+            st.code(preview, language="html")
+        with tab_body:
+            st.caption("원고의 📄 본문 칸에서 버튼을 넣을 자리에 이 한 줄을 넣고 💾 저장하면, 🧩 HTML에 버튼으로 들어가 "
+                       "(기본 모양: 가운데·파란색). 색·위치·제휴 고지를 바꾸려면 위 워드프레스/티스토리 코드를 써.")
+            st.code(f"[버튼: {text} | {url}]", language=None)
+
+
+cta_tool_ui()
 st.divider()
 
 mode = st.radio("작성 방식", MODES, key="mode", horizontal=True)

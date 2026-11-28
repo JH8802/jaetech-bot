@@ -222,6 +222,7 @@ PLACEHOLDER_RE = re.compile(
 )
 _INLINE_TAG_RE = re.compile(r"\[(?:출처 필요|추가 필요|검수)[^\]\n]*\]")
 _LINK_LINE_RE = re.compile(r"^\[링크:\s*(.*?)\s*\|\s*(https?://\S+)\s*\]$")
+_BUTTON_LINE_RE = re.compile(r"^\[버튼:\s*(.+?)\s*\|\s*(https?://\S+?)\s*\]$")
 _IMAGE_LINE_RE = re.compile(r"^\[이미지:\s*(https?://\S+)\s*\|\s*(.*?)\s*\]$")
 _BULLET_RE = re.compile(r"^[-•·]\s+")
 _CARD_RE = re.compile(r"^\[원문 카드\s*[:：]\s*(?:자료|출처)?\s*(\d+)\s*\]$")
@@ -265,6 +266,7 @@ def parse_body_blocks(body):
       … [표 끝]                     → ("table", {"caption", "rows"})
       - 항목 / 1. 항목 (연속된 줄)   → ("ul"|"ol", [항목...])
       [링크: 제목 | 주소]           → ("link", (제목, 주소))
+      [버튼: 문구 | 주소]           → ("button", (문구, 주소))   CTA 버튼 (가운데·파란색)
       [이미지: 주소 | ALT]          → ("image", (주소, ALT))
       [사진 제안]·[내부링크 제안]·[추가 필요]·[검수] 줄 → ("notice", 줄)
       그 외 연속된 줄               → ("p", [줄...])
@@ -328,6 +330,9 @@ def parse_body_blocks(body):
         elif _LINK_LINE_RE.match(s):
             flush()
             blocks.append(("link", _LINK_LINE_RE.match(s).groups()))
+        elif _BUTTON_LINE_RE.match(s):
+            flush()
+            blocks.append(("button", _BUTTON_LINE_RE.match(s).groups()))
         elif _IMAGE_LINE_RE.match(s):
             flush()
             blocks.append(("image", _IMAGE_LINE_RE.match(s).groups()))
@@ -403,6 +408,64 @@ def _card_gutenberg(card):
     )
 
 
+# ─────────────────────────────────────────────
+# CTA 버튼 (원고 없이도 링크만으로 만들 수 있음)
+# ─────────────────────────────────────────────
+CTA_COLORS = {"파랑": "#2f6fde", "초록": "#1f9d55", "주황": "#f07c1d", "빨강": "#e03131", "검정": "#222222"}
+CTA_SPONSORED_NOTE = "※ 이 링크는 제휴 링크로, 이 링크를 통해 구매하면 글쓴이가 일정 수수료를 받을 수 있습니다."
+
+
+def _cta_rel(sponsored, new_tab):
+    rel = ["sponsored", "nofollow"] if sponsored else []
+    if new_tab:
+        rel.append("noopener")
+    return " ".join(rel)
+
+
+def cta_html(url, text, lead="", color=CTA_COLORS["파랑"], center=True, sponsored=False, new_tab=True, note=""):
+    """티스토리 HTML 모드 등 일반 HTML용 CTA 버튼."""
+    align = "center" if center else "left"
+    target = ' target="_blank"' if new_tab else ""
+    rel = _cta_rel(sponsored, new_tab)
+    rel = f' rel="{rel}"' if rel else ""
+    parts = ['<div style="text-align:%s;margin:28px 0;">' % align]
+    if lead:
+        parts.append(f'<p style="margin:0 0 12px;">{html.escape(lead)}</p>')
+    parts.append(f'<a href="{html.escape(url)}"{target}{rel} style="display:inline-block;padding:12px 28px;'
+                 f'border-radius:8px;background:{color};color:#ffffff;text-decoration:none;font-weight:bold;'
+                 f'font-size:17px;">{html.escape(text)}</a>')
+    if note:
+        parts.append(f'<p style="margin:10px 0 0;color:#888;font-size:13px;">{html.escape(note)}</p>')
+    parts.append("</div>")
+    return safe_tilde("".join(parts))
+
+
+def cta_gutenberg(url, text, lead="", color=CTA_COLORS["파랑"], center=True, sponsored=False, new_tab=True, note=""):
+    """워드프레스 블록 에디터(코드 편집기)용 CTA 버튼 — 워드프레스가 직접 만드는 형식 그대로 (블록 오류 없음)."""
+    out = []
+    p_attr = ' {"align":"center"}' if center else ""
+    p_cls = ' class="has-text-align-center"' if center else ""
+    if lead:
+        out.append(f"<!-- wp:paragraph{p_attr} -->\n<p{p_cls}>{html.escape(lead)}</p>\n<!-- /wp:paragraph -->")
+    style = ('{"style":{"color":{"background":"%s","text":"#ffffff"},"border":{"radius":"8px"},'
+             '"typography":{"fontSize":"17px"},"spacing":{"padding":{"top":"12px","bottom":"12px",'
+             '"left":"28px","right":"28px"}}}}' % color)
+    target = ' target="_blank"' if new_tab else ""
+    rel = _cta_rel(sponsored, new_tab)
+    rel = f' rel="{rel}"' if rel else ""
+    link = (f'<a class="wp-block-button__link has-text-color has-background has-custom-font-size wp-element-button" '
+            f'href="{html.escape(url)}" style="border-radius:8px;color:#ffffff;background-color:{color};padding-top:12px;'
+            f'padding-right:28px;padding-bottom:12px;padding-left:28px;font-size:17px"{target}{rel}>{html.escape(text)}</a>')
+    layout = ' {"layout":{"type":"flex","justifyContent":"center"}}' if center else ""
+    out.append(f"<!-- wp:buttons{layout} -->\n<div class=\"wp-block-buttons\"><!-- wp:button {style} -->\n"
+               f"<div class=\"wp-block-button\">{link}</div>\n<!-- /wp:button --></div>\n<!-- /wp:buttons -->")
+    if note:
+        n_attr = ' {"align":"center","fontSize":"small"}' if center else ' {"fontSize":"small"}'
+        n_cls = "has-text-align-center has-small-font-size" if center else "has-small-font-size"
+        out.append(f'<!-- wp:paragraph{n_attr} -->\n<p class="{n_cls}">{html.escape(note)}</p>\n<!-- /wp:paragraph -->')
+    return safe_tilde("\n\n".join(out))
+
+
 TILDE_SAFE = "∼"  # U+223C 물결표 — 보기엔 ~ 와 같지만 에디터가 취소선 기호로 읽지 않음
 
 
@@ -472,6 +535,8 @@ def body_to_html(body, cards=None):
         elif kind == "link":
             title, url = data
             out.append(f'<p>👉 함께 보면 좋은 글: <a href="{html.escape(url)}">{html.escape(title)}</a></p>')
+        elif kind == "button":
+            out.append(cta_html(data[1], data[0]))
         elif kind == "image":
             url, alt = data
             out.append(f'<p><img src="{html.escape(url)}" alt="{html.escape(alt)}"></p>')
@@ -556,6 +621,8 @@ def body_to_gutenberg(body, cards=None):
             title, url = data
             out.append(_wp("paragraph",
                            f'<p>👉 함께 보면 좋은 글: <a href="{html.escape(url)}">{html.escape(title)}</a></p>'))
+        elif kind == "button":
+            out.append(cta_gutenberg(data[1], data[0]))
         elif kind == "refs":
             out.append(_wp("heading", f'<h2 class="wp-block-heading">{REFS_TITLE}</h2>'))
             lis = "\n\n".join(_wp("list-item", f"<li>{_ref_item(x)}</li>") for x in data)
